@@ -1,10 +1,5 @@
-# LightMemory
+# 憶智防線（LightMemory）
 
-> **憶智防線（LightMemory）**
->
-> *An AI-powered Cognitive Health Companion for Older Adults.*
-
----
 
 ## 目錄
 
@@ -21,7 +16,7 @@
 
 ## 專案介紹
 
-LightMemory（憶智防線）是一套以 AI 為核心的認知健康管理平台。
+憶智防線是一套以 AI 為核心的認知健康管理平台。
 
 本系統整合聲影日記、認知遊戲、健康儀表板、資訊加油站、社群互動及 AI 分析等功能，希望協助長者建立日常記錄習慣，並提供家屬長期追蹤認知健康狀態的工具。
 
