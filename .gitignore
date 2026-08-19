@@ -24,3 +24,8 @@ staticfiles/
 # OS
 .DS_Store
 Thumbs.db
+
+# Firebase private credentials
+secrets/
+firebase-adminsdk-*.json
+serviceAccountKey.json
