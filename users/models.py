@@ -22,6 +22,7 @@ class User(AbstractUser):
     phone = models.CharField(max_length=10, blank=True)
     address = models.CharField(max_length=100, blank=True)
     region = models.CharField(max_length=30, choices=REGION_CHOICES, blank=True)
+    avatar_url = models.CharField(max_length=255, blank=True, null=True)
     registered_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
