@@ -24,3 +24,6 @@ staticfiles/
 # OS
 .DS_Store
 Thumbs.db
+
+# MacOS
+COMMAND.md
