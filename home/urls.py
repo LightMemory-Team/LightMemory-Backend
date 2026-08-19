@@ -19,5 +19,8 @@ from . import views
 
 urlpatterns = [
     path('ping/', views.ping), # 測試首頁連線
-
+    path('user/', views.get_user), # 使用者名稱
+    path('greet/', views.greet), # 問候語
+    path('daily_suggetion/', views.daily_suggetion),
+    path('games/', views.games_list), # 遊戲卡片列表
 ]
