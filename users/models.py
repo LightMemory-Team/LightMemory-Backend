@@ -25,7 +25,7 @@ class User(AbstractUser):
     registered_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.name or self.username
+        return self.last_name or self.username
     
 class FamilyContact(models.Model):
     RELATIONSHIP_CHOICES = [
