@@ -77,6 +77,121 @@ LightMemory/
 
 ---
 
+## 資料庫 ER 圖
+
+```mermaid
+erDiagram
+    USER ||--o{ FAMILYCONTACT : "有家屬聯絡人"
+    USER ||--o{ DIARY : "撰寫"
+    USER ||--o{ GAMERECORD : "遊玩"
+    USER ||--o{ AD8RECORD : "填寫"
+    USER ||--o{ HEALTHDASHBOARDRECORD : "擁有"
+    USER ||--o{ ACTIVITYRECORD : "報名"
+
+    DIARY ||--o{ DIARYANALYSIS : "AI 分析"
+
+    GAMECATEGORY ||--o{ GAME : "包含"
+    GAME ||--o{ GAMERECORD : "產生紀錄"
+
+    HEALTHINFORMATION ||--o{ ACTIVITYRECORD : "被報名"
+
+    USER {
+        string username
+        string name
+        string gender
+        date birth_date
+        string phone
+        string address
+        string region
+        datetime registered_at
+    }
+
+    FAMILYCONTACT {
+        string family_name
+        string relationship
+        string phone
+        string email
+    }
+
+    DIARY {
+        string image_path
+        string audio_path
+        text transcription
+        text diary_text
+        datetime created_at
+    }
+
+    DIARYANALYSIS {
+        decimal language_fluency
+        decimal logic_completeness
+        decimal emotion_description_completeness
+        string emotion_analysis_result
+        text ai_feedback
+        datetime analysis_time
+    }
+
+    GAMECATEGORY {
+        string category_name
+        text category_description
+    }
+
+    GAME {
+        string game_name
+        text game_description
+        string default_difficulty
+        boolean is_enabled
+    }
+
+    GAMERECORD {
+        int score
+        decimal accuracy
+        decimal reaction_time
+        string difficulty
+        datetime played_at
+        date played_date
+    }
+
+    AD8RECORD {
+        int total_score
+        string result_description
+        datetime completed_at
+    }
+
+    HEALTHDASHBOARDRECORD {
+        decimal attention_score
+        decimal executive_function_score
+        decimal language_score
+        decimal working_memory_score
+        decimal math_score
+        decimal visual_spatial_score
+        int brain_age
+        string trend_alert_level
+        string report_type
+        datetime generated_at
+    }
+
+    HEALTHINFORMATION {
+        string activity_name
+        string activity_type
+        string activity_location
+        string activity_region
+        datetime start_time
+        datetime end_time
+        decimal fee
+        text activity_description
+        string source_url
+        datetime created_at
+    }
+
+    ACTIVITYRECORD {
+        string status
+        datetime recorded_at
+        boolean is_enabled
+    }
+```
+
+---
+
 ## 環境需求
 
 開始前請確認已安裝：
@@ -85,6 +200,10 @@ LightMemory/
 - Git
 
 ---
+
+## 資料庫
+
+
 
 ## 快速開始
 
@@ -113,7 +232,11 @@ Windows：
 ```powershell
 venv\Scripts\activate
 ```
+MacOS:
 
+```bash
+source venv/bin/activate
+```
 ### 5. 安裝套件
 
 ```bash

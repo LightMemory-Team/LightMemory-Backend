@@ -25,6 +25,8 @@ staticfiles/
 .DS_Store
 Thumbs.db
 
+# MacOS
+COMMAND.md
 # Firebase private credentials
 secrets/
 firebase-adminsdk-*.json
