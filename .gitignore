@@ -27,3 +27,7 @@ Thumbs.db
 
 # MacOS
 COMMAND.md
+# Firebase private credentials
+secrets/
+firebase-adminsdk-*.json
+serviceAccountKey.json
