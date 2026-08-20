@@ -32,6 +32,7 @@
    | `activities` | `HealthInformation`, `ActivityRecord` | 資訊加油站活動、活動報名紀錄 |
 
 6. 產生對應的 migration 檔案（`各app/migrations/0001_initial.py` 等），這些檔案記錄了「怎麼把 models 轉換成資料表」，**必須一起同步**，不然無法在你的電腦上建出一樣的資料表
+7. 新增 `python-decouple` 套件，把資料庫連線資訊改成從 `.env` 讀取，`settings.py` 裡不再寫死任何密碼，並新增 `.env.example` 作為格式範例
 
 ---
 
@@ -136,24 +137,22 @@ venv\Scripts\activate        # Windows 啟動虛擬環境
 pip install -r requirements.txt
 ```
 
-### 5. 修改 `config/settings.py`
+### 5. 建立自己的 `.env` 檔案
 
-把 `DATABASES` 區塊改成自己剛建立的帳密：
+專案已經改成用 `.env` 管理資料庫密碼（不會寫死在程式碼裡，也不會上傳到 GitHub）。
 
-```python
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': '你的資料庫名稱',
-        'USER': '你的帳號名稱',
-        'PASSWORD': '你的密碼',
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
-}
+在專案根目錄（跟 `manage.py` 同一層）複製一份 `.env.example`，重新命名為 `.env`，把裡面的值換成你自己剛剛建立的帳密：
+
+```
+DB_NAME=你的資料庫名稱
+DB_USER=你的帳號名稱
+DB_PASSWORD=你的密碼
+DB_HOST=localhost
+DB_PORT=5432
 ```
 
-⚠️ **這個檔案不要直接 commit 上傳你自己的密碼**，之後我們會統一改成用 `.env` 檔案管理，目前先各自在本地端修改測試即可。
+> `.env` 已經被 `.gitignore` 排除，**不會**被 git 追蹤，也**不會**被 push 上去，每個人的 `.env` 內容都可以不一樣，安心填自己的帳密就好。
+> 千萬不要把 `.env.example` 的檔名直接刪掉 `.example`，改完記得存檔並確認檔名正確是 `.env`。
 
 ### 6. 建立資料表
 
