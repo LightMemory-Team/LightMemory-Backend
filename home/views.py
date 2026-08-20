@@ -19,7 +19,7 @@ def get_user(request):
     user_name = User.objects.first() # 目前還沒有登入驗證先取資料庫第一筆
     if user_name is None:
         return Response({"user_name_error": "查無使用者"}, status=404)
-    return Response({"user_name": user_name.name})
+    return Response({"user_name": user_name.last_name})
 
 # 問候語
 @api_view(['GET'])

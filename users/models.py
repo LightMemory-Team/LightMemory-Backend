@@ -16,7 +16,6 @@ class User(AbstractUser):
         ('east', '東部'),
     ]
 
-    name = models.CharField(max_length=50)
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True)
     birth_date = models.DateField(null=True, blank=True)
     phone = models.CharField(max_length=10, blank=True)
