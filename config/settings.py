@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'social',
     'assessments',
     'ai_service',
+    'home',
 ]
 
 AUTH_USER_MODEL = 'users.User'
