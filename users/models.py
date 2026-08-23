@@ -16,16 +16,16 @@ class User(AbstractUser):
         ('east', '東部'),
     ]
 
-    name = models.CharField(max_length=50)
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True)
     birth_date = models.DateField(null=True, blank=True)
     phone = models.CharField(max_length=10, blank=True)
     address = models.CharField(max_length=100, blank=True)
     region = models.CharField(max_length=30, choices=REGION_CHOICES, blank=True)
+    avatar_url = models.CharField(max_length=255, blank=True, null=True)
     registered_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.name or self.username
+        return self.last_name or self.username
     
 class FamilyContact(models.Model):
     RELATIONSHIP_CHOICES = [

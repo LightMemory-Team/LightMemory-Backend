@@ -28,12 +28,12 @@
 |------|------|
 | 後端框架 | Django |
 | API | Django REST Framework |
-| 資料庫 | SQLite（開發階段） |
+| 資料庫 | PostgreSQL |
 | CORS | django-cors-headers |
 | 語言 | Python |
 | 版本控制 | Git / GitHub |
 
-> 後續預計加入 Flutter、PostgreSQL、Firebase Storage、OpenAI API、Whisper。
+> 後續預計加入 Flutter、Firebase Storage、OpenAI API、Whisper。
 
 ---
 
@@ -46,7 +46,6 @@ LightMemory/
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
-├── db.sqlite3
 │
 ├── config/
 ├── users/
@@ -56,7 +55,8 @@ LightMemory/
 ├── activities/
 ├── social/
 ├── assessments/
-└── ai_service/
+├── ai_service/
+└── home/
 ```
 
 ---
@@ -74,6 +74,7 @@ LightMemory/
 | social | 社群分享、留言與互動 |
 | assessments | AD-8 及其他認知評估 |
 | ai_service | OpenAI、Whisper、AI 分析服務 |
+| home | 首頁整合 API |
 
 ---
 
@@ -87,6 +88,7 @@ erDiagram
     USER ||--o{ AD8RECORD : "填寫"
     USER ||--o{ HEALTHDASHBOARDRECORD : "擁有"
     USER ||--o{ ACTIVITYRECORD : "報名"
+    USER ||--o{ POST : "發布"
 
     DIARY ||--o{ DIARYANALYSIS : "AI 分析"
 
@@ -103,6 +105,7 @@ erDiagram
         string phone
         string address
         string region
+        string avatar_url
         datetime registered_at
     }
 
@@ -188,6 +191,13 @@ erDiagram
         datetime recorded_at
         boolean is_enabled
     }
+
+    POST {
+        text content_text
+        int like_count
+        int comment_count
+        datetime posted_at
+    }
 ```
 
 ---
@@ -200,9 +210,6 @@ erDiagram
 - Git
 
 ---
-
-## 資料庫
-
 
 
 ## 快速開始
@@ -271,18 +278,20 @@ python manage.py runserver
 - [x] 設定 Django 基本環境
 - [x] 建立 requirements.txt
 - [x] 建立 .gitignore
+- [x] 設定 PostgreSQL 資料庫
+- [x] 建立 Database Models（users、diary、games、dashboard、activities、assessments）
+- [x] 首頁（home）API：`user_name`、`daily_tip`、`daily_suggestion`、`games[]`（詳見 [checklist.md](checklist.md)）
 
 ---
 
 ## 後續開發規劃
 
-- 建立 Database Models
-- 設計 RESTful API
+- 首頁 API 剩餘欄位：`unread_notification_count`（Notification model 尚未決定歸屬）、`wall_posts[]`（待會議確認是否改由 Firebase 處理）
+- 首頁 4 支獨立 API 整合為一支 `GET /api/home`
 - 使用者登入與 JWT 驗證
 - 聲影日記 API
 - AI 分析服務
 - 認知遊戲 API
 - 健康儀表板 API
 - Flutter 前後端串接
-- PostgreSQL
 - Firebase Storage
