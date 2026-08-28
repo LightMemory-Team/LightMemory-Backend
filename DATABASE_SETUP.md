@@ -11,6 +11,7 @@
 - [資料表結構總覽](#資料表結構總覽)
 - [你需要做的事（在自己電腦上設定 PostgreSQL）](#你需要做的事在自己電腦上設定-postgresql)
 - [驗證是否成功](#驗證是否成功)
+- [migration 有改動時，怎麼乾淨地重建](#migration-有改動時怎麼乾淨地重建)
 
 ---
 
@@ -194,6 +195,102 @@ activities_activityrecord
 ```
 
 看到這些表就代表設定成功。
+
+---
+
+## migration 有改動時，怎麼乾淨地重建
+
+有時候 migration 檔案本身會被重新產生（例如把某個 app 的 migration 全部刪掉重建）。這種情況下 `git pull` 之後直接 `migrate` **不會有用**，需要多做一步。
+
+### 為什麼「刪掉專案資料夾重新 clone」沒有用
+
+這是最容易誤會的地方：
+
+- PostgreSQL 資料庫**不在專案資料夾裡**，它裝在系統層（跟著 PostgreSQL 本身安裝的位置）
+- 所以刪掉專案資料夾再重新 clone，拿到的是乾淨的**程式碼**，但**資料庫完全沒動**
+- 資料庫裡有一張 Django 自己維護的表叫 `django_migrations`，記錄「哪些 migration 已經套用過」
+- 舊的 migration 紀錄還留在那裡 → 再跑 `migrate` 時 Django 會判斷「這個已經做過了」而**跳過建表**
+- 結果就是 **migration 顯示已完成，但資料表根本不存在** 的不一致狀態
+
+順便一個實務上的麻煩：`.env` 沒有被 git 追蹤，刪掉專案資料夾就一起沒了，重新 clone 後要照 [步驟 5](#5-建立自己的-env-檔案) 再建一次。
+
+**結論：要重來的是資料庫，不是專案資料夾。**
+
+### 做法：重建資料庫（環境建置階段推薦）
+
+還在建環境、資料庫裡沒有要保留的資料時，這是最乾淨也最不容易出錯的做法：
+
+```bash
+git pull
+```
+
+打開 SQL Shell (psql)，用 `postgres` 超級使用者登入後執行：
+
+```sql
+DROP DATABASE 你的資料庫名稱;
+CREATE DATABASE 你的資料庫名稱 OWNER 你的帳號名稱;
+GRANT ALL PRIVILEGES ON DATABASE 你的資料庫名稱 TO 你的帳號名稱;
+```
+
+> 資料庫名稱就是你 `.env` 裡 `DB_NAME` 填的那個，每個人可能不一樣。
+> `DROP DATABASE` 會失敗的話，通常是還有連線佔用著 —— 先關掉 pgAdmin、`runserver`、以及其他開著的 psql 視窗再試。
+
+回到專案資料夾：
+
+```bash
+venv\Scripts\activate
+py manage.py migrate
+py manage.py createsuperuser
+```
+
+這樣 `django_migrations` 會跟著新資料庫從零開始，不會有任何殘留紀錄，也不用擔心漏砍哪張表。`.env` 不用改、專案資料夾不用刪。
+
+### 如果資料庫裡有想保留的資料
+
+那就不要整個 DROP，只重建有改動的那個 app（以下用 `social` 當例子）。在 psql 裡：
+
+```sql
+DROP TABLE IF EXISTS social_like, social_comment, social_notification, social_post CASCADE;
+DELETE FROM django_migrations WHERE app = 'social';
+```
+
+```bash
+py manage.py migrate social
+```
+
+> ⚠️ `CASCADE` 會連帶刪掉其他表指向這些表的關聯資料。真的有重要資料的話，先備份再動手。
+
+### 驗證重建成功
+
+```bash
+py manage.py showmigrations social       # 應該只看到 [X] 0001_initial
+py manage.py makemigrations --check --dry-run   # 要顯示「No changes detected」
+py manage.py check                       # 要顯示 no issues
+```
+
+三個都通過，代表 models、migration 檔案、資料庫三邊的狀態一致了。
+
+---
+
+## 已知的一次 migration 重建：social app
+
+2026/08/28 把 `social` 的 migration 重新產生過一次：
+
+- 原本是 `0001_initial`（建立 Post、Comment、Like、Notification 四張表）+ `0002_delete_post`（又把 Post 刪掉）
+- 但 `social/models.py` 裡 Post 一直都還定義著，所以 `0002` 跟 models 是對不上的
+- 現在整理成**只有一個 `0001_initial`**，四張表一次建好，不再有 `0002`
+
+**只要你之前 pull 過 main 並跑過 `migrate`，你的資料庫裡就有舊的 social `0001` + `0002` 紀錄**，需要照上面「重建資料庫」的步驟處理一次，否則 social 的四張表不會出現。
+
+用這個指令可以確認自己是哪種狀況：
+
+```bash
+py manage.py showmigrations social
+```
+
+- 看到 `[X] 0001_initial` + `[X] 0002_delete_post` → 要重建
+- 只看到 `[X] 0001_initial` → 已經是新的，不用動
+- 什麼都沒套用（全是 `[ ]`）→ 直接 `py manage.py migrate` 就好
 
 ---
 
