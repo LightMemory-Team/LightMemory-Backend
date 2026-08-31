@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 
 # Virtual Environment
+.venv/
 venv/
 
 # Database
@@ -27,6 +28,7 @@ Thumbs.db
 
 # MacOS
 COMMAND.md
+
 # Firebase private credentials
 secrets/
 firebase-adminsdk-*.json
