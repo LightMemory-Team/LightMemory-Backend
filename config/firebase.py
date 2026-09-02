@@ -39,7 +39,8 @@ def get_firebase_app():
         return firebase_admin.initialize_app(
             cred,
             {
-                "projectId": os.getenv("FIREBASE_PROJECT_ID")
+                "projectId": os.getenv("FIREBASE_PROJECT_ID"),
+                "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET"),
             }
         )
 
