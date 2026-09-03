@@ -357,6 +357,8 @@ FIREBASE_STORAGE_BUCKET=lightmemory-sqlf.firebasestorage.app
 - [x] 設定 PostgreSQL 資料庫
 - [x] 建立 Database Models（users、diary、games、dashboard、activities、assessments）
 - [x] 首頁（home）API：`user_name`、`daily_tip`、`daily_suggestion`、`games[]`（詳見 [checklist.md](checklist.md)）
+- [x] 使用者註冊 API：`POST /api/users/register/`
+- [x] 使用者登入與 JWT 驗證：`POST /api/users/login/`（登入）、`POST /api/users/login/refresh/`（換發 access token）
 - [x] 建立 Firebase Storage
 - [x] Django 串接 Firebase Admin SDK
 - [x] Firebase Storage Bucket 設定
@@ -368,7 +370,7 @@ FIREBASE_STORAGE_BUCKET=lightmemory-sqlf.firebasestorage.app
 
 - 首頁 API 剩餘欄位：`unread_notification_count`、`wall_posts[]`
 - 首頁 4 支獨立 API 整合為一支 `GET /api/home`
-- 使用者登入與 JWT 驗證
+- home 系列 API 套用 JWT 驗證（`IsAuthenticated` + `request.user`，目前仍是 `AllowAny`）
 - 聲影日記 API
 - Firebase Storage 與聲影日記 API 正式串接
 - AI 分析服務
