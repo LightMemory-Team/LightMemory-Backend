@@ -19,5 +19,6 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/home/', include('home.urls') ) # 首頁連線測試
+    path('api/home/', include('home.urls') ), # 首頁連線測試
+    path('api/social/', include('social.urls')),# 通知相關功能
 ]
