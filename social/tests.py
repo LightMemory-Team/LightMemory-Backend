@@ -1,7 +1,8 @@
 """
 System test：Notification API 端到端流程。
 
-用 APIClient 打真實 URL，驗證前端實際會拿到的行為。
+用 APIClient 打真實 URL，完整經過 URL routing、middleware、
+認證與序列化，驗證前端實際會拿到的行為。
 
 對應端點：
     GET   /api/social/notifications/
@@ -33,6 +34,7 @@ class NotificationListTests(APITestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username='wang_yulan', password='Str0ng!Pass2026')
+        self.client.force_authenticate(user=self.user)
 
     def test_list_returns_empty_when_no_notifications(self):
         response = self.client.get(LIST_URL)
@@ -56,10 +58,10 @@ class NotificationListTests(APITestCase):
         self.assertEqual(response.data['notifications'][0]['notification_type_display'], '按讚')
 
     def test_list_orders_newest_first(self):
-        first = Notification.objects.create(
+        Notification.objects.create(
             user=self.user, notification_type='comment', message='第一則'
         )
-        second = Notification.objects.create(
+        Notification.objects.create(
             user=self.user, notification_type='comment', message='第二則'
         )
 
@@ -68,12 +70,12 @@ class NotificationListTests(APITestCase):
         self.assertEqual(response.data['notifications'][0]['message'], '第二則')
         self.assertEqual(response.data['notifications'][1]['message'], '第一則')
 
-    def test_list_returns_404_when_no_user_exists(self):
-        User.objects.all().delete()
+    def test_list_requires_authentication(self):
+        self.client.force_authenticate(user=None)
 
         response = self.client.get(LIST_URL)
 
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
 class UnreadCountTests(APITestCase):
@@ -81,6 +83,7 @@ class UnreadCountTests(APITestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username='wang_yulan', password='Str0ng!Pass2026')
+        self.client.force_authenticate(user=self.user)
 
     def test_unread_count_returns_zero_when_no_notifications(self):
         response = self.client.get(UNREAD_COUNT_URL)
@@ -106,6 +109,7 @@ class MarkAsReadTests(APITestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username='wang_yulan', password='Str0ng!Pass2026')
+        self.client.force_authenticate(user=self.user)
         self.notification = Notification.objects.create(
             user=self.user, notification_type='comment', message='測試通知', is_read=False
         )
