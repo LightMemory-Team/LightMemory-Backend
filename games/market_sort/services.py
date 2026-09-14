@@ -16,7 +16,9 @@ import statistics
 
 class InsufficientDataError(Exception):
     """資料不足以計算某項指標時拋出（例如 switch 題數為 0）"""
-    pass
+    def __init__(self, message, code="CALCULATION_ERROR"):
+        super().__init__(message)
+        self.code = code
 
 
 # ---- 常數設定：常模、加權、階段題數 ----
@@ -51,17 +53,17 @@ def calculate_raw_metrics(questions: list[dict]) -> dict:
     switch_q = [q for q in questions if q["trial_type"] == "switch"]
 
     if not switch_q:
-        raise InsufficientDataError("這場資料沒有任何 switch 題，無法計算切換相關指標")
+        raise InsufficientDataError("這場資料沒有任何 switch 題，無法計算切換相關指標", code="NO_SWITCH_TRIALS")
     if not repeat_q:
-        raise InsufficientDataError("這場資料沒有任何 repeat 題，無法計算切換相關指標")
+        raise InsufficientDataError("這場資料沒有任何 repeat 題，無法計算切換相關指標", code="NO_REPEAT_TRIALS")
 
     repeat_correct = [q for q in repeat_q if q["is_correct"]]
     switch_correct = [q for q in switch_q if q["is_correct"]]
 
     if not repeat_correct:
-        raise InsufficientDataError("repeat 題全部答錯，無法計算 repeat 平均反應時間")
+        raise InsufficientDataError("repeat 題全部答錯，無法計算 repeat 平均反應時間", code="ALL_REPEAT_INCORRECT")
     if not switch_correct:
-        raise InsufficientDataError("switch 題全部答錯，無法計算 switch 平均反應時間")
+        raise InsufficientDataError("switch 題全部答錯，無法計算 switch 平均反應時間", code="ALL_SWITCH_INCORRECT")
 
     # 指標1：切換成本 RT
     repeat_rt_avg = statistics.mean(q["reaction_time_ms"] for q in repeat_correct) / 1000
@@ -108,7 +110,8 @@ def calculate_learning_speed(questions: list[dict]) -> float:
     """
     if len(questions) < STAGE_BOUNDARIES[-1]:
         raise InsufficientDataError(
-            f"題目數量不足（收到 {len(questions)} 題，需要 {STAGE_BOUNDARIES[-1]} 題），無法計算學習速度"
+            f"題目數量不足（收到 {len(questions)} 題，需要 {STAGE_BOUNDARIES[-1]} 題），無法計算學習速度",
+            code="INSUFFICIENT_QUESTION_COUNT"
         )
 
     catch_up_lengths = []

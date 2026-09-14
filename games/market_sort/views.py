@@ -33,10 +33,9 @@ class MarketSortSubmitView(APIView):
             result = calculate_cognitive_flexibility_score(questions)
         except InsufficientDataError as e:
             return Response(
-                {"error": {"code": "CALCULATION_ERROR", "message": str(e)}},
+                {"error": {"code": e.code, "message": str(e)}},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
         record = MarketSortResult.objects.create(
             user=request.user,
             session_id=session_id,
