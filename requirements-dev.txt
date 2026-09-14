@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# 排版與 lint（設定見 pyproject.toml）
+ruff==0.16.6
