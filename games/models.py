@@ -45,3 +45,15 @@ class GameRecord(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.game} ({self.score}分)"
+    
+class MarketSortResult(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='market_sort_results')
+    session_id = models.CharField(max_length=64, unique=True) #避免同一場遊戲不小心被存兩次
+    is_complete = models.BooleanField(default=False)
+    raw_metrics = models.JSONField(null=True, blank=True)
+    z_scores = models.JSONField(null=True, blank=True)
+    cognitive_flexibility_score = models.IntegerField(null=True, blank=True)
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user} 的整理菜籃結果 ({self.generated_at.date()}) - {self.cognitive_flexibility_score}分"
