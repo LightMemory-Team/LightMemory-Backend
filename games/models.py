@@ -47,7 +47,7 @@ class GameRecord(models.Model):
         return f"{self.user} - {self.game} ({self.score}分)"
 
 
-# 市場買菜：記錄單次遊戲進行中的資料
+# 市場買菜：記錄一場 10 題遊戲進行中的資料
 class MarketShoppingSession(models.Model):
     DIFFICULTY_CHOICES = [
         ('easy', '簡單'),
@@ -61,41 +61,83 @@ class MarketShoppingSession(models.Model):
         related_name='market_shopping_sessions'
     )
 
+    # 目前難度，開始遊戲時固定 easy
     difficulty = models.CharField(
         max_length=20,
-        choices=DIFFICULTY_CHOICES
+        choices=DIFFICULTY_CHOICES,
+        default='easy'
     )
 
-    # 第一畫面：要記住的購物清單
+    # ===== 目前這一題的題目資料 =====
+
+    # 要記住的購物清單
     target_items = models.JSONField()
 
-    # 第二畫面：可選擇的所有食材
+    # 畫面上可選擇的所有食材
     option_items = models.JSONField()
 
-    # 第三畫面：找零相關資料
+    # 找零相關資料
     budget = models.IntegerField(default=200)
     spent_amount = models.IntegerField()
     correct_change = models.IntegerField()
 
-    # 記錄使用者答了幾次
+    # ===== 目前這一題的作答狀態 =====
+
+    # 選菜答了幾次
     item_attempt_count = models.IntegerField(default=0)
+
+    # 找零答了幾次
     change_attempt_count = models.IntegerField(default=0)
 
-    # 是否第一次就答對
+    # 選菜是否第一次就答對
     item_first_try_correct = models.BooleanField(
         null=True,
         blank=True
     )
+
+    # 找零是否第一次就答對
     change_first_try_correct = models.BooleanField(
         null=True,
         blank=True
     )
 
+    # ===== 整場 10 題的遊戲進度 =====
+
+    # 目前第幾題
+    current_question = models.IntegerField(default=1)
+
+    # 一場固定 10 題
+    total_questions = models.IntegerField(default=10)
+
+    # 目前連續答對幾題
+    consecutive_correct = models.IntegerField(default=0)
+
+    # 整場總共答對幾題
+    total_correct = models.IntegerField(default=0)
+
+    # 完全沒有答錯、一次完成的題數
+    first_try_correct_count = models.IntegerField(default=0)
+
+    # 目前這一題答錯幾次
+    current_wrong_count = models.IntegerField(default=0)
+
+    # 目前這題是否曾經答錯過
+    current_question_had_error = models.BooleanField(default=False)
+
+    # 整場遊戲是否完成
+    is_completed = models.BooleanField(default=False)
+
+    # ===== 時間 =====
+
     started_at = models.DateTimeField(auto_now_add=True)
+
     completed_at = models.DateTimeField(
         null=True,
         blank=True
     )
 
     def __str__(self):
-        return f"{self.user} - 市場買菜 - {self.difficulty}"
+        return (
+            f"{self.user} - 市場買菜 - "
+            f"第{self.current_question}題 - {self.difficulty}"
+        )

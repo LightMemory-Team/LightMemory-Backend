@@ -21,5 +21,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/home/', include('home.urls') ), # 首頁
     path('api/users/', include('users.urls')), # 使用者
+    path('api/games/', include('games.urls')),  # 遊戲
 
 ]
