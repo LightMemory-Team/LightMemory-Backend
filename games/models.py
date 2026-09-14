@@ -1,4 +1,5 @@
 from django.db import models
+
 from users.models import User
 
 
@@ -12,15 +13,19 @@ class GameCategory(models.Model):
 
 class Game(models.Model):
     DIFFICULTY_CHOICES = [
-        ('easy', '簡單'),
-        ('medium', '中等'),
-        ('hard', '困難'),
+        ("easy", "簡單"),
+        ("medium", "中等"),
+        ("hard", "困難"),
     ]
 
-    game_category = models.ForeignKey(GameCategory, on_delete=models.CASCADE, related_name='games')
+    game_category = models.ForeignKey(
+        GameCategory, on_delete=models.CASCADE, related_name="games"
+    )
     game_name = models.CharField(max_length=50)
     game_description = models.TextField(blank=True)
-    default_difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, blank=True)
+    default_difficulty = models.CharField(
+        max_length=20, choices=DIFFICULTY_CHOICES, blank=True
+    )
     is_enabled = models.BooleanField(default=True)
 
     def __str__(self):
@@ -29,16 +34,22 @@ class Game(models.Model):
 
 class GameRecord(models.Model):
     DIFFICULTY_CHOICES = [
-        ('easy', '簡單'),
-        ('medium', '中等'),
-        ('hard', '困難'),
+        ("easy", "簡單"),
+        ("medium", "中等"),
+        ("hard", "困難"),
     ]
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='game_records')
-    game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name='records')
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="game_records"
+    )
+    game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="records")
     score = models.IntegerField(null=True, blank=True)
-    accuracy = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    reaction_time = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    accuracy = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True
+    )
+    reaction_time = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True
+    )
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, blank=True)
     played_at = models.DateTimeField(null=True, blank=True)
     played_date = models.DateField(null=True, blank=True)
