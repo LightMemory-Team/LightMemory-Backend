@@ -1,0 +1,15 @@
+[tool.ruff]
+# 對齊 Django 6.0 要求的最低 Python 版本
+target-version = "py312"
+line-length = 88
+# Django migrations 是自動產生的檔案，不強制套用排版與 lint 規則
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+# E/F：pyflakes + pycodestyle 基本規則（未使用 import、明顯錯誤等）
+# I：import 排序（取代 isort）
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+# 專案裡的字串多為雙引號，維持 ruff 預設一致即可
+quote-style = "double"
