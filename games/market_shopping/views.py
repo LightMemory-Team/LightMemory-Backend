@@ -184,6 +184,9 @@ def move_to_next_question(session):
         session.is_completed = True
         session.completed_at = timezone.now()
         session.save()
+
+        save_game_record(session)
+
         return None
 
     # 進入下一題
@@ -501,10 +504,8 @@ def submit_change_answer(request, session_id):
 
         # 第 10 題結束
         if next_question is None:
-            save_game_record(session)
-            
             accuracy = round(
-                session.total_correct
+                session.first_try_correct_count
                 / session.total_questions
                 * 100,
                 2,
