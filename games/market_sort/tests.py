@@ -67,3 +67,15 @@ class MarketSortSubmitEndpointTests(APITestCase):
         response = self.client.post(SUBMIT_URL, payload, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_duplicate_session_id_returns_same_result_without_duplicate_record(self):
+        payload = {"session_id": "duplicate_test", "is_complete": True, "questions": build_questions()}
+
+        first_response = self.client.post(SUBMIT_URL, payload, format='json')
+        second_response = self.client.post(SUBMIT_URL, payload, format='json')
+
+        self.assertEqual(first_response.data, second_response.data)
+
+        from games.models import MarketSortResult
+        count = MarketSortResult.objects.filter(session_id="duplicate_test").count()
+        self.assertEqual(count, 1)

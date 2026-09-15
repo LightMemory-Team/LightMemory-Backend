@@ -182,11 +182,12 @@ def calculate_cognitive_flexibility_score(questions: list[dict]) -> dict:
 def determine_encouragement_tier(current_score: int, highest_score: int) -> str:
     """
     ⚠️ 門檻為暫定值，待確認
+    固定三種值，對應結算畫面的星星／打勾／旗子三個等級圖示
     """
     diff = highest_score - current_score
     if diff <= 0:
-        return "new_best"
+        return "great"
     elif diff <= 15:
-        return "close_to_best"
+        return "good"
     else:
-        return "keep_going"
+        return "keep_trying"

@@ -23,6 +23,13 @@ class MarketSortSubmitView(APIView):
         is_complete = validated["is_complete"]
         questions = validated["questions"]
 
+        # 冪等性處理：同一個 session_id 重複送出時，直接回傳既有結果，不重新計算、不重複寫入
+        existing = MarketSortResult.objects.filter(session_id=session_id).first()
+        if existing:
+            if not existing.is_complete:
+                return Response({"data": None}, status=status.HTTP_201_CREATED)
+            return self._build_response(request.user, existing)
+
         if not is_complete:
             MarketSortResult.objects.create(
                 user=request.user, session_id=session_id, is_complete=False,
@@ -36,6 +43,7 @@ class MarketSortSubmitView(APIView):
                 {"error": {"code": e.code, "message": str(e)}},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
         record = MarketSortResult.objects.create(
             user=request.user,
             session_id=session_id,
@@ -45,14 +53,20 @@ class MarketSortSubmitView(APIView):
             cognitive_flexibility_score=result["cognitive_flexibility_score"],
         )
 
+        return self._build_response(request.user, record)
+
+    def _build_response(self, user, record):
         history = MarketSortResult.objects.filter(
-            user=request.user, is_complete=True
+            user=user, is_complete=True
         ).order_by("-generated_at")
 
         current_score = record.cognitive_flexibility_score
         highest_score = max([r.cognitive_flexibility_score for r in history], default=current_score)
-        recent_scores = [r.cognitive_flexibility_score for r in history[1:6]]
+
+        others = [r for r in history if r.session_id != record.session_id]
+        recent_scores = [r.cognitive_flexibility_score for r in others[:4]]
         recent_scores.reverse()
+
         tier = determine_encouragement_tier(current_score, highest_score)
 
         return Response(
