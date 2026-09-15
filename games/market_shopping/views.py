@@ -6,7 +6,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from users.models import User
-from games.models import MarketShoppingSession
+from games.models import Game, GameRecord, MarketShoppingSession
 
 from .constants import FOODS, BUDGET_OPTIONS
 
@@ -149,6 +149,34 @@ def create_session(request):
         },
         status=status.HTTP_201_CREATED,
     )
+def save_game_record(session):
+    game = Game.objects.filter(game_name="市場買菜").first()
+
+    if game is None:
+        return None
+
+    accuracy = round(
+        session.first_try_correct_count
+        / session.total_questions
+        * 100,
+        2,
+    )
+
+    record, created = GameRecord.objects.get_or_create(
+        user=session.user,
+        game=game,
+        played_at=session.completed_at,
+        defaults={
+            "score": session.first_try_correct_count,
+            "accuracy": accuracy,
+            "difficulty": session.difficulty,
+            "played_date": timezone.localtime(
+                session.completed_at
+            ).date(),
+        },
+    )
+
+    return record
 
 def move_to_next_question(session):
     # 如果目前已經是第 10 題，整場結束
@@ -473,6 +501,8 @@ def submit_change_answer(request, session_id):
 
         # 第 10 題結束
         if next_question is None:
+            save_game_record(session)
+            
             accuracy = round(
                 session.total_correct
                 / session.total_questions
@@ -554,6 +584,9 @@ def submit_change_answer(request, session_id):
         session.is_completed = True
         session.completed_at = timezone.now()
         session.save()
+
+        # 將本場成績正式存入 GameRecord
+        save_game_record(session)
 
         accuracy = round(
             session.first_try_correct_count
