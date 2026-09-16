@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 
+# Ruff
+.ruff_cache/
+
 # Virtual Environment
 .venv/
 venv/
@@ -33,3 +36,6 @@ COMMAND.md
 secrets/
 firebase-adminsdk-*.json
 serviceAccountKey.json
+
+# ai system prompt
+CLAUDE.md
