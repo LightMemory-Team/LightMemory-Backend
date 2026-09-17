@@ -1,0 +1,8 @@
+{
+  "items": [
+    {"item": "鯛魚"},
+    {"item": "鮭魚"},
+    {"item": "鱸魚"}
+  ],
+  "distractor_item": "魚骨頭"
+}
