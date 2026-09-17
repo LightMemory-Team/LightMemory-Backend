@@ -631,3 +631,71 @@ def submit_change_answer(request, session_id):
         },
         status=status.HTTP_200_OK,
     )
+
+# 第四支 API：取得市場買菜歷史成績
+@api_view(["GET"])
+def get_market_shopping_history(request):
+    # 有登入時使用登入者
+    # 開發階段未登入時暫時抓第一位使用者
+    if request.user.is_authenticated:
+        user = request.user
+    else:
+        user = User.objects.first()
+
+    if user is None:
+        return Response(
+            {
+                "error": {
+                    "code": "USER_NOT_FOUND",
+                    "message": "查無使用者資料",
+                }
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # 找到「市場買菜」遊戲
+    game = Game.objects.filter(
+        game_name="市場買菜"
+    ).first()
+
+    if game is None:
+        return Response(
+            {
+                "error": {
+                    "code": "GAME_NOT_FOUND",
+                    "message": "查無市場買菜遊戲",
+                }
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # 取得最近 10 次遊戲紀錄
+    records = list(
+        GameRecord.objects.filter(
+            user=user,
+            game=game,
+            played_at__isnull=False,
+        )
+        .order_by("-played_at")[:10]
+    )
+
+    # 折線圖由舊到新顯示
+    records.reverse()
+
+    history = [
+        {
+            "score": record.score,
+            "accuracy": float(record.accuracy)
+            if record.accuracy is not None
+            else None,
+            "played_at": record.played_at,
+        }
+        for record in records
+    ]
+
+    return Response(
+        {
+            "data": history
+        },
+        status=status.HTTP_200_OK,
+    )
