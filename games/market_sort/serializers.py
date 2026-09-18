@@ -5,9 +5,9 @@ class QuestionSerializer(serializers.Serializer):
     question_index = serializers.IntegerField(min_value=1)
     is_correct = serializers.BooleanField()
     reaction_time_ms = serializers.IntegerField(min_value=0)
-    trial_type = serializers.ChoiceField(choices=['repeat', 'switch'])
+    trial_type = serializers.ChoiceField(choices=["repeat", "switch"])
     error_type = serializers.ChoiceField(
-        choices=['persistent', 'random'], allow_null=True, required=False
+        choices=["persistent", "random"], allow_null=True, required=False
     )
 
 

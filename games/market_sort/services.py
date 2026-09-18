@@ -11,11 +11,12 @@
 
 import statistics
 
-
 # ---- 自訂例外：讓 View 層可以分別接住不同的錯誤情況 ----
+
 
 class InsufficientDataError(Exception):
     """資料不足以計算某項指標時拋出（例如 switch 題數為 0）"""
+
     def __init__(self, message, code="CALCULATION_ERROR"):
         super().__init__(message)
         self.code = code
@@ -26,7 +27,11 @@ class InsufficientDataError(Exception):
 
 NORM_REFERENCE = {
     "switch_cost_rt": {"mean": 1.5, "std": 0.5, "direction": "smaller_is_better"},
-    "persistent_error_rate": {"mean": 0.30, "std": 0.10, "direction": "smaller_is_better"},
+    "persistent_error_rate": {
+        "mean": 0.30,
+        "std": 0.10,
+        "direction": "smaller_is_better",
+    },
     "switch_accuracy": {"mean": 0.60, "std": 0.15, "direction": "larger_is_better"},
     "learning_speed": {"mean": 6, "std": 2, "direction": "smaller_is_better"},
 }
@@ -44,6 +49,7 @@ STAGE_BOUNDARIES = [5, 10, 15, 28]
 
 # ---- Step2：4 項不受題數影響的原始指標 ----
 
+
 def calculate_raw_metrics(questions: list[dict]) -> dict:
     """
     輸入：單場的 questions[] 陣列（每題含 is_correct, reaction_time_ms, trial_type, error_type）
@@ -53,21 +59,35 @@ def calculate_raw_metrics(questions: list[dict]) -> dict:
     switch_q = [q for q in questions if q["trial_type"] == "switch"]
 
     if not switch_q:
-        raise InsufficientDataError("這場資料沒有任何 switch 題，無法計算切換相關指標", code="NO_SWITCH_TRIALS")
+        raise InsufficientDataError(
+            "這場資料沒有任何 switch 題，無法計算切換相關指標", code="NO_SWITCH_TRIALS"
+        )
     if not repeat_q:
-        raise InsufficientDataError("這場資料沒有任何 repeat 題，無法計算切換相關指標", code="NO_REPEAT_TRIALS")
+        raise InsufficientDataError(
+            "這場資料沒有任何 repeat 題，無法計算切換相關指標", code="NO_REPEAT_TRIALS"
+        )
 
     repeat_correct = [q for q in repeat_q if q["is_correct"]]
     switch_correct = [q for q in switch_q if q["is_correct"]]
 
     if not repeat_correct:
-        raise InsufficientDataError("repeat 題全部答錯，無法計算 repeat 平均反應時間", code="ALL_REPEAT_INCORRECT")
+        raise InsufficientDataError(
+            "repeat 題全部答錯，無法計算 repeat 平均反應時間",
+            code="ALL_REPEAT_INCORRECT",
+        )
     if not switch_correct:
-        raise InsufficientDataError("switch 題全部答錯，無法計算 switch 平均反應時間", code="ALL_SWITCH_INCORRECT")
+        raise InsufficientDataError(
+            "switch 題全部答錯，無法計算 switch 平均反應時間",
+            code="ALL_SWITCH_INCORRECT",
+        )
 
     # 指標1：切換成本 RT
-    repeat_rt_avg = statistics.mean(q["reaction_time_ms"] for q in repeat_correct) / 1000
-    switch_rt_avg = statistics.mean(q["reaction_time_ms"] for q in switch_correct) / 1000
+    repeat_rt_avg = (
+        statistics.mean(q["reaction_time_ms"] for q in repeat_correct) / 1000
+    )
+    switch_rt_avg = (
+        statistics.mean(q["reaction_time_ms"] for q in switch_correct) / 1000
+    )
     switch_cost_rt = switch_rt_avg - repeat_rt_avg
 
     # 指標2：切換成本正確率（僅供參考，不用於 z 分數）與 switch 自身正確率（用於 z 分數）
@@ -80,13 +100,17 @@ def calculate_raw_metrics(questions: list[dict]) -> dict:
     persistent_error_rate = len(persistent_errors) / len(switch_q)
 
     # 指標5：反應時間 CV
-    all_correct_rts = [q["reaction_time_ms"] / 1000 for q in repeat_correct + switch_correct]
+    all_correct_rts = [
+        q["reaction_time_ms"] / 1000 for q in repeat_correct + switch_correct
+    ]
     rt_mean = statistics.mean(all_correct_rts)
     if len(all_correct_rts) < 2:
         rt_cv = 0.0  # 樣本數不足以算標準差，記為0而非報錯
     else:
         rt_std = statistics.stdev(all_correct_rts)
-        rt_cv = 0.0 if rt_std == 0 else rt_std / rt_mean  # 全部時間都一樣時，標準差為0，CV記為0
+        rt_cv = (
+            0.0 if rt_std == 0 else rt_std / rt_mean
+        )  # 全部時間都一樣時，標準差為0，CV記為0
 
     return {
         "switch_cost_rt": round(switch_cost_rt, 2),
@@ -98,6 +122,7 @@ def calculate_raw_metrics(questions: list[dict]) -> dict:
 
 
 # ---- Step2：規則學習速度（依題號反推階段，含邊界案例處理）----
+
 
 def calculate_learning_speed(questions: list[dict]) -> float:
     """
@@ -111,7 +136,7 @@ def calculate_learning_speed(questions: list[dict]) -> float:
     if len(questions) < STAGE_BOUNDARIES[-1]:
         raise InsufficientDataError(
             f"題目數量不足（收到 {len(questions)} 題，需要 {STAGE_BOUNDARIES[-1]} 題），無法計算學習速度",
-            code="INSUFFICIENT_QUESTION_COUNT"
+            code="INSUFFICIENT_QUESTION_COUNT",
         )
 
     catch_up_lengths = []
@@ -139,6 +164,7 @@ def calculate_learning_speed(questions: list[dict]) -> float:
 
 # ---- Step3~5：z分數、加權、換算0-100分 ----
 
+
 def to_z_score(value: float, metric_name: str) -> float:
     norm = NORM_REFERENCE[metric_name]
     if norm["direction"] == "smaller_is_better":
@@ -157,9 +183,15 @@ def calculate_cognitive_flexibility_score(questions: list[dict]) -> dict:
     raw_metrics["learning_speed"] = round(learning_speed, 2)
 
     z_scores = {
-        "switch_cost_rt_z": round(to_z_score(raw_metrics["switch_cost_rt"], "switch_cost_rt"), 3),
-        "persistent_error_rate_z": round(to_z_score(raw_metrics["persistent_error_rate"], "persistent_error_rate"), 3),
-        "switch_accuracy_z": round(to_z_score(raw_metrics["switch_accuracy"], "switch_accuracy"), 3),
+        "switch_cost_rt_z": round(
+            to_z_score(raw_metrics["switch_cost_rt"], "switch_cost_rt"), 3
+        ),
+        "persistent_error_rate_z": round(
+            to_z_score(raw_metrics["persistent_error_rate"], "persistent_error_rate"), 3
+        ),
+        "switch_accuracy_z": round(
+            to_z_score(raw_metrics["switch_accuracy"], "switch_accuracy"), 3
+        ),
         "learning_speed_z": round(to_z_score(learning_speed, "learning_speed"), 3),
     }
 
@@ -178,6 +210,7 @@ def calculate_cognitive_flexibility_score(questions: list[dict]) -> dict:
         "z_scores": z_scores,
         "cognitive_flexibility_score": round(final_score),
     }
+
 
 def determine_encouragement_tier(current_score: int, highest_score: int) -> str:
     """
