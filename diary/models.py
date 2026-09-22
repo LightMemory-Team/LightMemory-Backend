@@ -5,12 +5,11 @@ from users.models import User
 class Diary(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='diaries')
     image_path = models.CharField(max_length=255, blank=True)
-    audio_path = models.CharField(max_length=255, blank=True)   # 第1輪錄音
-    transcription = models.TextField(blank=True)                 # finalize時寫入合併文字
-    diary_text = models.TextField(blank=True)                    # 同transcription
+    audio_path = models.CharField(max_length=255, blank=True)
+    transcription = models.TextField(blank=True)
+    diary_text = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # 新增
     title = models.CharField(max_length=50, blank=True)
     first_question = models.TextField(blank=True)
     photo_description = models.TextField(blank=True)
@@ -26,7 +25,7 @@ class Diary(models.Model):
     category = models.CharField(max_length=20, blank=True)
     suggested_replies = models.JSONField(default=list, blank=True)
     invite_text = models.CharField(max_length=100, blank=True)
-    pending_question = models.TextField(blank=True)  
+    pending_question = models.TextField(blank=True)
 
     def __str__(self):
         return f"{self.user} 的日記 ({self.created_at.date()})"
@@ -57,7 +56,7 @@ class DiaryAnalysis(models.Model):
     sentence_score = models.FloatField(null=True, blank=True)
     naming_score = models.FloatField(null=True, blank=True)
     semantic_score = models.FloatField(null=True, blank=True)
-    communication_score = models.FloatField(null=True, blank=True)  # 儀表板「語言」分數直接用這個
+    communication_score = models.FloatField(null=True, blank=True)
     total_score = models.FloatField(null=True, blank=True)
     average_score = models.FloatField(null=True, blank=True)
     risk_level = models.CharField(max_length=10, blank=True)
