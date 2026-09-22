@@ -58,10 +58,6 @@ class DiaryCalendarView(APIView):
                 "diaries": diaries_data,
             }
         })
-    
-class DiaryUploadView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
     def post(self, request):
         photo = request.FILES.get('photo')
         if not photo:
@@ -85,7 +81,6 @@ class DiaryUploadView(APIView):
                 "created_at": diary.created_at.isoformat(),
             }
         }, status=status.HTTP_201_CREATED)
-
 
 class DiaryReplyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
