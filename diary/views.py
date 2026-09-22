@@ -7,6 +7,7 @@ from rest_framework import status, permissions
 
 from .models import Diary,DiaryReply, DiaryAnalysis
 from . import external, ai_gen, analysis as analysis_utils
+from social.models import Post
 
 
 
@@ -173,6 +174,10 @@ class DiaryFinalizeView(APIView):
         diary.invite_text = content["invite_text"]
         diary.status = "done"
         diary.save()
+        Post.objects.get_or_create(
+            diary=diary,
+            defaults={"user": diary.user, "content": diary.post_text, "image_path": diary.image_path},
+        )
 
         return self._build_response(diary, http_status=201)
 
