@@ -102,6 +102,7 @@ class DiaryReplyView(APIView):
         round_index = int(round_index)
 
         transcript = external.transcribe_audio(audio)
+        audio.seek(0)
         audio_url = external.upload_to_firebase(audio, "audio")
 
         question_for_this_round = diary.pending_question or diary.first_question
