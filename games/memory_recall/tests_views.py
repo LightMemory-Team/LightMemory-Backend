@@ -74,6 +74,14 @@ class MemoryRecallTestCase(APITestCase):
         )
         return response.data["data"]
 
+    def _start_official_session(self):
+        """跑完一場前測讓下一場變成正式賽，回傳新的 session_id。"""
+        pretest_id = self._start()["session_id"]
+        for _ in range(4):
+            self._answer_correctly(pretest_id)
+        self.client.post(FINISH_URL, {"session_id": pretest_id}, format="json")
+        return self._start()["session_id"]
+
 
 class ConfigApiTests(MemoryRecallTestCase):
     """GET /api/games/memory-recall/config/"""
@@ -111,6 +119,29 @@ class StartApiTests(MemoryRecallTestCase):
 
         self.assertFalse(data["is_pretest"])
         self.assertIsNotNone(data["expires_at"])
+
+
+class RoundApiTests(MemoryRecallTestCase):
+    """GET /api/games/memory-recall/round/：回想階段固定 2 選 1。"""
+
+    def test_basic_stage_offers_two_options_including_target(self):
+        session_id = self._start()["session_id"]
+
+        question = self._get_round(session_id)
+
+        self.assertEqual(len(question["option_items"]), 2)
+        self.assertIn(question["target_item"], question["option_items"])
+
+    def test_advanced_stage_offers_two_options_including_target(self):
+        session_id = self._start_official_session()
+        for _ in range(6):  # basic -> intermediate -> advanced
+            self._answer_correctly(session_id)
+
+        question = self._get_round(session_id)
+
+        self.assertEqual(question["stage"], "advanced")
+        self.assertEqual(len(question["option_items"]), 2)
+        self.assertIn(question["target_item"], question["option_items"])
 
 
 class PretestFlowTests(MemoryRecallTestCase):
@@ -168,14 +199,6 @@ class PretestFlowTests(MemoryRecallTestCase):
 
 class OfficialGameFlowTests(MemoryRecallTestCase):
     """規格書「四、正式賽計時與升階規則」「五、計分邏輯」。"""
-
-    def _start_official_session(self):
-        """跑完一場前測讓下一場變成正式賽，回傳新的 session_id。"""
-        pretest_id = self._start()["session_id"]
-        for _ in range(4):
-            self._answer_correctly(pretest_id)
-        self.client.post(FINISH_URL, {"session_id": pretest_id}, format="json")
-        return self._start()["session_id"]
 
     def test_three_correct_in_a_row_promotes_and_grants_bonus_time(self):
         session_id = self._start_official_session()
