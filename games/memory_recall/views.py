@@ -134,18 +134,28 @@ def start(request):
     return Response({"success": True, "data": data, "error": None})
 
 
+OPTION_COUNT = 2
+
+
 def _pick_question(stage):
-    """依階段出題。advanced 先隨機選一個形狀分組，再用組內固定 3 個型態出題。"""
+    """依階段出題，回想階段固定 2 選 1（目標物 + 1 個干擾物）。
+
+    advanced 先隨機選一個形狀分組，組內固定就是 2 個型態，全部當選項；
+    basic/intermediate 題庫維持 3 種物品，出題時隨機抽 2 種（含目標物）
+    當選項，增加變化。
+    """
     if stage == "advanced":
         group = random.choice(load_advanced_groups())
         pool = group["items"]
         group_name = group["group"]
+        options = pool
     else:
         pool = load_items(stage)
         group_name = None
+        options = random.sample(pool, OPTION_COUNT)
 
-    target = random.choice(pool)
-    option_items = [item["item"] for item in pool]
+    target = random.choice(options)
+    option_items = [item["item"] for item in options]
     random.shuffle(option_items)
 
     return {
