@@ -17,6 +17,8 @@ from rest_framework.test import APITestCase
 from games import session_service
 from users.models import User
 
+from .views import GAME_TYPE
+
 CONFIG_URL = "/api/games/memory-recall/config/"
 START_URL = "/api/games/memory-recall/start/"
 ROUND_URL = "/api/games/memory-recall/round/"
@@ -308,6 +310,37 @@ class ErrorHandlingTests(MemoryRecallTestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data["error"]["code"], "FORBIDDEN")
+
+    def test_official_round_timeout_ends_the_whole_game(self):
+        session_id = self._start_official_session()
+        question = self._get_round(session_id)
+
+        # 模擬這一題已經超過單題逾時秒數仍未作答。
+        session = session_service.get_session(GAME_TYPE, session_id)
+        current_question = session["current_question"]
+        current_question["round_expires_at"] = "2020-01-01T00:00:00+00:00"
+        session_service.set_current_question(GAME_TYPE, session_id, current_question)
+
+        response = self._answer(
+            session_id, question["round_number"], question["target_item"]
+        )
+
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.data["error"]["code"], "ROUND_TIME_UP")
+
+        # 整場遊戲應該已經被標記結束，逾時的這一題不計入統計。
+        result_response = self.client.get(result_url(session_id))
+        self.assertTrue(result_response.data["success"])
+        self.assertEqual(
+            result_response.data["data"]["session_result"]["total_rounds"], 0
+        )
+
+    def test_pretest_round_has_no_timeout(self):
+        session_id = self._start()["session_id"]
+        self._get_round(session_id)
+
+        session = session_service.get_session(GAME_TYPE, session_id)
+        self.assertIsNone(session["current_question"]["round_expires_at"])
 
 
 class ResultApiTests(MemoryRecallTestCase):

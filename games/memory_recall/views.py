@@ -23,6 +23,9 @@ BASE_TIME_LIMIT_SECONDS = 60
 PROMOTE_STREAK = 3
 PROMOTE_BONUS_SECONDS = 15
 
+# 測試用暫定值，正式上線前改為 20（規格書未定案，見 recall_memory.md 第九節討論）
+ROUND_TIMEOUT_SECONDS = 10
+
 
 def _current_user(request):
     """有登入時使用登入者，開發階段未登入時暫時抓第一位使用者。"""
@@ -192,6 +195,11 @@ def round_view(request):
     question = _pick_question(session["state"]["current_stage"])
     round_number = session["question_number"] + 1
     question["round_number"] = round_number
+    question["round_expires_at"] = (
+        None
+        if session["state"]["is_pretest"]
+        else (timezone.now() + timedelta(seconds=ROUND_TIMEOUT_SECONDS)).isoformat()
+    )
     session_service.set_current_question(GAME_TYPE, session_id, question)
 
     data = {
@@ -254,6 +262,23 @@ def round_answer(request):
                 },
             },
             status=400,
+        )
+
+    round_expires_at = current_question["round_expires_at"]
+    if round_expires_at is not None and timezone.now() > datetime.fromisoformat(
+        round_expires_at
+    ):
+        session_service.finish_session(GAME_TYPE, session_id, _build_result(session))
+        return Response(
+            {
+                "success": False,
+                "data": None,
+                "error": {
+                    "code": "ROUND_TIME_UP",
+                    "message": "這一題已經超過作答時間，遊戲已結束",
+                },
+            },
+            status=410,
         )
 
     selected_item = request.data.get("selected_item")
@@ -348,21 +373,8 @@ def round_answer(request):
     return Response({"success": True, "data": data, "error": None})
 
 
-# 5. 結束遊戲，計算總結果
-@api_view(["POST"])
-def finish(request):
-    user = _current_user(request)
-    session_id = request.data.get("session_id")
-    session, error_response = _get_session_or_error(
-        session_id, user.id if user else None
-    )
-    if error_response is not None:
-        return error_response
-
-    # 冪等性處理：已經結束過的 session 直接回傳既有結果，不重算不覆寫。
-    if session["status"] == "finished":
-        return Response({"success": True, "data": session["result"], "error": None})
-
+def _build_result(session):
+    """依 session 目前的 step_records 彙總出 finish/ 要回傳、存檔的 result。"""
     state = session["state"]
     is_pretest = state["is_pretest"]
     step_records = session["step_records"]
@@ -386,7 +398,7 @@ def finish(request):
         stage_index = STAGE_ORDER.index(state["current_stage"])
         total_bonus_seconds = stage_index * PROMOTE_BONUS_SECONDS
 
-    result = {
+    return {
         "total_rounds": total_rounds,
         "total_correct": total_correct,
         "total_wrong": total_wrong,
@@ -396,6 +408,24 @@ def finish(request):
         "total_bonus_seconds": total_bonus_seconds,
         "total_score": None if is_pretest else total_score,
     }
+
+
+# 5. 結束遊戲，計算總結果
+@api_view(["POST"])
+def finish(request):
+    user = _current_user(request)
+    session_id = request.data.get("session_id")
+    session, error_response = _get_session_or_error(
+        session_id, user.id if user else None
+    )
+    if error_response is not None:
+        return error_response
+
+    # 冪等性處理：已經結束過的 session 直接回傳既有結果，不重算不覆寫。
+    if session["status"] == "finished":
+        return Response({"success": True, "data": session["result"], "error": None})
+
+    result = _build_result(session)
     session_service.finish_session(GAME_TYPE, session_id, result)
     return Response({"success": True, "data": result, "error": None})
 
