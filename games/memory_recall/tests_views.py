@@ -151,6 +151,20 @@ class PretestFlowTests(MemoryRecallTestCase):
         self.assertEqual(data["final_stage"], "basic")
         self.assertIsNone(data["total_score"])
 
+    def test_calling_finish_twice_returns_same_result_without_recalculating(self):
+        session_id = self._start()["session_id"]
+        for _ in range(4):
+            self._answer_correctly(session_id)
+
+        first = self.client.post(
+            FINISH_URL, {"session_id": session_id}, format="json"
+        ).data["data"]
+        second = self.client.post(
+            FINISH_URL, {"session_id": session_id}, format="json"
+        ).data["data"]
+
+        self.assertEqual(first, second)
+
 
 class OfficialGameFlowTests(MemoryRecallTestCase):
     """規格書「四、正式賽計時與升階規則」「五、計分邏輯」。"""
@@ -259,6 +273,18 @@ class ErrorHandlingTests(MemoryRecallTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["error"]["code"], "SESSION_NOT_FINISHED")
+
+    def test_other_user_accessing_session_returns_403(self):
+        session_id = self._start()["session_id"]
+        other_user = User.objects.create_user(
+            username="other_tester", password="testpass123"
+        )
+        self.client.force_authenticate(user=other_user)
+
+        response = self.client.get(ROUND_URL, {"session_id": session_id})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["error"]["code"], "FORBIDDEN")
 
 
 class ResultApiTests(MemoryRecallTestCase):

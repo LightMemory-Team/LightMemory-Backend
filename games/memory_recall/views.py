@@ -31,6 +31,40 @@ def _current_user(request):
     return User.objects.first()
 
 
+def _get_session_or_error(session_id, user_id):
+    """讀取 session，回傳 (session, error_response)，err 為 None 代表成功。
+
+    統一處理 SESSION_NOT_FOUND、FORBIDDEN（session 不屬於這位使用者）兩種
+    檢查，避免各支 API 重複同一段邏輯。
+    """
+    session = session_service.get_session(GAME_TYPE, session_id)
+    if session is None:
+        return None, Response(
+            {
+                "success": False,
+                "data": None,
+                "error": {
+                    "code": "SESSION_NOT_FOUND",
+                    "message": "找不到指定的 session",
+                },
+            },
+            status=404,
+        )
+    if session["state"].get("user_id") != user_id:
+        return None, Response(
+            {
+                "success": False,
+                "data": None,
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "這場遊戲不屬於目前的使用者",
+                },
+            },
+            status=403,
+        )
+    return session, None
+
+
 def _has_finished_before(user_id):
     """判斷這位使用者是否已經玩過（有 finished 過）這款遊戲，不分前測或正式賽。
 
@@ -125,20 +159,13 @@ def _pick_question(stage):
 # 3. 取得單一題目內容
 @api_view(["GET"])
 def round_view(request):
+    user = _current_user(request)
     session_id = request.query_params.get("session_id")
-    session = session_service.get_session(GAME_TYPE, session_id)
-    if session is None:
-        return Response(
-            {
-                "success": False,
-                "data": None,
-                "error": {
-                    "code": "SESSION_NOT_FOUND",
-                    "message": "找不到指定的 session",
-                },
-            },
-            status=404,
-        )
+    session, error_response = _get_session_or_error(
+        session_id, user.id if user else None
+    )
+    if error_response is not None:
+        return error_response
     if session["status"] != "in_progress":
         return Response(
             {
@@ -171,20 +198,13 @@ def round_view(request):
 # 4. 送出單題作答
 @api_view(["POST"])
 def round_answer(request):
+    user = _current_user(request)
     session_id = request.data.get("session_id")
-    session = session_service.get_session(GAME_TYPE, session_id)
-    if session is None:
-        return Response(
-            {
-                "success": False,
-                "data": None,
-                "error": {
-                    "code": "SESSION_NOT_FOUND",
-                    "message": "找不到指定的 session",
-                },
-            },
-            status=404,
-        )
+    session, error_response = _get_session_or_error(
+        session_id, user.id if user else None
+    )
+    if error_response is not None:
+        return error_response
     if session["status"] != "in_progress":
         return Response(
             {
@@ -321,20 +341,17 @@ def round_answer(request):
 # 5. 結束遊戲，計算總結果
 @api_view(["POST"])
 def finish(request):
+    user = _current_user(request)
     session_id = request.data.get("session_id")
-    session = session_service.get_session(GAME_TYPE, session_id)
-    if session is None:
-        return Response(
-            {
-                "success": False,
-                "data": None,
-                "error": {
-                    "code": "SESSION_NOT_FOUND",
-                    "message": "找不到指定的 session",
-                },
-            },
-            status=404,
-        )
+    session, error_response = _get_session_or_error(
+        session_id, user.id if user else None
+    )
+    if error_response is not None:
+        return error_response
+
+    # 冪等性處理：已經結束過的 session 直接回傳既有結果，不重算不覆寫。
+    if session["status"] == "finished":
+        return Response({"success": True, "data": session["result"], "error": None})
 
     state = session["state"]
     is_pretest = state["is_pretest"]
@@ -376,19 +393,12 @@ def finish(request):
 # 6. 查詢單場結果
 @api_view(["GET"])
 def result(request, session_id):
-    session = session_service.get_session(GAME_TYPE, session_id)
-    if session is None:
-        return Response(
-            {
-                "success": False,
-                "data": None,
-                "error": {
-                    "code": "SESSION_NOT_FOUND",
-                    "message": "找不到指定的 session",
-                },
-            },
-            status=404,
-        )
+    user = _current_user(request)
+    session, error_response = _get_session_or_error(
+        session_id, user.id if user else None
+    )
+    if error_response is not None:
+        return error_response
     if session["status"] != "finished":
         return Response(
             {
