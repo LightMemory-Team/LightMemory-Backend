@@ -1,5 +1,3 @@
-import random
-
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -8,100 +6,89 @@ from rest_framework.response import Response
 from games import session_service
 from users.models import User
 
-from .constants import BUDGET_OPTIONS, FOODS
+from .services import (
+    TOTAL_QUESTIONS,
+    build_question_payload,
+    calculate_difficulty,
+    calculate_metrics,
+    calculate_score,
+    evaluate_change_answer,
+    evaluate_item_answer,
+    generate_change_options,
+    generate_question,
+)
+
 
 GAME_TYPE = "market_shopping"
-TOTAL_QUESTIONS = 10
 
 
-def generate_question(difficulty):
-    # 不同難度決定購物清單數量與選項數量
-    if difficulty == "easy":
-        target_count = 2
-        option_count = 4
-    else:
-        target_count = 4
-        option_count = 6
+def _get_reaction_time(request):
+    """
+    取得前端傳入的 reaction_time_ms。
 
-    # 隨機抽出正確購物清單
-    target_items = random.sample(
-        FOODS,
-        target_count,
-    )
+    目前先允許不傳，避免前端尚未更新時 API 直接壞掉。
+    若有傳，必須為 >= 0 的數字。
+    """
+    reaction_time_ms = request.data.get("reaction_time_ms")
 
-    # 已經抽中的食材代碼
-    target_codes = {item["food_code"] for item in target_items}
+    if reaction_time_ms is None:
+        return None, None
 
-    # 剩下的食材當干擾選項
-    remaining_foods = [food for food in FOODS if food["food_code"] not in target_codes]
+    if (
+        isinstance(reaction_time_ms, bool)
+        or not isinstance(reaction_time_ms, (int, float))
+        or reaction_time_ms < 0
+    ):
+        return None, Response(
+            {
+                "success": False,
+                "data": None,
+                "error": {
+                    "code": "INVALID_REACTION_TIME",
+                    "message": "reaction_time_ms 必須為大於等於 0 的數字",
+                },
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    distractor_count = option_count - target_count
+    return reaction_time_ms, None
 
-    distractors = random.sample(
-        remaining_foods,
-        distractor_count,
-    )
 
-    option_items = target_items + distractors
-    random.shuffle(option_items)
+def _get_current_user(request):
+    """
+    開發階段：
+    - 已登入：使用 request.user
+    - 未登入：暫時抓資料庫第一位 User
+    """
+    if request.user.is_authenticated:
+        return request.user
+    return User.objects.first()
 
-    # 計算購物總金額
-    spent_amount = sum(item["price"] for item in target_items)
 
-    # 只挑足夠付款，而且一定有找零的預算
-    available_budgets = [amount for amount in BUDGET_OPTIONS if amount > spent_amount]
-
-    budget = random.choice(available_budgets)
-    correct_change = budget - spent_amount
-
+def _completed_payload(result, is_correct, question_skipped=False):
+    """統一整理整場結束時回傳給前端的資料。"""
     return {
-        "target_items": target_items,
-        "option_items": option_items,
-        "budget": budget,
-        "spent_amount": spent_amount,
-        "correct_change": correct_change,
-    }
-
-
-def _build_question_payload(current_question, difficulty, question_number):
-    """組出「一題的內容」回應格式，create_session 跟換下一題共用同一份格式。"""
-    shopping_list = [
-        {
-            "food_code": item["food_code"],
-            "food_name": item["food_name"],
-        }
-        for item in current_question["target_items"]
-    ]
-
-    selection_options = [
-        {
-            "food_code": item["food_code"],
-            "food_name": item["food_name"],
-        }
-        for item in current_question["option_items"]
-    ]
-
-    return {
-        "difficulty": difficulty,
-        "current_question": question_number,
+        "is_correct": is_correct,
+        "retry": False if question_skipped else None,
+        "question_skipped": question_skipped,
+        "is_completed": True,
+        "score": result["score"],
+        "total_correct": result["total_correct"],
+        "first_try_correct_count": result["first_try_correct_count"],
         "total_questions": TOTAL_QUESTIONS,
-        "shopping_list": shopping_list,
-        "selection_options": selection_options,
+        "accuracy": result["accuracy"],
+        "metrics": result["metrics"],
+        "difficulty": result["difficulty"],
+        "completed_at": result["completed_at"],
     }
 
 
-# 第一支 API
 @api_view(["POST"])
 def create_session(request):
-    # 每一場固定從 easy 開始
+    """建立一場新的市場買菜遊戲。"""
     difficulty = "easy"
 
-    # 有登入時使用登入者
-    # 開發階段未登入時暫時抓第一位使用者
-    if request.user.is_authenticated:
-        user = request.user
-    else:
-        user = User.objects.first()
+    user = _get_current_user(request)
 
     if user is None:
         return Response(
@@ -116,18 +103,25 @@ def create_session(request):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # 產生第 1 題
     question = generate_question(difficulty)
 
     initial_state = {
         "user_id": user.id,
+
+        # DDA
         "difficulty": difficulty,
+        "consecutive_correct": 0,
+
+        # 整場統計
+        "total_correct": 0,
+        "first_try_correct_count": 0,
+
+        # 本題找零資料
         "budget": question["budget"],
         "spent_amount": question["spent_amount"],
         "correct_change": question["correct_change"],
-        "consecutive_correct": 0,
-        "total_correct": 0,
-        "first_try_correct_count": 0,
+
+        # 本題作答狀態
         "current_wrong_count": 0,
         "current_question_had_error": False,
         "item_attempt_count": 0,
@@ -135,13 +129,17 @@ def create_session(request):
         "item_first_try_correct": None,
         "change_first_try_correct": None,
     }
+
     current_question = {
         "target_items": question["target_items"],
         "option_items": question["option_items"],
     }
 
-    # 建立一整場 10 題的遊戲 Session
-    session = session_service.create_session(GAME_TYPE, initial_state=initial_state)
+    session = session_service.create_session(
+        GAME_TYPE,
+        initial_state=initial_state,
+    )
+
     session = session_service.update_session(
         GAME_TYPE,
         session["session_id"],
@@ -149,71 +147,101 @@ def create_session(request):
         current_question=current_question,
     )
 
-    payload = _build_question_payload(
-        current_question, difficulty, session["question_number"]
+    payload = build_question_payload(
+        current_question,
+        difficulty,
+        session["question_number"],
     )
     payload["session_id"] = session["session_id"]
 
     return Response(
-        {"success": True, "data": payload, "error": None},
+        {
+            "success": True,
+            "data": payload,
+            "error": None,
+        },
         status=status.HTTP_201_CREATED,
     )
 
 
-def _complete_session(session_id, state, total_correct):
-    """整場結束的收尾：算總結果、寫入 session 的 result。
-
-    result 會完整保留在這個 session 的 JSON 檔案裡，歷史成績查詢
-    （get_market_shopping_history）直接掃描所有 session 檔案取得，
-    不另外寫資料庫。
+def _complete_session(session_id):
     """
-    completed_at = timezone.now()
-    accuracy = round(
-        state["first_try_correct_count"] / TOTAL_QUESTIONS * 100,
-        2,
+    完成整場遊戲並計算：
+    - 選菜首次正確率
+    - 找零首次正確率
+    - 整題一次完成率
+    - RT
+    - CV
+    - score
+    """
+    session = session_service.get_session(
+        GAME_TYPE,
+        session_id,
     )
 
+    state = session["state"]
+
+    metrics = calculate_metrics(
+        session["step_records"],
+        total_questions=TOTAL_QUESTIONS,
+    )
+
+    score = calculate_score(metrics)
+    completed_at = timezone.now()
+
     result = {
-        "total_correct": total_correct,
+        "score": score,
+        "total_correct": state["total_correct"],
         "first_try_correct_count": state["first_try_correct_count"],
         "total_questions": TOTAL_QUESTIONS,
-        "accuracy": accuracy,
+
+        # 舊前端仍可沿用 accuracy。
+        # 內容等於「整題一次完成率」。
+        "accuracy": metrics["complete_first_try_accuracy"],
+
         "difficulty": state["difficulty"],
+        "metrics": metrics,
         "completed_at": completed_at.isoformat(),
     }
 
-    session_service.finish_session(GAME_TYPE, session_id, result)
+    session_service.finish_session(
+        GAME_TYPE,
+        session_id,
+        result,
+    )
 
     return result
 
 
 def move_to_next_question(session):
+    """完成目前題目後，產生下一題；若已是第 10 題則結束整場。"""
     session_id = session["session_id"]
     question_number = session["question_number"]
     state = session["state"]
 
-    # 如果目前已經是第 10 題，整場結束
     if question_number >= TOTAL_QUESTIONS:
-        _complete_session(session_id, state, state["total_correct"])
+        _complete_session(session_id)
         return None
 
-    # 依照目前難度產生新題目
-    question = generate_question(state["difficulty"])
+    question = generate_question(
+        state["difficulty"]
+    )
 
     current_question = {
         "target_items": question["target_items"],
         "option_items": question["option_items"],
     }
 
-    # 新的一題，作答狀態全部重新計算
     new_state = {
         "budget": question["budget"],
         "spent_amount": question["spent_amount"],
         "correct_change": question["correct_change"],
+
         "item_attempt_count": 0,
         "change_attempt_count": 0,
         "item_first_try_correct": None,
         "change_first_try_correct": None,
+
         "current_wrong_count": 0,
         "current_question_had_error": False,
     }
@@ -226,17 +254,18 @@ def move_to_next_question(session):
         state=new_state,
     )
 
-    return _build_question_payload(
-        current_question, session["state"]["difficulty"], session["question_number"]
+    return build_question_payload(
+        current_question,
+        session["state"]["difficulty"],
+        session["question_number"],
     )
 
 
-# 第二支 API：檢查選菜答案
 @api_view(["POST"])
 def submit_item_answer(request, session_id):
+    """提交選菜答案。"""
     selected_food_codes = request.data.get("selected_food_codes")
 
-    # 檢查格式
     if not isinstance(selected_food_codes, list):
         return Response(
             {
@@ -250,8 +279,16 @@ def submit_item_answer(request, session_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # 找這一場遊戲
-    session = session_service.get_session(GAME_TYPE, session_id)
+    reaction_time_ms, error_response = _get_reaction_time(request)
+
+    if error_response:
+        return error_response
+
+    session = session_service.get_session(
+        GAME_TYPE,
+        session_id,
+    )
+
     if session is None:
         return Response(
             {
@@ -265,7 +302,6 @@ def submit_item_answer(request, session_id):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # 已經結束的遊戲不能繼續答
     if session["status"] == "finished":
         return Response(
             {
@@ -282,40 +318,60 @@ def submit_item_answer(request, session_id):
     state = session["state"]
     current_question = session["current_question"]
 
-    correct_food_codes = [
-        item["food_code"] for item in current_question["target_items"]
-    ]
+    answer_result = evaluate_item_answer(
+        selected_food_codes,
+        current_question["target_items"],
+    )
+    is_correct = answer_result["is_correct"]
 
-    # 記錄選菜作答次數
     item_attempt_count = state["item_attempt_count"] + 1
 
-    # 不看點選順序，只檢查選到的食材是否一致
-    is_correct = len(selected_food_codes) == len(correct_food_codes) and set(
-        selected_food_codes
-    ) == set(correct_food_codes)
+    step_record = {
+        "question_number": session["question_number"],
+        "phase": "item",
+        "attempt_number": item_attempt_count,
+        "difficulty": state["difficulty"],
+        "selected_food_codes": selected_food_codes,
+        "is_correct": is_correct,
+        "error_type": answer_result["error_type"],
+        "missing_food_codes": answer_result["missing_food_codes"],
+        "extra_food_codes": answer_result["extra_food_codes"],
+        "reaction_time_ms": reaction_time_ms,
+    }
 
-    state_update = {"item_attempt_count": item_attempt_count}
+    session_service.save_step(
+        GAME_TYPE,
+        session_id,
+        step_record,
+    )
 
-    # 第一次作答，記錄是否第一次就答對
+    state_update = {
+        "item_attempt_count": item_attempt_count,
+    }
+
     if item_attempt_count == 1:
         state_update["item_first_try_correct"] = is_correct
 
-    # =========================
-    # 選錯
-    # =========================
+    # -------------------------
+    # 選菜答錯
+    # -------------------------
     if not is_correct:
         current_wrong_count = state["current_wrong_count"] + 1
-        state_update["current_wrong_count"] = current_wrong_count
-        state_update["current_question_had_error"] = True
 
-        # 答錯會中斷連續答對
-        state_update["consecutive_correct"] = 0
-
-        session = session_service.update_session(
-            GAME_TYPE, session_id, state=state_update
+        state_update.update(
+            {
+                "current_wrong_count": current_wrong_count,
+                "current_question_had_error": True,
+                "consecutive_correct": 0,
+            }
         )
 
-        # 還沒有錯滿 3 次
+        session = session_service.update_session(
+            GAME_TYPE,
+            session_id,
+            state=state_update,
+        )
+
         if current_wrong_count < 3:
             return Response(
                 {
@@ -326,35 +382,35 @@ def submit_item_answer(request, session_id):
                         "current_question": session["question_number"],
                         "wrong_count": current_wrong_count,
                         "remaining_attempts": 3 - current_wrong_count,
+                        "error_type": answer_result["error_type"],
                     },
                     "error": None,
                 },
                 status=status.HTTP_200_OK,
             )
 
-        # 已經錯滿 3 次，跳過這一題
         next_question = move_to_next_question(session)
 
-        # 如果剛好是第 10 題，整場結束
         if next_question is None:
-            final_session = session_service.get_session(GAME_TYPE, session_id)
+            final_session = session_service.get_session(
+                GAME_TYPE,
+                session_id,
+            )
+            result = final_session["result"]
+
             return Response(
                 {
                     "success": True,
-                    "data": {
-                        "is_correct": False,
-                        "retry": False,
-                        "question_skipped": True,
-                        "is_completed": True,
-                        "total_correct": final_session["state"]["total_correct"],
-                        "total_questions": TOTAL_QUESTIONS,
-                    },
+                    "data": _completed_payload(
+                        result,
+                        is_correct=False,
+                        question_skipped=True,
+                    ),
                     "error": None,
                 },
                 status=status.HTTP_200_OK,
             )
 
-        # 還沒到第 10 題，直接回傳下一題
         return Response(
             {
                 "success": True,
@@ -370,39 +426,20 @@ def submit_item_answer(request, session_id):
             status=status.HTTP_200_OK,
         )
 
-    # =========================
-    # 選對 → 進入找零
-    # =========================
-
-    session = session_service.update_session(GAME_TYPE, session_id, state=state_update)
-    state = session["state"]
-
-    correct_change = state["correct_change"]
-
-    possible_wrong_answers = [
-        correct_change - 20,
-        correct_change - 10,
-        correct_change - 5,
-        correct_change + 5,
-        correct_change + 10,
-        correct_change + 20,
-    ]
-
-    possible_wrong_answers = [
-        amount
-        for amount in possible_wrong_answers
-        if amount >= 0 and amount != correct_change
-    ]
-
-    # 隨機取兩個錯誤答案
-    wrong_answers = random.sample(
-        possible_wrong_answers,
-        2,
+    # -------------------------
+    # 選菜答對 → 進入找零
+    # -------------------------
+    session = session_service.update_session(
+        GAME_TYPE,
+        session_id,
+        state=state_update,
     )
 
-    # 正解 + 2 個錯誤選項
-    change_options = wrong_answers + [correct_change]
-    random.shuffle(change_options)
+    state = session["state"]
+
+    change_options = generate_change_options(
+        state["correct_change"]
+    )
 
     response_data = {
         "is_correct": True,
@@ -412,11 +449,9 @@ def submit_item_answer(request, session_id):
         "change_options": change_options,
     }
 
-    # easy / medium 直接顯示花費總額
     if state["difficulty"] in ["easy", "medium"]:
         response_data["spent_amount"] = state["spent_amount"]
 
-    # hard 不顯示總額，要自己加
     if state["difficulty"] == "hard":
         response_data["purchased_items"] = [
             {
@@ -427,18 +462,24 @@ def submit_item_answer(request, session_id):
         ]
 
     return Response(
-        {"success": True, "data": response_data, "error": None},
+        {
+            "success": True,
+            "data": response_data,
+            "error": None,
+        },
         status=status.HTTP_200_OK,
     )
 
 
-# 第三支 API：檢查找零答案
 @api_view(["POST"])
 def submit_change_answer(request, session_id):
+    """提交找零答案。"""
     selected_amount = request.data.get("selected_amount")
 
-    # 檢查格式
-    if not isinstance(selected_amount, int):
+    if (
+        isinstance(selected_amount, bool)
+        or not isinstance(selected_amount, int)
+    ):
         return Response(
             {
                 "success": False,
@@ -451,8 +492,16 @@ def submit_change_answer(request, session_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # 找這一場遊戲
-    session = session_service.get_session(GAME_TYPE, session_id)
+    reaction_time_ms, error_response = _get_reaction_time(request)
+
+    if error_response:
+        return error_response
+
+    session = session_service.get_session(
+        GAME_TYPE,
+        session_id,
+    )
+
     if session is None:
         return Response(
             {
@@ -466,7 +515,6 @@ def submit_change_answer(request, session_id):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # 已完成的遊戲不能繼續作答
     if session["status"] == "finished":
         return Response(
             {
@@ -482,33 +530,58 @@ def submit_change_answer(request, session_id):
 
     state = session["state"]
 
-    # 找零作答次數 +1
+    answer_result = evaluate_change_answer(
+        selected_amount,
+        state["correct_change"],
+    )
+    is_correct = answer_result["is_correct"]
+
     change_attempt_count = state["change_attempt_count"] + 1
 
-    is_correct = selected_amount == state["correct_change"]
+    step_record = {
+        "question_number": session["question_number"],
+        "phase": "change",
+        "attempt_number": change_attempt_count,
+        "difficulty": state["difficulty"],
+        "selected_amount": selected_amount,
+        "is_correct": is_correct,
+        "error_type": answer_result["error_type"],
+        "reaction_time_ms": reaction_time_ms,
+    }
 
-    state_update = {"change_attempt_count": change_attempt_count}
+    session_service.save_step(
+        GAME_TYPE,
+        session_id,
+        step_record,
+    )
 
-    # 記錄是否第一次就答對
+    state_update = {
+        "change_attempt_count": change_attempt_count,
+    }
+
     if change_attempt_count == 1:
         state_update["change_first_try_correct"] = is_correct
 
-    # =========================
+    # -------------------------
     # 找零答錯
-    # =========================
+    # -------------------------
     if not is_correct:
         current_wrong_count = state["current_wrong_count"] + 1
-        state_update["current_wrong_count"] = current_wrong_count
-        state_update["current_question_had_error"] = True
 
-        # 答錯會中斷連續答對
-        state_update["consecutive_correct"] = 0
-
-        session = session_service.update_session(
-            GAME_TYPE, session_id, state=state_update
+        state_update.update(
+            {
+                "current_wrong_count": current_wrong_count,
+                "current_question_had_error": True,
+                "consecutive_correct": 0,
+            }
         )
 
-        # 還沒錯滿 3 次
+        session = session_service.update_session(
+            GAME_TYPE,
+            session_id,
+            state=state_update,
+        )
+
         if current_wrong_count < 3:
             return Response(
                 {
@@ -519,33 +592,30 @@ def submit_change_answer(request, session_id):
                         "current_question": session["question_number"],
                         "wrong_count": current_wrong_count,
                         "remaining_attempts": 3 - current_wrong_count,
+                        "error_type": answer_result["error_type"],
                     },
                     "error": None,
                 },
                 status=status.HTTP_200_OK,
             )
 
-        # 錯滿 3 次，跳下一題
         next_question = move_to_next_question(session)
 
-        # 第 10 題結束
         if next_question is None:
-            final_session = session_service.get_session(GAME_TYPE, session_id)
+            final_session = session_service.get_session(
+                GAME_TYPE,
+                session_id,
+            )
             result = final_session["result"]
 
             return Response(
                 {
                     "success": True,
-                    "data": {
-                        "is_correct": False,
-                        "retry": False,
-                        "question_skipped": True,
-                        "is_completed": True,
-                        "total_correct": result["total_correct"],
-                        "total_questions": TOTAL_QUESTIONS,
-                        "accuracy": result["accuracy"],
-                        "completed_at": result["completed_at"],
-                    },
+                    "data": _completed_payload(
+                        result,
+                        is_correct=False,
+                        question_skipped=True,
+                    ),
                     "error": None,
                 },
                 status=status.HTTP_200_OK,
@@ -566,56 +636,37 @@ def submit_change_answer(request, session_id):
             status=status.HTTP_200_OK,
         )
 
-    # =========================
-    # 找零答對 → 這題完成
-    # =========================
-
-    # 最後成功完成這一題
+    # -------------------------
+    # 找零答對 → 整題完成
+    # -------------------------
     state_update["total_correct"] = state["total_correct"] + 1
 
-    # 整題從選菜到找零都沒有答錯過
     if not state["current_question_had_error"]:
-        # 一次完成的題數 +1
-        state_update["first_try_correct_count"] = state["first_try_correct_count"] + 1
-
-        # 連續答對 +1
-        state_update["consecutive_correct"] = state["consecutive_correct"] + 1
+        state_update["first_try_correct_count"] = (
+            state["first_try_correct_count"] + 1
+        )
+        consecutive_correct = state["consecutive_correct"] + 1
     else:
-        # 曾經答錯過就中斷連續答對
-        state_update["consecutive_correct"] = 0
+        consecutive_correct = 0
 
-    # =========================
-    # 連續答對 3 題 → 升難度
-    # =========================
+    dda_result = calculate_difficulty(
+        state["difficulty"],
+        consecutive_correct,
+    )
 
-    difficulty_upgraded = False
-    difficulty = state["difficulty"]
-    consecutive_correct = state_update["consecutive_correct"]
+    state_update["difficulty"] = dda_result["difficulty"]
+    state_update["consecutive_correct"] = dda_result["consecutive_correct"]
 
-    if consecutive_correct >= 3:
-        if difficulty == "easy":
-            difficulty = "medium"
-            consecutive_correct = 0
-            difficulty_upgraded = True
+    session = session_service.update_session(
+        GAME_TYPE,
+        session_id,
+        state=state_update,
+    )
 
-        elif difficulty == "medium":
-            difficulty = "hard"
-            consecutive_correct = 0
-            difficulty_upgraded = True
-
-        state_update["difficulty"] = difficulty
-        state_update["consecutive_correct"] = consecutive_correct
-
-    session = session_service.update_session(GAME_TYPE, session_id, state=state_update)
-    state = session["state"]
     question_number = session["question_number"]
 
-    # =========================
-    # 第 10 題完成 → 遊戲結束
-    # =========================
-
     if question_number >= TOTAL_QUESTIONS:
-        result = _complete_session(session_id, state, state["total_correct"])
+        result = _complete_session(session_id)
 
         return Response(
             {
@@ -623,21 +674,21 @@ def submit_change_answer(request, session_id):
                 "data": {
                     "is_correct": True,
                     "is_completed": True,
+                    "score": result["score"],
                     "total_correct": result["total_correct"],
-                    "first_try_correct_count": result["first_try_correct_count"],
+                    "first_try_correct_count": result[
+                        "first_try_correct_count"
+                    ],
                     "total_questions": TOTAL_QUESTIONS,
                     "accuracy": result["accuracy"],
                     "difficulty": result["difficulty"],
+                    "metrics": result["metrics"],
                     "completed_at": result["completed_at"],
                 },
                 "error": None,
             },
             status=status.HTTP_200_OK,
         )
-
-    # =========================
-    # 還沒第 10 題 → 出下一題
-    # =========================
 
     next_question = move_to_next_question(session)
 
@@ -647,9 +698,13 @@ def submit_change_answer(request, session_id):
             "data": {
                 "is_correct": True,
                 "is_completed": False,
-                "difficulty_upgraded": difficulty_upgraded,
-                "consecutive_correct": state["consecutive_correct"],
-                "total_correct": state["total_correct"],
+                "difficulty_upgraded": dda_result[
+                    "difficulty_upgraded"
+                ],
+                "consecutive_correct": session["state"][
+                    "consecutive_correct"
+                ],
+                "total_correct": session["state"]["total_correct"],
                 "next_question": next_question,
             },
             "error": None,
@@ -658,15 +713,10 @@ def submit_change_answer(request, session_id):
     )
 
 
-# 第四支 API：取得市場買菜歷史成績
 @api_view(["GET"])
 def get_market_shopping_history(request):
-    # 有登入時使用登入者
-    # 開發階段未登入時暫時抓第一位使用者
-    if request.user.is_authenticated:
-        user = request.user
-    else:
-        user = User.objects.first()
+    """取得目前使用者最近 10 次市場買菜成績。"""
+    user = _get_current_user(request)
 
     if user is None:
         return Response(
@@ -681,31 +731,56 @@ def get_market_shopping_history(request):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # 掃描這個遊戲類型底下所有 session，篩出這位使用者已完成的場次
     all_sessions = session_service.list_sessions(GAME_TYPE)
+
     finished_sessions = [
-        s
-        for s in all_sessions
-        if s["status"] == "finished" and s["state"].get("user_id") == user.id
+        session
+        for session in all_sessions
+        if session["status"] == "finished"
+        and session["state"].get("user_id") == user.id
+        and session.get("result") is not None
     ]
 
-    # 取得最近 10 次遊戲紀錄
-    finished_sessions.sort(key=lambda s: s["result"]["completed_at"], reverse=True)
-    recent_sessions = finished_sessions[:10]
+    finished_sessions.sort(
+        key=lambda session: session["result"].get(
+            "completed_at",
+            "",
+        ),
+        reverse=True,
+    )
 
-    # 折線圖由舊到新顯示
+    recent_sessions = finished_sessions[:10]
     recent_sessions.reverse()
 
-    history = [
-        {
-            "score": session["result"]["first_try_correct_count"],
-            "accuracy": session["result"]["accuracy"],
-            "played_at": session["result"]["completed_at"],
-        }
-        for session in recent_sessions
-    ]
+    history = []
+
+    for session in recent_sessions:
+        result = session["result"]
+
+        history.append(
+            {
+                "score": result.get(
+                    "score",
+                    result.get(
+                        "first_try_correct_count",
+                        0,
+                    ),
+                ),
+                "accuracy": result.get(
+                    "accuracy",
+                    0,
+                ),
+                "played_at": result.get(
+                    "completed_at"
+                ),
+            }
+        )
 
     return Response(
-        {"success": True, "data": history, "error": None},
+        {
+            "success": True,
+            "data": history,
+            "error": None,
+        },
         status=status.HTTP_200_OK,
     )
