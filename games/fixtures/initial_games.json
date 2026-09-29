@@ -1,0 +1,78 @@
+[
+  {
+    "model": "games.gamecategory",
+    "pk": 1,
+    "fields": {
+      "category_name": "注意力",
+      "category_description": "注意力訓練與評估"
+    }
+  },
+  {
+    "model": "games.gamecategory",
+    "pk": 2,
+    "fields": {
+      "category_name": "執行功能",
+      "category_description": "執行功能與認知靈活性訓練"
+    }
+  },
+  {
+    "model": "games.gamecategory",
+    "pk": 3,
+    "fields": {
+      "category_name": "工作記憶",
+      "category_description": "工作記憶與短期記憶訓練"
+    }
+  },
+  {
+    "model": "games.gamecategory",
+    "pk": 4,
+    "fields": {
+      "category_name": "數學",
+      "category_description": "數學計算與金錢運算訓練"
+    }
+  },
+  {
+    "model": "games.gamecategory",
+    "pk": 5,
+    "fields": {
+      "category_name": "視覺空間",
+      "category_description": "視覺空間與路徑識別訓練"
+    }
+  },
+  {
+    "model": "games.game",
+    "pk": 1,
+    "fields": {
+      "game_category": 4,
+      "game_name": "市場買菜",
+      "game_description": "食材採買與金錢找零計算訓練",
+      "code": "market_shopping",
+      "default_difficulty": "easy",
+      "is_enabled": true
+    }
+  },
+  {
+    "model": "games.game",
+    "pk": 2,
+    "fields": {
+      "game_category": 5,
+      "game_name": "菜市場找路",
+      "game_description": "菜市場路線與空間辨識訓練",
+      "code": "market_route",
+      "default_difficulty": "easy",
+      "is_enabled": true
+    }
+  },
+  {
+    "model": "games.game",
+    "pk": 3,
+    "fields": {
+      "game_category": 2,
+      "game_name": "整理菜籃遊戲",
+      "game_description": "菜籃分類與認知彈性訓練",
+      "code": "market_sort",
+      "default_difficulty": "easy",
+      "is_enabled": true
+    }
+  }
+]
