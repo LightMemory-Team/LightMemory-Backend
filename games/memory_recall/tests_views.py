@@ -11,13 +11,15 @@ finish → result），驗證規格書「三、前測設計」「四、正式賽
 
 import shutil
 from pathlib import Path
+from unittest.mock import patch
 
+from django.test import SimpleTestCase
 from rest_framework.test import APITestCase
 
 from games import session_service
 from users.models import User
 
-from .views import GAME_TYPE
+from .views import GAME_TYPE, _pick_distractor
 
 CONFIG_URL = "/api/games/memory-recall/config/"
 START_URL = "/api/games/memory-recall/start/"
@@ -68,11 +70,17 @@ class MemoryRecallTestCase(APITestCase):
             format="json",
         )
 
+    def _current_answer(self, session_id):
+        """round/ 不回傳答案，測試直接讀後端 state 裡的正解。"""
+        return session_service.get_session(GAME_TYPE, session_id)["state"][
+            "current_item"
+        ]
+
     def _answer_correctly(self, session_id):
         """取得目前題目並選正確答案，回傳 answer 的回應 data。"""
         question = self._get_round(session_id)
         response = self._answer(
-            session_id, question["round_number"], question["target_item"]
+            session_id, question["round_number"], self._current_answer(session_id)
         )
         return response.data["data"]
 
@@ -98,6 +106,15 @@ class ConfigApiTests(MemoryRecallTestCase):
         self.assertEqual(data["promote_streak"], 3)
         self.assertEqual(data["promote_bonus_seconds"], 15)
 
+    def test_has_item_pools_and_no_removed_timing_fields(self):
+        data = self.client.get(CONFIG_URL).data["data"]
+
+        self.assertEqual(
+            set(data["stage_item_pools"]), {"basic", "intermediate", "advanced"}
+        )
+        self.assertNotIn("memorize_time_ms", data)
+        self.assertNotIn("delay_ms", data)
+
 
 class StartApiTests(MemoryRecallTestCase):
     """POST /api/games/memory-recall/start/"""
@@ -108,6 +125,14 @@ class StartApiTests(MemoryRecallTestCase):
         self.assertTrue(data["is_pretest"])
         self.assertEqual(data["current_stage"], "basic")
         self.assertIsNone(data["expires_at"])
+
+    def test_returns_seed_item_that_is_first_round_answer(self):
+        data = self._start()
+
+        question = self._get_round(data["session_id"])
+
+        self.assertIn(data["seed_item"], question["option_items"])
+        self.assertEqual(self._current_answer(data["session_id"]), data["seed_item"])
 
     def test_returning_player_gets_official_round_with_expiry(self):
         # 先完整跑完一場前測
@@ -124,17 +149,24 @@ class StartApiTests(MemoryRecallTestCase):
 
 
 class RoundApiTests(MemoryRecallTestCase):
-    """GET /api/games/memory-recall/round/：回想階段固定 2 選 1。"""
+    """GET /api/games/memory-recall/round/：1-back 固定 2 張卡片。"""
 
-    def test_basic_stage_offers_two_options_including_target(self):
+    def test_response_does_not_reveal_answer(self):
         session_id = self._start()["session_id"]
 
         question = self._get_round(session_id)
 
-        self.assertEqual(len(question["option_items"]), 2)
-        self.assertIn(question["target_item"], question["option_items"])
+        self.assertEqual(set(question), {"round_number", "stage", "option_items"})
 
-    def test_advanced_stage_offers_two_options_including_target(self):
+    def test_basic_stage_offers_two_distinct_options_including_answer(self):
+        session_id = self._start()["session_id"]
+
+        question = self._get_round(session_id)
+
+        self.assertEqual(len(set(question["option_items"])), 2)
+        self.assertIn(self._current_answer(session_id), question["option_items"])
+
+    def test_advanced_stage_offers_two_distinct_options_including_answer(self):
         session_id = self._start_official_session()
         for _ in range(6):  # basic -> intermediate -> advanced
             self._answer_correctly(session_id)
@@ -142,8 +174,29 @@ class RoundApiTests(MemoryRecallTestCase):
         question = self._get_round(session_id)
 
         self.assertEqual(question["stage"], "advanced")
-        self.assertEqual(len(question["option_items"]), 2)
-        self.assertIn(question["target_item"], question["option_items"])
+        self.assertEqual(len(set(question["option_items"])), 2)
+        self.assertIn(self._current_answer(session_id), question["option_items"])
+
+    def test_other_card_becomes_next_answer_after_correct_answer(self):
+        session_id = self._start()["session_id"]
+        question = self._get_round(session_id)
+        answer = self._current_answer(session_id)
+        other_card = next(i for i in question["option_items"] if i != answer)
+
+        self._answer(session_id, question["round_number"], answer)
+
+        self.assertEqual(self._current_answer(session_id), other_card)
+        self.assertIn(other_card, self._get_round(session_id)["option_items"])
+
+    def test_other_card_becomes_next_answer_after_wrong_answer(self):
+        session_id = self._start()["session_id"]
+        question = self._get_round(session_id)
+        answer = self._current_answer(session_id)
+        other_card = next(i for i in question["option_items"] if i != answer)
+
+        self._answer(session_id, question["round_number"], other_card)
+
+        self.assertEqual(self._current_answer(session_id), other_card)
 
 
 class PretestFlowTests(MemoryRecallTestCase):
@@ -223,9 +276,8 @@ class OfficialGameFlowTests(MemoryRecallTestCase):
         self._answer_correctly(session_id)
 
         question = self._get_round(session_id)
-        wrong_item = next(
-            item for item in question["option_items"] if item != question["target_item"]
-        )
+        answer = self._current_answer(session_id)
+        wrong_item = next(item for item in question["option_items"] if item != answer)
         result = self._answer(session_id, question["round_number"], wrong_item).data[
             "data"
         ]
@@ -265,7 +317,7 @@ class ErrorHandlingTests(MemoryRecallTestCase):
         question = self._get_round(session_id)
 
         response = self._answer(
-            session_id, question["round_number"] + 1, question["target_item"]
+            session_id, question["round_number"] + 1, self._current_answer(session_id)
         )
 
         self.assertEqual(response.status_code, 400)
@@ -322,7 +374,7 @@ class ErrorHandlingTests(MemoryRecallTestCase):
         session_service.set_current_question(GAME_TYPE, session_id, current_question)
 
         response = self._answer(
-            session_id, question["round_number"], question["target_item"]
+            session_id, question["round_number"], self._current_answer(session_id)
         )
 
         self.assertEqual(response.status_code, 410)
@@ -358,3 +410,35 @@ class ResultApiTests(MemoryRecallTestCase):
 
         self.assertTrue(response.data["success"])
         self.assertEqual(response.data["data"]["session_result"], finish_data)
+
+
+class PickDistractorTests(SimpleTestCase):
+    """_pick_distractor：高階同組為主、有機率換組。"""
+
+    ADVANCED_ITEMS = {
+        "馬鈴薯泥",
+        "馬鈴薯塊",
+        "紅蘿蔔泥",
+        "紅蘿蔔塊",
+        "洋蔥圈",
+        "洋蔥絲",
+    }
+
+    def test_basic_distractor_is_other_basic_item(self):
+        distractor = _pick_distractor("basic", "馬鈴薯")
+
+        self.assertIn(distractor, {"胡蘿蔔", "洋蔥"})
+
+    @patch("games.memory_recall.views.random.random", return_value=0.0)
+    def test_advanced_picks_same_group_other_form(self, _):
+        self.assertEqual(_pick_distractor("advanced", "馬鈴薯泥"), "馬鈴薯塊")
+
+    @patch("games.memory_recall.views.random.random", return_value=0.99)
+    def test_advanced_can_switch_to_other_group(self, _):
+        distractor = _pick_distractor("advanced", "馬鈴薯泥")
+
+        self.assertIn(distractor, self.ADVANCED_ITEMS - {"馬鈴薯泥", "馬鈴薯塊"})
+
+    def test_advanced_with_non_advanced_answer_picks_any_advanced_item(self):
+        # 剛從 intermediate 升上來，正解還是調味料
+        self.assertIn(_pick_distractor("advanced", "鹽巴"), self.ADVANCED_ITEMS)

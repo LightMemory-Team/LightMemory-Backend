@@ -15,6 +15,11 @@ def _load():
         return json.load(f)
 
 
+def load_item_pools():
+    """回傳三階段完整物品庫，給 config/ 的 stage_item_pools 用。"""
+    return _load()
+
+
 def load_items(stage):
     """回傳 basic/intermediate 階段的物品清單，例如 [{"item": "馬鈴薯"}, ...]。"""
     return _load()[stage]

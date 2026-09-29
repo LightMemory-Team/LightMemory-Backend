@@ -8,15 +8,14 @@ from rest_framework.response import Response
 from games import session_service
 from users.models import User
 
-from .item_bank import load_advanced_groups, load_items
+from .item_bank import load_advanced_groups, load_item_pools, load_items
 from .score import calculate_step_score, calculate_total_score
 
 GAME_TYPE = "memory_recall"
 
 STAGE_ORDER = ["basic", "intermediate", "advanced"]
 
-MEMORIZE_TIME_MS = 1200
-DELAY_MS = 1000
+SAME_GROUP_DISTRACTOR_RATE = 0.7
 
 PRETEST_TOTAL_ROUNDS = 4
 BASE_TIME_LIMIT_SECONDS = 60
@@ -91,8 +90,7 @@ def config(request):
         "base_time_limit_seconds": BASE_TIME_LIMIT_SECONDS,
         "promote_streak": PROMOTE_STREAK,
         "promote_bonus_seconds": PROMOTE_BONUS_SECONDS,
-        "memorize_time_ms": MEMORIZE_TIME_MS,
-        "delay_ms": DELAY_MS,
+        "stage_item_pools": load_item_pools(),
     }
     return Response({"success": True, "data": data, "error": None})
 
@@ -119,11 +117,13 @@ def start(request):
             timezone.now() + timedelta(seconds=BASE_TIME_LIMIT_SECONDS)
         ).isoformat()
 
+    seed_item = _pick_seed("basic")
     initial_state = {
         "user_id": user.id,
         "is_pretest": is_pretest,
         "current_stage": "basic",
         "correct_streak": 0,
+        "current_item": seed_item,
         "expires_at": expires_at,
     }
     session = session_service.create_session(GAME_TYPE, initial_state=initial_state)
@@ -133,40 +133,51 @@ def start(request):
         "is_pretest": is_pretest,
         "current_stage": "basic",
         "expires_at": expires_at,
+        "seed_item": seed_item,
     }
     return Response({"success": True, "data": data, "error": None})
 
 
-OPTION_COUNT = 2
-
-
-def _pick_question(stage):
-    """依階段出題，回想階段固定 2 選 1（目標物 + 1 個干擾物）。
-
-    advanced 先隨機選一個形狀分組，組內固定就是 2 個型態，全部當選項；
-    basic/intermediate 題庫維持 3 種物品，出題時隨機抽 2 種（含目標物）
-    當選項，增加變化。
-    """
+def _stage_item_names(stage):
+    """回傳該階段所有物品名稱，advanced 會把各組攤平成一個清單。"""
     if stage == "advanced":
-        group = random.choice(load_advanced_groups())
-        pool = group["items"]
-        group_name = group["group"]
-        options = pool
-    else:
-        pool = load_items(stage)
-        group_name = None
-        options = random.sample(pool, OPTION_COUNT)
+        return [i["item"] for g in load_advanced_groups() for i in g["items"]]
+    return [i["item"] for i in load_items(stage)]
 
-    target = random.choice(options)
-    option_items = [item["item"] for item in options]
-    random.shuffle(option_items)
 
-    return {
-        "stage": stage,
-        "group": group_name,
-        "target_item": target["item"],
-        "option_items": option_items,
-    }
+def _find_group(item):
+    """回傳物品所屬的高階分組，不是高階物品就回傳 None。"""
+    for group in load_advanced_groups():
+        if item in [i["item"] for i in group["items"]]:
+            return group
+    return None
+
+
+def _pick_seed(stage):
+    return random.choice(_stage_item_names(stage))
+
+
+def _pick_distractor(stage, answer_item):
+    """從目前階段抽這一輪的干擾物（不能跟正解相同）。"""
+    if stage == "advanced":
+        group = _find_group(answer_item)
+        if group is not None:
+            # 不能每次都抽同組：干擾物會變下一輪正解，全抽同組就會卡在同一組兩型態來回
+            if random.random() < SAME_GROUP_DISTRACTOR_RATE:
+                return next(
+                    i["item"] for i in group["items"] if i["item"] != answer_item
+                )
+            return random.choice(
+                [
+                    i["item"]
+                    for g in load_advanced_groups()
+                    if g["group"] != group["group"]
+                    for i in g["items"]
+                ]
+            )
+    return random.choice(
+        [name for name in _stage_item_names(stage) if name != answer_item]
+    )
 
 
 # 3. 取得單一題目內容
@@ -192,24 +203,37 @@ def round_view(request):
             status=409,
         )
 
-    question = _pick_question(session["state"]["current_stage"])
+    state = session["state"]
+    stage = state["current_stage"]
+    answer_item = state["current_item"]
+    distractor_item = _pick_distractor(stage, answer_item)
+    option_items = [answer_item, distractor_item]
+    random.shuffle(option_items)
+    group = _find_group(answer_item)
     round_number = session["question_number"] + 1
-    question["round_number"] = round_number
-    question["round_expires_at"] = (
-        None
-        if session["state"]["is_pretest"]
-        else (timezone.now() + timedelta(seconds=ROUND_TIMEOUT_SECONDS)).isoformat()
-    )
-    session_service.set_current_question(GAME_TYPE, session_id, question)
 
-    data = {
-        "round_number": round_number,
-        "stage": question["stage"],
-        "target_item": question["target_item"],
-        "memorize_time_ms": MEMORIZE_TIME_MS,
-        "delay_ms": DELAY_MS,
-        "option_items": question["option_items"],
-    }
+    session_service.set_current_question(
+        GAME_TYPE,
+        session_id,
+        {
+            "round_number": round_number,
+            "stage": stage,
+            "group": group["group"] if group else None,
+            "target_item": answer_item,
+            "distractor_item": distractor_item,
+            "option_items": option_items,
+            "round_expires_at": (
+                None
+                if state["is_pretest"]
+                else (
+                    timezone.now() + timedelta(seconds=ROUND_TIMEOUT_SECONDS)
+                ).isoformat()
+            ),
+        },
+    )
+
+    # 正解只留在後端，回傳不含 target_item
+    data = {"round_number": round_number, "stage": stage, "option_items": option_items}
     return Response({"success": True, "data": data, "error": None})
 
 
@@ -357,6 +381,7 @@ def round_answer(request):
         state={
             "current_stage": stage,
             "correct_streak": correct_streak,
+            "current_item": current_question["distractor_item"],
             "expires_at": expires_at,
         },
     )
