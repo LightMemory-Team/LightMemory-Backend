@@ -65,6 +65,8 @@ class DiaryCalendarView(APIView):
             return Response({"error": {"code": "INVALID_IMAGE", "message": "這張照片無法使用，換一張試試看吧"}}, status=400)
 
         image_url = external.upload_to_firebase(photo, "images")
+        if image_url is None:
+            return Response({"error": {"code": "UPLOAD_FAILED", "message": "照片上傳失敗，請再試一次"}}, status=500)
         first_question = ai_gen.generate_first_question()
 
         diary = Diary.objects.create(
@@ -102,8 +104,12 @@ class DiaryReplyView(APIView):
         round_index = int(round_index)
 
         transcript = external.transcribe_audio(audio)
+        if transcript is None:
+            return Response({"error": {"code": "TRANSCRIPTION_FAILED", "message": "語音辨識失敗，請再錄一次"}}, status=500)
         audio.seek(0)
         audio_url = external.upload_to_firebase(audio, "audio")
+        if audio_url is None:
+            return Response({"error": {"code": "UPLOAD_FAILED", "message": "錄音上傳失敗，請再試一次"}}, status=500)
 
         question_for_this_round = diary.pending_question or diary.first_question
         DiaryReply.objects.create(
