@@ -1,29 +1,31 @@
-"""三款遊戲共用的 session 狀態儲存。
+"""三款遊戲共用的 session 狀態儲存（原暫時用 JSON 檔案，現已依規格書第四、五點全面換成資料庫實作）。
 
-【架構設計與演進說明】：
-1. 設計目的：
-   把「怎麼存資料」跟「遊戲邏輯」分開。各遊戲的 views.py 只呼叫這裡的函式，不直接碰資料庫或底層檔案。
-   依據《遊戲系統共用資料表規格書》第四節與第五節設計，本模組作為 GameSession / GameStepLog 之 Facade。
-   對外維持 8 個函式簽名與回傳 dict 形狀不變（擴充 is_pretest、avg_response_time_ms 等可選參數），
-   內部已正式從原先的 JSON 檔案儲存遷移為透過 Django ORM 操作關聯式資料庫（GameSession 與 GameStepLog 資料表）。
-   各遊戲的 views.py 完全不用改動即可無縫接軌。
+設計目的：把「怎麼存資料」跟「遊戲邏輯」分開。各遊戲的 views.py 只呼叫這裡
+的函式，不直接碰檔案或 JSON。之後換成真正的資料庫時，只需要重寫這個檔案
+內部的實作（改成用 Django ORM 讀寫），各遊戲的 views.py 完全不用改。
 
-2. 儲存機制遷移歷程（JSON 檔案 -> 關聯式資料庫）：
-   - 原暫時方案（v1.0）：一個 session 存成一個 JSON 檔案（原預設路徑 games/data/sessions/<game_type>/<id>.json），
-     寫檔採用暫存檔原子替換方式，不同遊戲不同 session 互不干擾。
-   - 現行正式方案（v2.0）：一個 session 對應一筆 GameSession 資料表紀錄，`game_type` 透過外鍵關聯到 Game.code，
-     逐輪明細則由 GameStepLog 反查組成 `step_records`。原 JSON 檔案讀寫（SESSION_ROOT_DIR）已全數由資料庫取代。
+共通欄位（每個遊戲都有）：
+    session_id, game_type, status, question_number, current_question,
+    step_records, result
+擴充共通欄位（規格書第四節）：
+    is_pretest, avg_response_time_ms
 
-3. 共通欄位（依 GAME_FRAMEWORK.md 校準）：
-   - 原始 8 個共通欄位：
-       session_id, game_type, status, question_number, current_question,
-       step_records, result, state
-   - 本次擴充共通欄位：
-       is_pretest (是否為前測), avg_response_time_ms (平均反應時間)
+遊戲專屬欄位（例如 market_route 的 current_stage、correct_streak）一律放在
+`state`（一個 dict）裡，各遊戲自己決定要放什麼、怎麼讀寫。
 
-4. 遊戲專屬欄位（一律放進 state）：
-   遊戲專屬欄位（例如 market_route 的 current_stage、correct_streak、exposure_time_ms）一律放在
-   `state`（一個 dict / JSONField）裡，各遊戲自己決定要放什麼、怎麼讀寫，共用模組不理解其內容。
+一個 session 一個 JSON 檔案（games/data/sessions/<game_type>/<id>.json），
+不同遊戲、不同 session 互不干擾；換成資料庫後，一個 session 自然對應一筆
+GameSession row，`game_type` 會變成該筆資料的一個欄位。
+
+這是單一開發者本機測試情境，不做檔案鎖（file locking）：
+- 正常遊戲流程本來就是一支 API 打完才打下一支，不會同時併發寫同一個 session
+- 加鎖對一個即將被資料庫取代的暫時方案來說是過度工程
+唯一做的保護是寫檔用「先寫暫存檔、再原子性換名」，避免寫到一半當機造成檔案損毀。
+
+【現行正式資料庫實作（v2.0）】：
+依據規格書第四節與第五節設計，本模組作為 GameSession / GameStepLog 之 Facade。
+對外維持 8 個函式簽名與回傳 dict 形狀不變（加上 is_pretest、avg_response_time_ms 等可選參數），
+內部改為透過 Django ORM 操作 GameSession 與 GameStepLog。
 """
 
 from django.core.exceptions import ValidationError
