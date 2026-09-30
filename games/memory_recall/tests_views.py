@@ -27,6 +27,9 @@ ROUND_URL = "/api/games/memory-recall/round/"
 ROUND_ANSWER_URL = "/api/games/memory-recall/round/answer/"
 FINISH_URL = "/api/games/memory-recall/finish/"
 
+INTERMEDIATE_ITEMS = {"辣椒粉", "鮮奶油", "咖哩塊"}
+ADVANCED_ITEMS = {"馬鈴薯泥", "馬鈴薯塊", "紅蘿蔔泥", "紅蘿蔔塊", "洋蔥圈", "洋蔥絲"}
+
 
 def result_url(session_id):
     return f"/api/games/memory-recall/result/{session_id}/"
@@ -271,6 +274,37 @@ class OfficialGameFlowTests(MemoryRecallTestCase):
         self.assertEqual(third["bonus_seconds_granted"], 15)
         # basic 答對 3 題：10 + 10 + 10
         self.assertEqual(first["score_earned"], 10)
+        self.assertIn(third["seed_item"], INTERMEDIATE_ITEMS)
+        self.assertEqual(self._current_answer(session_id), third["seed_item"])
+
+    def test_seed_item_is_null_without_promotion(self):
+        session_id = self._start_official_session()
+
+        result = self._answer_correctly(session_id)
+
+        self.assertEqual(result["action"], "next_question")
+        self.assertIsNone(result["seed_item"])
+
+    def test_round_after_promotion_has_only_new_stage_items(self):
+        # 前端回報：升階進 intermediate 第一輪出現 ['洋蔥', '黑糖']
+        session_id = self._start_official_session()
+        for _ in range(3):
+            self._answer_correctly(session_id)
+
+        question = self._get_round(session_id)
+
+        self.assertEqual(question["stage"], "intermediate")
+        self.assertTrue(set(question["option_items"]) <= INTERMEDIATE_ITEMS)
+
+    def test_promotion_to_advanced_gives_advanced_seed(self):
+        session_id = self._start_official_session()
+        results = [self._answer_correctly(session_id) for _ in range(6)]
+
+        question = self._get_round(session_id)
+
+        self.assertEqual(results[-1]["action"], "promoted")
+        self.assertIn(results[-1]["seed_item"], ADVANCED_ITEMS)
+        self.assertTrue(set(question["option_items"]) <= ADVANCED_ITEMS)
 
     def test_wrong_answer_scores_zero_and_resets_streak_without_demotion(self):
         session_id = self._start_official_session()
@@ -429,15 +463,6 @@ class ResultApiTests(MemoryRecallTestCase):
 class PickDistractorTests(SimpleTestCase):
     """_pick_distractor：高階同組為主、有機率換組。"""
 
-    ADVANCED_ITEMS = {
-        "馬鈴薯泥",
-        "馬鈴薯塊",
-        "紅蘿蔔泥",
-        "紅蘿蔔塊",
-        "洋蔥圈",
-        "洋蔥絲",
-    }
-
     def test_basic_distractor_is_other_basic_item(self):
         distractor = _pick_distractor("basic", "馬鈴薯")
 
@@ -451,8 +476,4 @@ class PickDistractorTests(SimpleTestCase):
     def test_advanced_can_switch_to_other_group(self, _):
         distractor = _pick_distractor("advanced", "馬鈴薯泥")
 
-        self.assertIn(distractor, self.ADVANCED_ITEMS - {"馬鈴薯泥", "馬鈴薯塊"})
-
-    def test_advanced_with_non_advanced_answer_picks_any_advanced_item(self):
-        # 剛從 intermediate 升上來，正解還是調味料
-        self.assertIn(_pick_distractor("advanced", "鹽巴"), self.ADVANCED_ITEMS)
+        self.assertIn(distractor, ADVANCED_ITEMS - {"馬鈴薯泥", "馬鈴薯塊"})

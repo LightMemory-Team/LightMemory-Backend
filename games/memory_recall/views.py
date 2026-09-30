@@ -348,6 +348,8 @@ def round_answer(request):
     correct_streak = state["correct_streak"] + 1 if is_correct else 0
     bonus_seconds_granted = 0
     expires_at = state["expires_at"]
+    next_item = current_question["distractor_item"]
+    seed_item = None
 
     stage_index = STAGE_ORDER.index(stage)
     promoted = (
@@ -364,6 +366,9 @@ def round_answer(request):
             datetime.fromisoformat(expires_at)
             + timedelta(seconds=PROMOTE_BONUS_SECONDS)
         ).isoformat()
+        # 換新階段的種子，否則下一輪正解會是舊階段物品，跟新階段干擾物混在一起
+        seed_item = _pick_seed(stage)
+        next_item = seed_item
 
     question_number = session["question_number"] + 1
 
@@ -381,7 +386,7 @@ def round_answer(request):
         state={
             "current_stage": stage,
             "correct_streak": correct_streak,
-            "current_item": current_question["distractor_item"],
+            "current_item": next_item,
             "expires_at": expires_at,
         },
     )
@@ -394,6 +399,7 @@ def round_answer(request):
         "bonus_seconds_granted": bonus_seconds_granted,
         "expires_at": expires_at,
         "score_earned": score_earned,
+        "seed_item": seed_item,
     }
     return Response({"success": True, "data": data, "error": None})
 
