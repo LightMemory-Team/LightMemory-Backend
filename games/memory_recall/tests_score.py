@@ -2,7 +2,7 @@
 
 from django.test import SimpleTestCase
 
-from .score import calculate_step_score, calculate_total_score
+from .score import calculate_step_score, calculate_total_score, normalize_to_100
 
 
 class CalculateStepScoreTests(SimpleTestCase):
@@ -35,3 +35,18 @@ class CalculateTotalScoreTests(SimpleTestCase):
 
     def test_empty_list_is_zero(self):
         self.assertEqual(calculate_total_score([]), 0)
+
+
+class NormalizeTo100Tests(SimpleTestCase):
+    def test_zero_raw_score_is_zero(self):
+        self.assertEqual(normalize_to_100(0), 0)
+
+    def test_theoretical_max_is_100(self):
+        self.assertEqual(normalize_to_100(693), 100)
+
+    def test_rounds_to_nearest_integer(self):
+        # 214 / 693 * 100 = 30.88
+        self.assertEqual(normalize_to_100(214), 31)
+
+    def test_above_theoretical_max_is_capped_at_100(self):
+        self.assertEqual(normalize_to_100(1000), 100)

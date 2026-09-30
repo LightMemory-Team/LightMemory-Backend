@@ -9,7 +9,7 @@ from games import session_service
 from users.models import User
 
 from .item_bank import load_advanced_groups, load_item_pools, load_items
-from .score import calculate_step_score, calculate_total_score
+from .score import calculate_step_score, calculate_total_score, normalize_to_100
 
 GAME_TYPE = "memory_recall"
 
@@ -432,6 +432,7 @@ def _build_result(session):
         "final_stage": state["current_stage"],
         "total_bonus_seconds": total_bonus_seconds,
         "total_score": None if is_pretest else total_score,
+        "score": None if is_pretest else normalize_to_100(total_score),
     }
 
 

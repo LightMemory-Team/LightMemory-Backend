@@ -236,6 +236,7 @@ class PretestFlowTests(MemoryRecallTestCase):
         self.assertEqual(data["total_rounds"], 4)
         self.assertEqual(data["final_stage"], "basic")
         self.assertIsNone(data["total_score"])
+        self.assertIsNone(data["score"])
 
     def test_calling_finish_twice_returns_same_result_without_recalculating(self):
         session_id = self._start()["session_id"]
@@ -300,6 +301,19 @@ class OfficialGameFlowTests(MemoryRecallTestCase):
         self.assertEqual(data["total_bonus_seconds"], 15)
         self.assertEqual(data["final_stage"], "intermediate")
         self.assertIsNotNone(data["total_score"])
+
+    def test_finish_returns_x_score_converted_from_raw_score(self):
+        session_id = self._start_official_session()
+        for _ in range(3):  # basic 答對 3 題：原始分 30
+            self._answer_correctly(session_id)
+
+        data = self.client.post(
+            FINISH_URL, {"session_id": session_id}, format="json"
+        ).data["data"]
+
+        self.assertEqual(data["total_score"], 30)
+        # 30 / 693 * 100 = 4.33
+        self.assertEqual(data["score"], 4)
 
 
 class ErrorHandlingTests(MemoryRecallTestCase):
