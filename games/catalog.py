@@ -30,4 +30,9 @@ GAMES = [
         "title": "煮菜過程",
         "is_developed": True,
     },
+    {
+        "id": "fridge_check",
+        "title": "冰箱檢查",
+        "is_developed": True,
+    },
 ]

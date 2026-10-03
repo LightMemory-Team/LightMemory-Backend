@@ -6,6 +6,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from games import session_service
+from games.dda import DDAConfig, apply_answer
 from users.models import User
 
 from .item_bank import load_advanced_groups, load_item_pools, load_items
@@ -180,6 +181,43 @@ def _pick_distractor(stage, answer_item):
     )
 
 
+class MemoryRecallDDAStrategy:
+    """memory_recall 的 DDA 策略：處理升階時的時間獎勵與新階段種子物品抽取。"""
+
+    def on_correct(
+        self, state: dict, config: DDAConfig, *, is_fast: bool = False
+    ) -> dict:
+        return {}
+
+    def on_wrong(self, state: dict, config: DDAConfig) -> dict:
+        return {}
+
+    def on_promote(
+        self, state: dict, config: DDAConfig, new_stage: str
+    ) -> dict:
+        expires_at = state.get("expires_at")
+        new_expires_at = expires_at
+        if expires_at:
+            new_expires_at = (
+                datetime.fromisoformat(expires_at)
+                + timedelta(seconds=PROMOTE_BONUS_SECONDS)
+            ).isoformat()
+        seed_item = _pick_seed(new_stage)
+        return {
+            "expires_at": new_expires_at,
+            "current_item": seed_item,
+            "bonus_seconds_granted": PROMOTE_BONUS_SECONDS,
+            "seed_item": seed_item,
+        }
+
+
+DDA_CONFIG = DDAConfig(
+    stage_order=STAGE_ORDER,
+    promote_streak=PROMOTE_STREAK,
+)
+DDA_STRATEGY = MemoryRecallDDAStrategy()
+
+
 # 3. 取得單一題目內容
 @api_view(["GET"])
 def round_view(request):
@@ -345,30 +383,35 @@ def round_answer(request):
         },
     )
 
-    correct_streak = state["correct_streak"] + 1 if is_correct else 0
-    bonus_seconds_granted = 0
-    expires_at = state["expires_at"]
-    next_item = current_question["distractor_item"]
-    seed_item = None
-
-    stage_index = STAGE_ORDER.index(stage)
-    promoted = (
-        not is_pretest
-        and is_correct
-        and correct_streak >= PROMOTE_STREAK
-        and stage_index < len(STAGE_ORDER) - 1
-    )
-    if promoted:
-        stage = STAGE_ORDER[stage_index + 1]
-        correct_streak = 0
-        bonus_seconds_granted = PROMOTE_BONUS_SECONDS
-        expires_at = (
-            datetime.fromisoformat(expires_at)
-            + timedelta(seconds=PROMOTE_BONUS_SECONDS)
-        ).isoformat()
-        # 換新階段的種子，否則下一輪正解會是舊階段物品，跟新階段干擾物混在一起
-        seed_item = _pick_seed(stage)
-        next_item = seed_item
+    if is_pretest:
+        correct_streak = state["correct_streak"] + 1 if is_correct else 0
+        updated_state = {
+            "current_stage": stage,
+            "correct_streak": correct_streak,
+            "current_item": current_question["distractor_item"],
+            "expires_at": state["expires_at"],
+        }
+        promoted = False
+        bonus_seconds_granted = 0
+        seed_item = None
+    else:
+        updated_state, action_status = apply_answer(
+            state,
+            DDA_CONFIG,
+            DDA_STRATEGY,
+            is_correct=is_correct,
+        )
+        promoted = (action_status == "promoted")
+        if promoted:
+            bonus_seconds_granted = updated_state.pop(
+                "bonus_seconds_granted", PROMOTE_BONUS_SECONDS
+            )
+            seed_item = updated_state.pop("seed_item", None)
+        else:
+            bonus_seconds_granted = 0
+            seed_item = None
+            updated_state["current_item"] = current_question["distractor_item"]
+            updated_state["expires_at"] = state["expires_at"]
 
     question_number = session["question_number"] + 1
 
@@ -383,12 +426,7 @@ def round_answer(request):
         GAME_TYPE,
         session_id,
         question_number=question_number,
-        state={
-            "current_stage": stage,
-            "correct_streak": correct_streak,
-            "current_item": next_item,
-            "expires_at": expires_at,
-        },
+        state=updated_state,
     )
 
     data = {
