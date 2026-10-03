@@ -25,4 +25,9 @@ GAMES = [
         "title": "整理菜籃遊戲",
         "is_developed": True,
     },
+    {
+        "id": "memory_recall",
+        "title": "煮菜過程",
+        "is_developed": True,
+    },
 ]
