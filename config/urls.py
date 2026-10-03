@@ -22,4 +22,5 @@ urlpatterns = [
     path('api/home/', include('home.urls') ), # 首頁連線測試*
     path('api/social/', include('social.urls')),# 通知相關功能
     path('api/users/', include('users.urls')), # 使用者
+    path('api/diary/', include('diary.urls')), # 聲影日記
 ]
