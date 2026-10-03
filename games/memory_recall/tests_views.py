@@ -11,7 +11,6 @@ finish → result），驗證規格書「三、前測設計」「四、正式賽
 
 import shutil
 from pathlib import Path
-from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from rest_framework.test import APITestCase
@@ -19,7 +18,7 @@ from rest_framework.test import APITestCase
 from games import session_service
 from users.models import User
 
-from .views import GAME_TYPE, _pick_distractor
+from .views import GAME_TYPE, _pick_distractor, _pick_new_item
 
 CONFIG_URL = "/api/games/memory-recall/config/"
 START_URL = "/api/games/memory-recall/start/"
@@ -28,7 +27,12 @@ ROUND_ANSWER_URL = "/api/games/memory-recall/round/answer/"
 FINISH_URL = "/api/games/memory-recall/finish/"
 
 INTERMEDIATE_ITEMS = {"辣椒粉", "鮮奶油", "咖哩塊"}
-ADVANCED_ITEMS = {"馬鈴薯泥", "馬鈴薯塊", "紅蘿蔔泥", "紅蘿蔔塊", "洋蔥圈", "洋蔥絲"}
+ADVANCED_ITEMS = {"馬鈴薯泥", "馬鈴薯塊", "紅蘿蔔片", "紅蘿蔔塊", "洋蔥圈", "洋蔥絲"}
+ADVANCED_GROUPS = [
+    {"馬鈴薯泥", "馬鈴薯塊"},
+    {"紅蘿蔔片", "紅蘿蔔塊"},
+    {"洋蔥圈", "洋蔥絲"},
+]
 
 
 def result_url(session_id):
@@ -152,14 +156,23 @@ class StartApiTests(MemoryRecallTestCase):
 
 
 class RoundApiTests(MemoryRecallTestCase):
-    """GET /api/games/memory-recall/round/：1-back 固定 2 張卡片。"""
+    """GET /api/games/memory-recall/round/：2 張選項 + 1 個新物品。"""
 
     def test_response_does_not_reveal_answer(self):
         session_id = self._start()["session_id"]
 
         question = self._get_round(session_id)
 
-        self.assertEqual(set(question), {"round_number", "stage", "option_items"})
+        self.assertEqual(
+            set(question), {"round_number", "stage", "option_items", "new_item"}
+        )
+
+    def test_new_item_is_not_one_of_the_options(self):
+        session_id = self._start()["session_id"]
+
+        question = self._get_round(session_id)
+
+        self.assertNotIn(question["new_item"], question["option_items"])
 
     def test_basic_stage_offers_two_distinct_options_including_answer(self):
         session_id = self._start()["session_id"]
@@ -180,26 +193,43 @@ class RoundApiTests(MemoryRecallTestCase):
         self.assertEqual(len(set(question["option_items"])), 2)
         self.assertIn(self._current_answer(session_id), question["option_items"])
 
-    def test_other_card_becomes_next_answer_after_correct_answer(self):
+    def test_advanced_options_same_group_and_new_item_from_other_group(self):
+        # 前端回報：高階每輪新物品一直卡在同一組
+        session_id = self._start_official_session()
+        for _ in range(6):  # basic -> intermediate -> advanced
+            self._answer_correctly(session_id)
+
+        for _ in range(5):
+            question = self._get_round(session_id)
+            options = set(question["option_items"])
+            self.assertIn(options, ADVANCED_GROUPS)
+            self.assertNotIn(question["new_item"], options)
+            self._answer(
+                session_id,
+                question["round_number"],
+                self._current_answer(session_id),
+            )
+
+    def test_new_item_becomes_next_answer_after_correct_answer(self):
+        session_id = self._start()["session_id"]
+        question = self._get_round(session_id)
+
+        self._answer(
+            session_id, question["round_number"], self._current_answer(session_id)
+        )
+
+        self.assertEqual(self._current_answer(session_id), question["new_item"])
+        self.assertIn(question["new_item"], self._get_round(session_id)["option_items"])
+
+    def test_new_item_becomes_next_answer_after_wrong_answer(self):
         session_id = self._start()["session_id"]
         question = self._get_round(session_id)
         answer = self._current_answer(session_id)
-        other_card = next(i for i in question["option_items"] if i != answer)
+        wrong_item = next(i for i in question["option_items"] if i != answer)
 
-        self._answer(session_id, question["round_number"], answer)
+        self._answer(session_id, question["round_number"], wrong_item)
 
-        self.assertEqual(self._current_answer(session_id), other_card)
-        self.assertIn(other_card, self._get_round(session_id)["option_items"])
-
-    def test_other_card_becomes_next_answer_after_wrong_answer(self):
-        session_id = self._start()["session_id"]
-        question = self._get_round(session_id)
-        answer = self._current_answer(session_id)
-        other_card = next(i for i in question["option_items"] if i != answer)
-
-        self._answer(session_id, question["round_number"], other_card)
-
-        self.assertEqual(self._current_answer(session_id), other_card)
+        self.assertEqual(self._current_answer(session_id), question["new_item"])
 
 
 class PretestFlowTests(MemoryRecallTestCase):
@@ -460,20 +490,21 @@ class ResultApiTests(MemoryRecallTestCase):
         self.assertEqual(response.data["data"]["session_result"], finish_data)
 
 
-class PickDistractorTests(SimpleTestCase):
-    """_pick_distractor：高階同組為主、有機率換組。"""
+class PickItemTests(SimpleTestCase):
+    """_pick_distractor 與 _pick_new_item 的抽題規則。"""
 
     def test_basic_distractor_is_other_basic_item(self):
         distractor = _pick_distractor("basic", "馬鈴薯")
 
         self.assertIn(distractor, {"胡蘿蔔", "洋蔥"})
 
-    @patch("games.memory_recall.views.random.random", return_value=0.0)
-    def test_advanced_picks_same_group_other_form(self, _):
-        self.assertEqual(_pick_distractor("advanced", "馬鈴薯泥"), "馬鈴薯塊")
+    def test_advanced_distractor_is_always_same_group_other_form(self):
+        self.assertEqual(_pick_distractor("advanced", "紅蘿蔔片"), "紅蘿蔔塊")
 
-    @patch("games.memory_recall.views.random.random", return_value=0.99)
-    def test_advanced_can_switch_to_other_group(self, _):
-        distractor = _pick_distractor("advanced", "馬鈴薯泥")
+    def test_basic_new_item_is_the_item_not_in_options(self):
+        self.assertEqual(_pick_new_item("basic", ["馬鈴薯", "洋蔥"]), "胡蘿蔔")
 
-        self.assertIn(distractor, ADVANCED_ITEMS - {"馬鈴薯泥", "馬鈴薯塊"})
+    def test_advanced_new_item_comes_from_other_group(self):
+        new_item = _pick_new_item("advanced", ["馬鈴薯泥", "馬鈴薯塊"])
+
+        self.assertIn(new_item, ADVANCED_ITEMS - {"馬鈴薯泥", "馬鈴薯塊"})
