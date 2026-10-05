@@ -5,7 +5,7 @@ from rest_framework.response import Response
 
 from games import session_service
 from games.dda import DDAConfig, apply_answer
-from users.models import User
+from games.utils import get_current_user
 
 from .item_bank import load_distractor_item, load_items
 from .market_score import calculate_step_score, calculate_total_score
@@ -71,13 +71,6 @@ DDA_CONFIG = DDAConfig(
 DDA_STRATEGY = RouteDDAStrategy()
 
 
-def _current_user(request):
-    """有登入時使用登入者，開發階段未登入時暫時抓第一位使用者。"""
-    if request.user.is_authenticated:
-        return request.user
-    return User.objects.first()
-
-
 # 1. 取得本場遊戲設定
 @api_view(["GET"])
 def config(request):
@@ -102,7 +95,7 @@ def config(request):
 # 2. 開始一場遊戲，建立 session
 @api_view(["POST"])
 def start(request):
-    user = _current_user(request)
+    user = get_current_user(request)
     if user is None:
         return Response(
             {
