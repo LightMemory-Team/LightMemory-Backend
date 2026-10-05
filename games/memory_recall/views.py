@@ -82,6 +82,8 @@ def config(request):
         "base_time_limit_seconds": BASE_TIME_LIMIT_SECONDS,
         "promote_streak": PROMOTE_STREAK,
         "promote_bonus_seconds": PROMOTE_BONUS_SECONDS,
+        # 正式賽單題作答時限，從前端呼叫 round/ 開始算；前端讀這個值顯示本題倒數
+        "round_timeout_seconds": ROUND_TIMEOUT_SECONDS,
         "stage_item_pools": load_item_pools(),
     }
     return Response({"success": True, "data": data, "error": None})
