@@ -50,12 +50,12 @@ Sep 21, 2026 · @Someone
 
 **升階規則**
 
-- 連對 3 題（`promote_streak`）→ 升階
+- 連對 6 題（`promote_streak`）→ 升階
 - 每次升階獎勵 **+15 秒**（`promote_bonus_seconds`），由後端直接延長 `expires_at`
 - 因不設計降階，一場遊戲最多升階 2 次（basic→intermediate、intermediate→advanced），故最多可獲得 2×15=30 秒額外時間，遊戲時長上限 90 秒
 - **不設計降階**：時間有限，答錯以不加分處理，不讓玩家掉回前一階段浪費時間
 
-升階門檻（連對 3 題）為建議起始值，待長者測試後校準。
+升階門檻（連對 6 題）為建議起始值，待長者測試後校準。
 
 ## 五、計分邏輯
 
@@ -154,7 +154,7 @@ Sep 21, 2026 · @Someone
 | current\_stage | string | "basic" |  |
 | pretest\_total\_rounds | int | 4 | 前測固定輪數 |
 | base\_time\_limit\_seconds | int | 60 | 正式賽時長，前測不使用 |
-| promote\_streak | int | 3 | 連對幾題升階 |
+| promote\_streak | int | 6 | 連對幾題升階 |
 | promote\_bonus\_seconds | int | 15 | 每次升階獎勵秒數 |
 | stage\_item\_pools | object | 見第二節範例 | 各階段物品庫 |
 
@@ -325,6 +325,6 @@ flowchart LR
 ## 九、尚待確認事項
 
 - 高階物品庫的分組資料結構（`groups` 陣列）與前端組確認實際圖片素材如何對應
-- 升階門檻（連對 3 題）、時間獎勵（15 秒）是否合適，待長者測試後校準
+- 升階門檻（連對 6 題）、時間獎勵（15 秒）是否合適，待長者測試後校準
 - 前測固定 4 輪，樣本數較小，正確率基準值可能有雜訊，視測試結果評估是否調整輪數
 - 前測與正式賽物品庫是否重疊（皆從初階蔬菜種類開始），會不會讓正式賽一開始就有印象、影響「測基準」的獨立性，待討論

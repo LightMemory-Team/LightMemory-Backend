@@ -18,7 +18,13 @@ from rest_framework.test import APITestCase
 from games import session_service
 from users.models import User
 
-from .views import GAME_TYPE, _pick_distractor, _pick_new_item
+from .views import (
+    GAME_TYPE,
+    PROMOTE_STREAK,
+    _item_stage,
+    _pick_distractor,
+    _pick_new_item,
+)
 
 CONFIG_URL = "/api/games/memory-recall/config/"
 START_URL = "/api/games/memory-recall/start/"
@@ -26,13 +32,10 @@ ROUND_URL = "/api/games/memory-recall/round/"
 ROUND_ANSWER_URL = "/api/games/memory-recall/round/answer/"
 FINISH_URL = "/api/games/memory-recall/finish/"
 
+BASIC_ITEMS = {"馬鈴薯", "胡蘿蔔", "洋蔥"}
 INTERMEDIATE_ITEMS = {"辣椒粉", "鮮奶油", "咖哩塊"}
 ADVANCED_ITEMS = {"馬鈴薯泥", "馬鈴薯塊", "紅蘿蔔片", "紅蘿蔔塊", "洋蔥圈", "洋蔥絲"}
-ADVANCED_GROUPS = [
-    {"馬鈴薯泥", "馬鈴薯塊"},
-    {"紅蘿蔔片", "紅蘿蔔塊"},
-    {"洋蔥圈", "洋蔥絲"},
-]
+ALL_ITEMS = BASIC_ITEMS | INTERMEDIATE_ITEMS | ADVANCED_ITEMS
 
 
 def result_url(session_id):
@@ -99,6 +102,17 @@ class MemoryRecallTestCase(APITestCase):
         self.client.post(FINISH_URL, {"session_id": pretest_id}, format="json")
         return self._start()["session_id"]
 
+    def _reach_advanced_cards(self):
+        """開一場正式賽並一路答對，直到下一輪卡片是高階物品，回傳 session_id。
+
+        basic 連對 PROMOTE_STREAK 題升中階；過渡輪（卡片還是 basic）算進中階連對，
+        再答對 PROMOTE_STREAK - 1 題升高階；最後還要過一輪過渡輪（卡片還是中階）。
+        """
+        session_id = self._start_official_session()
+        for _ in range(2 * PROMOTE_STREAK + 1):
+            self._answer_correctly(session_id)
+        return session_id
+
 
 class ConfigApiTests(MemoryRecallTestCase):
     """GET /api/games/memory-recall/config/"""
@@ -110,7 +124,7 @@ class ConfigApiTests(MemoryRecallTestCase):
         data = response.data["data"]
         self.assertEqual(data["pretest_total_rounds"], 4)
         self.assertEqual(data["base_time_limit_seconds"], 60)
-        self.assertEqual(data["promote_streak"], 3)
+        self.assertEqual(data["promote_streak"], 6)
         self.assertEqual(data["promote_bonus_seconds"], 15)
 
     def test_has_item_pools_and_no_removed_timing_fields(self):
@@ -183,9 +197,7 @@ class RoundApiTests(MemoryRecallTestCase):
         self.assertIn(self._current_answer(session_id), question["option_items"])
 
     def test_advanced_stage_offers_two_distinct_options_including_answer(self):
-        session_id = self._start_official_session()
-        for _ in range(6):  # basic -> intermediate -> advanced
-            self._answer_correctly(session_id)
+        session_id = self._reach_advanced_cards()
 
         question = self._get_round(session_id)
 
@@ -193,22 +205,20 @@ class RoundApiTests(MemoryRecallTestCase):
         self.assertEqual(len(set(question["option_items"])), 2)
         self.assertIn(self._current_answer(session_id), question["option_items"])
 
-    def test_advanced_options_same_group_and_new_item_from_other_group(self):
-        # 前端回報：高階每輪新物品一直卡在同一組
-        session_id = self._start_official_session()
-        for _ in range(6):  # basic -> intermediate -> advanced
-            self._answer_correctly(session_id)
+    def test_advanced_distractor_any_stage_and_new_item_advanced(self):
+        # 高階干擾物不限階段，new_item 仍是高階物品且不能跟卡片重複
+        session_id = self._reach_advanced_cards()
 
         for _ in range(5):
             question = self._get_round(session_id)
-            options = set(question["option_items"])
-            self.assertIn(options, ADVANCED_GROUPS)
+            answer = self._current_answer(session_id)
+            options = question["option_items"]
+            self.assertIn(answer, ADVANCED_ITEMS)
+            self.assertIn(answer, options)
+            self.assertTrue(set(options) <= ALL_ITEMS)
+            self.assertIn(question["new_item"], ADVANCED_ITEMS)
             self.assertNotIn(question["new_item"], options)
-            self._answer(
-                session_id,
-                question["round_number"],
-                self._current_answer(session_id),
-            )
+            self._answer(session_id, question["round_number"], answer)
 
     def test_new_item_becomes_next_answer_after_correct_answer(self):
         session_id = self._start()["session_id"]
@@ -289,52 +299,105 @@ class PretestFlowTests(MemoryRecallTestCase):
 class OfficialGameFlowTests(MemoryRecallTestCase):
     """規格書「四、正式賽計時與升階規則」「五、計分邏輯」。"""
 
-    def test_three_correct_in_a_row_promotes_and_grants_bonus_time(self):
+    def test_streak_of_promote_streak_promotes_and_grants_bonus_time(self):
         session_id = self._start_official_session()
 
-        first = self._answer_correctly(session_id)
-        second = self._answer_correctly(session_id)
-        third = self._answer_correctly(session_id)
+        results = [self._answer_correctly(session_id) for _ in range(PROMOTE_STREAK)]
 
-        self.assertEqual(first["action"], "next_question")
-        self.assertEqual(second["action"], "next_question")
-        self.assertEqual(third["action"], "promoted")
-        self.assertEqual(third["current_stage"], "intermediate")
-        self.assertEqual(third["correct_streak"], 0)
-        self.assertEqual(third["bonus_seconds_granted"], 15)
-        # basic 答對 3 題：10 + 10 + 10
-        self.assertEqual(first["score_earned"], 10)
-        self.assertIn(third["seed_item"], INTERMEDIATE_ITEMS)
-        self.assertEqual(self._current_answer(session_id), third["seed_item"])
+        for result in results[:-1]:
+            self.assertEqual(result["action"], "next_question")
+            self.assertEqual(result["current_stage"], "basic")
+        last = results[-1]
+        self.assertEqual(last["action"], "promoted")
+        self.assertEqual(last["current_stage"], "intermediate")
+        self.assertEqual(last["correct_streak"], 0)
+        self.assertEqual(last["bonus_seconds_granted"], 15)
+        self.assertEqual(results[0]["score_earned"], 10)
 
-    def test_seed_item_is_null_without_promotion(self):
+    def test_five_correct_in_a_row_does_not_promote(self):
         session_id = self._start_official_session()
 
-        result = self._answer_correctly(session_id)
+        results = [self._answer_correctly(session_id) for _ in range(5)]
 
-        self.assertEqual(result["action"], "next_question")
-        self.assertIsNone(result["seed_item"])
+        self.assertEqual(results[-1]["action"], "next_question")
+        self.assertEqual(results[-1]["current_stage"], "basic")
+        self.assertEqual(results[-1]["correct_streak"], 5)
 
-    def test_round_after_promotion_has_only_new_stage_items(self):
-        # 前端回報：升階進 intermediate 第一輪出現 ['洋蔥', '黑糖']
+    def test_answer_response_has_no_seed_item(self):
         session_id = self._start_official_session()
-        for _ in range(3):
+
+        results = [self._answer_correctly(session_id) for _ in range(PROMOTE_STREAK)]
+
+        for result in results:
+            self.assertNotIn("seed_item", result)
+
+    def test_promotion_keeps_memory_chain(self):
+        # 升階不換種子：升階那一輪的 new_item 仍是下一輪的正解
+        session_id = self._start_official_session()
+        for _ in range(PROMOTE_STREAK - 1):
+            self._answer_correctly(session_id)
+        question = self._get_round(session_id)
+        self._answer(
+            session_id, question["round_number"], self._current_answer(session_id)
+        )
+
+        self.assertEqual(self._current_answer(session_id), question["new_item"])
+        self.assertIn(question["new_item"], BASIC_ITEMS)
+
+    def test_transition_round_keeps_previous_stage_cards(self):
+        # 升到 intermediate 後第一輪：卡片還是 basic，new_item 換成 intermediate
+        session_id = self._start_official_session()
+        for _ in range(PROMOTE_STREAK):
             self._answer_correctly(session_id)
 
+        transition = self._get_round(session_id)
+
+        self.assertEqual(transition["stage"], "basic")
+        self.assertTrue(set(transition["option_items"]) <= BASIC_ITEMS)
+        self.assertIn(transition["new_item"], INTERMEDIATE_ITEMS)
+
+        self._answer(
+            session_id, transition["round_number"], self._current_answer(session_id)
+        )
         question = self._get_round(session_id)
 
         self.assertEqual(question["stage"], "intermediate")
         self.assertTrue(set(question["option_items"]) <= INTERMEDIATE_ITEMS)
+        self.assertIn(transition["new_item"], question["option_items"])
 
-    def test_promotion_to_advanced_gives_advanced_seed(self):
+    def test_transition_round_scored_by_card_stage(self):
         session_id = self._start_official_session()
-        results = [self._answer_correctly(session_id) for _ in range(6)]
+        for _ in range(PROMOTE_STREAK):
+            self._answer_correctly(session_id)
 
-        question = self._get_round(session_id)
+        result = self._answer_correctly(session_id)
+
+        # 卡片是 basic：10 x 1.0，不是 intermediate 的 13
+        self.assertEqual(result["score_earned"], 10)
+        self.assertEqual(result["current_stage"], "intermediate")
+        self.assertEqual(result["correct_streak"], 1)
+
+    def test_transition_to_advanced_keeps_intermediate_cards(self):
+        session_id = self._start_official_session()
+        results = [
+            self._answer_correctly(session_id) for _ in range(2 * PROMOTE_STREAK)
+        ]
+
+        transition = self._get_round(session_id)
 
         self.assertEqual(results[-1]["action"], "promoted")
-        self.assertIn(results[-1]["seed_item"], ADVANCED_ITEMS)
-        self.assertTrue(set(question["option_items"]) <= ADVANCED_ITEMS)
+        self.assertEqual(results[-1]["current_stage"], "advanced")
+        self.assertEqual(transition["stage"], "intermediate")
+        self.assertTrue(set(transition["option_items"]) <= INTERMEDIATE_ITEMS)
+        self.assertIn(transition["new_item"], ADVANCED_ITEMS)
+
+        self._answer(
+            session_id, transition["round_number"], self._current_answer(session_id)
+        )
+        question = self._get_round(session_id)
+
+        self.assertEqual(question["stage"], "advanced")
+        self.assertIn(transition["new_item"], question["option_items"])
 
     def test_wrong_answer_scores_zero_and_resets_streak_without_demotion(self):
         session_id = self._start_official_session()
@@ -354,7 +417,7 @@ class OfficialGameFlowTests(MemoryRecallTestCase):
 
     def test_finish_totals_bonus_seconds_by_promotion_count(self):
         session_id = self._start_official_session()
-        for _ in range(3):  # 升到 intermediate
+        for _ in range(PROMOTE_STREAK):  # 升到 intermediate
             self._answer_correctly(session_id)
 
         response = self.client.post(
@@ -491,15 +554,29 @@ class ResultApiTests(MemoryRecallTestCase):
 
 
 class PickItemTests(SimpleTestCase):
-    """_pick_distractor 與 _pick_new_item 的抽題規則。"""
+    """_pick_distractor、_pick_new_item、_item_stage 的抽題規則。"""
 
     def test_basic_distractor_is_other_basic_item(self):
         distractor = _pick_distractor("basic", "馬鈴薯")
 
         self.assertIn(distractor, {"胡蘿蔔", "洋蔥"})
 
-    def test_advanced_distractor_is_always_same_group_other_form(self):
-        self.assertEqual(_pick_distractor("advanced", "紅蘿蔔片"), "紅蘿蔔塊")
+    def test_intermediate_distractor_stays_in_intermediate(self):
+        for _ in range(20):
+            distractor = _pick_distractor("intermediate", "辣椒粉")
+            self.assertIn(distractor, INTERMEDIATE_ITEMS - {"辣椒粉"})
+
+    def test_advanced_distractor_can_be_any_other_item(self):
+        picked = {_pick_distractor("advanced", "紅蘿蔔片") for _ in range(200)}
+
+        self.assertTrue(picked <= ALL_ITEMS - {"紅蘿蔔片"})
+        # 抽 200 次，應該會抽到非高階的物品（不限階段）
+        self.assertTrue(picked - ADVANCED_ITEMS)
+
+    def test_item_stage(self):
+        self.assertEqual(_item_stage("洋蔥"), "basic")
+        self.assertEqual(_item_stage("咖哩塊"), "intermediate")
+        self.assertEqual(_item_stage("洋蔥絲"), "advanced")
 
     def test_basic_new_item_is_the_item_not_in_options(self):
         self.assertEqual(_pick_new_item("basic", ["馬鈴薯", "洋蔥"]), "胡蘿蔔")
