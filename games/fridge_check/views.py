@@ -2,27 +2,13 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from users.models import User
+from games.utils import get_current_user
 
 from . import services
 from .constants import (
     MAX_WRONG_ATTEMPTS,
     TOTAL_QUESTIONS,
 )
-
-
-def get_current_user(request):
-    """
-    取得目前使用者。
-
-    正式環境使用 request.user；
-    開發測試階段若未登入，暫時取第一位 User。
-    """
-    if request.user.is_authenticated:
-        return request.user
-
-    return User.objects.first()
-
 
 # =========================================================
 # 建立遊戲 Session

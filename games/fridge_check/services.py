@@ -98,6 +98,7 @@ def create_game_session(user):
     session = session_service.create_session(
         GAME_TYPE,
         initial_state=initial_state,
+        user=user,
     )
 
     session = session_service.update_session(

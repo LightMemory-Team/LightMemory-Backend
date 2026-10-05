@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from users.models import User
+from games.utils import get_current_user
 
 from . import services
 
@@ -10,16 +10,10 @@ GAME_TYPE = services.GAME_TYPE
 TOTAL_QUESTIONS = services.TOTAL_QUESTIONS
 
 
-def _current_user(request):
-    if request.user.is_authenticated:
-        return request.user
-    return User.objects.first()
-
-
 # 第一支 API：建立遊戲 Session
 @api_view(["POST"])
 def create_session(request):
-    user = _current_user(request)
+    user = get_current_user(request)
     if user is None:
         return Response(
             {
@@ -347,7 +341,7 @@ def submit_change_answer(request, session_id):
 # 第四支 API：取得市場買菜歷史成績
 @api_view(["GET"])
 def get_market_shopping_history(request):
-    user = _current_user(request)
+    user = get_current_user(request)
     if user is None:
         return Response(
             {

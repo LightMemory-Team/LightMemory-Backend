@@ -39,7 +39,10 @@ class MarketSortSubmitView(APIView):
         questions = validated["questions"]
 
         session, created = session_service.get_or_create_session(
-            GAME_TYPE, session_id, initial_state={"user_id": request.user.id}
+            GAME_TYPE,
+            session_id,
+            initial_state={"user_id": request.user.id},
+            user=request.user,
         )
 
         # 冪等性處理：同一個 session_id 已經算過分，直接回傳既有結果，不重算不重寫。

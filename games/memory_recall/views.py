@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 from games import session_service
 from games.dda import DDAConfig, apply_answer
-from users.models import User
+from games.utils import get_current_user
 
 from .item_bank import load_advanced_groups, load_item_pools, load_items
 from .score import calculate_step_score, calculate_total_score, normalize_to_100
@@ -23,13 +23,6 @@ PROMOTE_BONUS_SECONDS = 15
 
 # 測試用暫定值，正式上線前改為 20（規格書未定案，見 recall_memory.md 第九節討論）
 ROUND_TIMEOUT_SECONDS = 10
-
-
-def _current_user(request):
-    """有登入時使用登入者，開發階段未登入時暫時抓第一位使用者。"""
-    if request.user.is_authenticated:
-        return request.user
-    return User.objects.first()
 
 
 def _get_session_or_error(session_id, user_id):
@@ -97,7 +90,7 @@ def config(request):
 # 2. 開始一場遊戲，建立 session
 @api_view(["POST"])
 def start(request):
-    user = _current_user(request)
+    user = get_current_user(request)
     if user is None:
         return Response(
             {
@@ -217,7 +210,7 @@ DDA_STRATEGY = MemoryRecallDDAStrategy()
 # 3. 取得單一題目內容
 @api_view(["GET"])
 def round_view(request):
-    user = _current_user(request)
+    user = get_current_user(request)
     session_id = request.query_params.get("session_id")
     session, error_response = _get_session_or_error(
         session_id, user.id if user else None
@@ -283,7 +276,7 @@ def round_view(request):
 # 4. 送出單題作答
 @api_view(["POST"])
 def round_answer(request):
-    user = _current_user(request)
+    user = get_current_user(request)
     session_id = request.data.get("session_id")
     session, error_response = _get_session_or_error(
         session_id, user.id if user else None
@@ -486,7 +479,7 @@ def _build_result(session):
 # 5. 結束遊戲，計算總結果
 @api_view(["POST"])
 def finish(request):
-    user = _current_user(request)
+    user = get_current_user(request)
     session_id = request.data.get("session_id")
     session, error_response = _get_session_or_error(
         session_id, user.id if user else None
@@ -506,7 +499,7 @@ def finish(request):
 # 6. 查詢單場結果
 @api_view(["GET"])
 def result(request, session_id):
-    user = _current_user(request)
+    user = get_current_user(request)
     session, error_response = _get_session_or_error(
         session_id, user.id if user else None
     )
