@@ -142,6 +142,37 @@ class MarketSortSubmitEndpointTests(APITestCase):
         count = sum(1 for s in sessions if s["session_id"] == "duplicate_test")
         self.assertEqual(count, 1)
 
+    def test_complete_submit_after_incomplete_one_calculates_score(self):
+        """先送未完成，再用同一個 session_id 送完整資料，要能算出分數。"""
+        incomplete = {
+            "session_id": "resubmit_after_incomplete",
+            "is_complete": False,
+            "questions": build_questions()[:10],
+        }
+        complete = {**incomplete, "is_complete": True, "questions": build_questions()}
+
+        self.client.post(SUBMIT_URL, incomplete, format="json")
+        response = self.client.post(SUBMIT_URL, complete, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn("current_score", response.data["data"])
+
+    def test_resubmit_after_insufficient_data_calculates_score(self):
+        """題數不足被擋下（400）後，補齊資料用同一個 session_id 重送，要能算出分數。"""
+        too_few = {
+            "session_id": "resubmit_after_400",
+            "is_complete": True,
+            "questions": build_questions()[:10],
+        }
+        enough = {**too_few, "questions": build_questions()}
+
+        first_response = self.client.post(SUBMIT_URL, too_few, format="json")
+        second_response = self.client.post(SUBMIT_URL, enough, format="json")
+
+        self.assertEqual(first_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(second_response.status_code, status.HTTP_201_CREATED)
+        self.assertIn("current_score", second_response.data["data"])
+
 
 def build_game_with_accuracy(correct_count, total=28, seed=0):
     """建立一場「答對 correct_count / total 題」的模擬資料，用固定的 seed
@@ -266,5 +297,7 @@ class MarketSortScoringFormulaTests(SimpleTestCase):
         questions[0]["trial_type"] = "switch"
         questions[0]["is_correct"] = False
 
-        result = calculate_cognitive_flexibility_score(questions)  # 不應該拋出例外，且不能被第1題影響
+        result = calculate_cognitive_flexibility_score(
+            questions
+        )  # 不應該拋出例外，且不能被第1題影響
         self.assertIn("switch_accuracy", result["raw_metrics"])

@@ -42,13 +42,10 @@ class MarketSortSubmitView(APIView):
             GAME_TYPE, session_id, initial_state={"user_id": request.user.id}
         )
 
-        # 冪等性處理：同一個 session_id 重複送出時，直接回傳既有結果，不重算不重寫
-        if not created:
-            if session["status"] != "finished":
-                return Response(
-                    {"success": True, "data": None, "error": None},
-                    status=status.HTTP_201_CREATED,
-                )
+        # 冪等性處理：同一個 session_id 已經算過分，直接回傳既有結果，不重算不重寫。
+        # 還沒結束的（之前送過未完成、或資料不足被擋下）照常往下驗證、計分，
+        # 否則補送完整資料也永遠拿不到分數。
+        if not created and session["status"] == "finished":
             return self._build_response(request.user, session)
 
         if not is_complete:
