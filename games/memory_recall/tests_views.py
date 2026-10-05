@@ -274,7 +274,7 @@ class PretestFlowTests(MemoryRecallTestCase):
         self.assertEqual(data["total_rounds"], 4)
         self.assertEqual(data["final_stage"], "basic")
         self.assertIsNone(data["total_score"])
-        self.assertIsNone(data["score"])
+        self.assertNotIn("score", data)
 
     def test_calling_finish_twice_returns_same_result_without_recalculating(self):
         session_id = self._start()["session_id"]
@@ -424,7 +424,7 @@ class OfficialGameFlowTests(MemoryRecallTestCase):
         self.assertEqual(data["final_stage"], "intermediate")
         self.assertIsNotNone(data["total_score"])
 
-    def test_finish_returns_x_score_converted_from_raw_score(self):
+    def test_finish_returns_raw_score_without_normalized_score(self):
         session_id = self._start_official_session()
         for _ in range(3):  # basic 答對 3 題：原始分 30
             self._answer_correctly(session_id)
@@ -434,8 +434,8 @@ class OfficialGameFlowTests(MemoryRecallTestCase):
         ).data["data"]
 
         self.assertEqual(data["total_score"], 30)
-        # 30 / 693 * 100 = 4.33
-        self.assertEqual(data["score"], 4)
+        # 單場結束只回傳 raw 分數，0~100 分換算之後再做
+        self.assertNotIn("score", data)
 
 
 class ErrorHandlingTests(MemoryRecallTestCase):
