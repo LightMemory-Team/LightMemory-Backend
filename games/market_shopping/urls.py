@@ -9,12 +9,12 @@ urlpatterns = [
         name="market-shopping-session-create",
     ),
     path(
-        "sessions/<int:session_id>/item-answers/",
+        "sessions/<str:session_id>/item-answers/",
         views.submit_item_answer,
         name="market-shopping-item-answer",
     ),
     path(
-        "sessions/<int:session_id>/change-answers/",
+        "sessions/<str:session_id>/change-answers/",
         views.submit_change_answer,
         name="market-shopping-change-answer",
     ),
