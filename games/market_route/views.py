@@ -20,6 +20,8 @@ STAGE_EXPOSURE_RANGE = {
 
 STAGE_ORDER = ["basic", "intermediate", "advanced"]
 PROMOTE_STREAK = 5
+# 連錯 5 次（每次作答都算，包含重看後再錯、超時）退一階
+DEMOTE_STREAK = 5
 FAST_PROMOTE_STREAK = 3
 FAST_RESPONSE_RATIO = 0.5
 MAX_WRONG_ATTEMPTS = 3
@@ -63,12 +65,47 @@ class RouteDDAStrategy:
             "wrong_attempts": 0,
         }
 
+    def on_demote(self, state: dict, config: DDAConfig, new_stage: str) -> dict:
+        # 降階跟升階一樣，從新階段最寬鬆的曝光時間重新開始
+        return self.on_promote(state, config, new_stage)
+
 
 DDA_CONFIG = DDAConfig(
     stage_order=STAGE_ORDER,
     promote_streak=PROMOTE_STREAK,
+    demote_streak=DEMOTE_STREAK,
 )
 DDA_STRATEGY = RouteDDAStrategy()
+
+
+def _error_response(code, message, status):
+    return Response(
+        {
+            "success": False,
+            "data": None,
+            "error": {"code": code, "message": message},
+        },
+        status=status,
+    )
+
+
+def _get_session_or_error(request, session_id, *, require_in_progress=False):
+    """讀取 session，回傳 (session, error_response)，error_response 為 None 代表成功。
+
+    統一處理 SESSION_NOT_FOUND、FORBIDDEN（session 不屬於這位使用者），
+    require_in_progress=True 時再檢查 SESSION_ALREADY_FINISHED（出題、作答用）。
+    """
+    session = session_service.get_session(GAME_TYPE, session_id)
+    if session is None:
+        return None, _error_response("SESSION_NOT_FOUND", "找不到指定的 session", 404)
+    user = get_current_user(request)
+    if user is None or session["user_id"] != user.id:
+        return None, _error_response("FORBIDDEN", "這場遊戲不屬於目前的使用者", 403)
+    if require_in_progress and session["status"] != "in_progress":
+        return None, _error_response(
+            "SESSION_ALREADY_FINISHED", "這場遊戲已經結束了", 409
+        )
+    return session, None
 
 
 # 1. 取得本場遊戲設定
@@ -80,6 +117,7 @@ def config(request):
         "total_questions": 20,
         "timeout_seconds": 20,
         "promote_streak": PROMOTE_STREAK,
+        "demote_streak": DEMOTE_STREAK,
         "fast_promote_streak": FAST_PROMOTE_STREAK,
         "fast_response_ratio": FAST_RESPONSE_RATIO,
         "max_wrong_attempts": MAX_WRONG_ATTEMPTS,
@@ -112,6 +150,7 @@ def start(request):
         "correct_streak": 0,
         "fast_correct_streak": 0,
         "wrong_attempts": 0,
+        "wrong_streak": 0,
         "exposure_time_ms": loose_exposure,
     }
     session = session_service.create_session(
@@ -157,19 +196,11 @@ def _pick_question(stage, exposure_time_ms, question_number):
 @api_view(["GET"])
 def round_view(request):
     session_id = request.query_params.get("session_id")
-    session = session_service.get_session(GAME_TYPE, session_id)
-    if session is None:
-        return Response(
-            {
-                "success": False,
-                "data": None,
-                "error": {
-                    "code": "SESSION_NOT_FOUND",
-                    "message": "找不到指定的 session",
-                },
-            },
-            status=404,
-        )
+    session, error_response = _get_session_or_error(
+        request, session_id, require_in_progress=True
+    )
+    if error_response is not None:
+        return error_response
 
     question = _pick_question(
         session["state"]["current_stage"],
@@ -187,6 +218,13 @@ def _apply_dda(session, is_correct, is_timeout, response_time_ms):
     達標。所以加一個更嚴格但門檻更低的條件：連續 3 題「答對且反應時間在
     當下曝光時間的 50% 以內」也視為熟練，直接升階。只要有一題答錯、或答對
     但不夠快，這個快速連續計數就歸零重算。
+
+    action：
+        promoted       答對且升階，前端顯示升階對話框後進下一題
+        demoted        答錯（含超時）且連錯達 DEMOTE_STREAK 次，優先於 retry，
+                       前端顯示降階對話框後進下一題
+        retry          答錯但同一題還沒錯滿 MAX_WRONG_ATTEMPTS 次，同一題再試
+        next_question  其他情況，進下一題
     """
     state = session["state"]
     exposure_time_ms = state["exposure_time_ms"]
@@ -203,7 +241,7 @@ def _apply_dda(session, is_correct, is_timeout, response_time_ms):
         )
 
     if is_correct:
-        updated_fields, _ = apply_answer(
+        updated_fields, dda_action = apply_answer(
             state,
             DDA_CONFIG,
             DDA_STRATEGY,
@@ -211,27 +249,31 @@ def _apply_dda(session, is_correct, is_timeout, response_time_ms):
             is_fast=is_fast,
             extra_promote_check=extra_promote_check,
         )
-        action = "next_question"
+        action = "promoted" if dda_action == "promoted" else "next_question"
     elif is_timeout:
         # 超時：這題當作未作答，直接換下一題；不算進答錯次數
-        # （答錯 3 次換題只看真的答錯，跟超時無關）
-        updated_fields, _ = apply_answer(
+        # （答錯 3 次換題只看真的答錯，跟超時無關），但會算進降階的連錯次數
+        updated_fields, dda_action = apply_answer(
             state,
             DDA_CONFIG,
             DDA_STRATEGY,
             is_correct=False,
         )
         updated_fields["wrong_attempts"] = 0
-        action = "next_question"
+        action = "demoted" if dda_action == "demoted" else "next_question"
     else:
         wrong_attempts = state["wrong_attempts"] + 1
-        updated_fields, _ = apply_answer(
+        updated_fields, dda_action = apply_answer(
             state,
             DDA_CONFIG,
             DDA_STRATEGY,
             is_correct=False,
         )
-        if wrong_attempts >= MAX_WRONG_ATTEMPTS:
+        if dda_action == "demoted":
+            # 降階直接換下一題，不給重看
+            action = "demoted"
+            wrong_attempts = 0
+        elif wrong_attempts >= MAX_WRONG_ATTEMPTS:
             action = "next_question"
             wrong_attempts = 0
         else:
@@ -245,18 +287,16 @@ def _apply_dda(session, is_correct, is_timeout, response_time_ms):
 @api_view(["POST"])
 def round_answer(request):
     session_id = request.data.get("session_id")
-    session = session_service.get_session(GAME_TYPE, session_id)
-    if session is None:
-        return Response(
-            {
-                "success": False,
-                "data": None,
-                "error": {
-                    "code": "SESSION_NOT_FOUND",
-                    "message": "找不到指定的 session",
-                },
-            },
-            status=404,
+    session, error_response = _get_session_or_error(
+        request, session_id, require_in_progress=True
+    )
+    if error_response is not None:
+        return error_response
+
+    current_question = session["current_question"]
+    if current_question is None:
+        return _error_response(
+            "ROUND_NOT_STARTED", "目前沒有進行中的題目，請先呼叫 round/ 取得題目", 400
         )
 
     attempt_number = request.data.get("attempt_number")
@@ -264,7 +304,6 @@ def round_answer(request):
     is_timeout = request.data.get("is_timeout", False)
     response_time_ms = request.data.get("response_time_ms")
 
-    current_question = session["current_question"]
     is_correct = (not is_timeout) and answer_position == current_question[
         "target_position"
     ]
@@ -299,10 +338,18 @@ def round_answer(request):
         session, is_correct, is_timeout, response_time_ms
     )
     question_number = session["question_number"]
-    if action == "next_question":
+    current_question_after = current_question
+    # 只有 retry 停在同一題，其餘（含升降階）都進下一題；換題時清掉這一題，
+    # 下一次作答前一定要先呼叫 round/ 拿新題目，避免重複作答已經結束的題目
+    if action != "retry":
         question_number += 1
+        current_question_after = None
     session_service.update_session(
-        GAME_TYPE, session_id, question_number=question_number, state=updated_fields
+        GAME_TYPE,
+        session_id,
+        question_number=question_number,
+        current_question=current_question_after,
+        state=updated_fields,
     )
 
     data = {
@@ -321,19 +368,13 @@ def round_answer(request):
 @api_view(["POST"])
 def finish(request):
     session_id = request.data.get("session_id")
-    session = session_service.get_session(GAME_TYPE, session_id)
-    if session is None:
-        return Response(
-            {
-                "success": False,
-                "data": None,
-                "error": {
-                    "code": "SESSION_NOT_FOUND",
-                    "message": "找不到指定的 session",
-                },
-            },
-            status=404,
-        )
+    session, error_response = _get_session_or_error(request, session_id)
+    if error_response is not None:
+        return error_response
+
+    # 冪等性處理：已經結束過的 session 直接回傳既有結果，不重算不覆寫。
+    if session["status"] == "finished":
+        return Response({"success": True, "data": session["result"], "error": None})
 
     step_records = session["step_records"]
     # 遊戲專屬欄位（question_number、is_timeout…）存在每筆紀錄的 detail 裡
@@ -373,19 +414,9 @@ def finish(request):
 # 6. 查詢單場結果
 @api_view(["GET"])
 def result(request, session_id):
-    session = session_service.get_session(GAME_TYPE, session_id)
-    if session is None:
-        return Response(
-            {
-                "success": False,
-                "data": None,
-                "error": {
-                    "code": "SESSION_NOT_FOUND",
-                    "message": "找不到指定的 session",
-                },
-            },
-            status=404,
-        )
+    session, error_response = _get_session_or_error(request, session_id)
+    if error_response is not None:
+        return error_response
     if session["status"] != "finished":
         return Response(
             {

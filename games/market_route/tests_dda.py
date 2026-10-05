@@ -5,13 +5,7 @@ market_route 專屬 DDA 邏輯單元測試。
 
 from django.test import TestCase
 
-from games.dda import apply_answer
 from games.market_route.views import (
-    DDA_CONFIG,
-    DDA_STRATEGY,
-    EXPOSURE_STEP_DOWN,
-    EXPOSURE_STEP_UP,
-    STAGE_EXPOSURE_RANGE,
     _apply_dda,
 )
 
@@ -109,7 +103,7 @@ class MarketRouteDDATests(TestCase):
             session, is_correct=True, is_timeout=False, response_time_ms=1500
         )
 
-        self.assertEqual(action, "next_question")
+        self.assertEqual(action, "promoted")
         self.assertEqual(updated["current_stage"], "intermediate")
         self.assertEqual(updated["correct_streak"], 0)
         self.assertEqual(updated["exposure_time_ms"], 1500)
@@ -130,8 +124,89 @@ class MarketRouteDDATests(TestCase):
             session, is_correct=True, is_timeout=False, response_time_ms=800
         )
 
-        self.assertEqual(action, "next_question")
+        self.assertEqual(action, "promoted")
         self.assertEqual(updated["current_stage"], "intermediate")
         self.assertEqual(updated["correct_streak"], 0)
         self.assertEqual(updated["fast_correct_streak"], 0)
         self.assertEqual(updated["exposure_time_ms"], 1500)
+
+    def test_demotion_after_5_wrong_streaks(self):
+        """連錯 5 次退一階，優先於 retry，曝光時間重置為新階段 loose (2000ms)。"""
+        session = {
+            "state": {
+                "current_stage": "intermediate",
+                "correct_streak": 0,
+                "fast_correct_streak": 0,
+                "wrong_attempts": 1,
+                "wrong_streak": 4,
+                "exposure_time_ms": 1300,
+            }
+        }
+        updated, action = _apply_dda(
+            session, is_correct=False, is_timeout=False, response_time_ms=500
+        )
+
+        self.assertEqual(action, "demoted")
+        self.assertEqual(updated["current_stage"], "basic")
+        self.assertEqual(updated["wrong_streak"], 0)
+        self.assertEqual(updated["wrong_attempts"], 0)
+        self.assertEqual(updated["exposure_time_ms"], 2000)
+
+    def test_timeout_counts_toward_demotion(self):
+        """超時也算進降階的連錯次數。"""
+        session = {
+            "state": {
+                "current_stage": "advanced",
+                "correct_streak": 0,
+                "fast_correct_streak": 0,
+                "wrong_attempts": 0,
+                "wrong_streak": 4,
+                "exposure_time_ms": 800,
+            }
+        }
+        updated, action = _apply_dda(
+            session, is_correct=False, is_timeout=True, response_time_ms=None
+        )
+
+        self.assertEqual(action, "demoted")
+        self.assertEqual(updated["current_stage"], "intermediate")
+        self.assertEqual(updated["exposure_time_ms"], 1500)
+
+    def test_no_demotion_at_basic(self):
+        """已經在 basic 時連錯達標也不降階，照常 retry。"""
+        session = {
+            "state": {
+                "current_stage": "basic",
+                "correct_streak": 0,
+                "fast_correct_streak": 0,
+                "wrong_attempts": 0,
+                "wrong_streak": 4,
+                "exposure_time_ms": 2000,
+            }
+        }
+        updated, action = _apply_dda(
+            session, is_correct=False, is_timeout=False, response_time_ms=500
+        )
+
+        self.assertEqual(action, "retry")
+        self.assertEqual(updated["current_stage"], "basic")
+        self.assertEqual(updated["wrong_streak"], 5)
+
+    def test_correct_answer_resets_wrong_streak(self):
+        """答對時連錯次數歸零，之前的錯誤不會累積到之後的降階判斷。"""
+        session = {
+            "state": {
+                "current_stage": "intermediate",
+                "correct_streak": 0,
+                "fast_correct_streak": 0,
+                "wrong_attempts": 0,
+                "wrong_streak": 4,
+                "exposure_time_ms": 1300,
+            }
+        }
+        updated, action = _apply_dda(
+            session, is_correct=True, is_timeout=False, response_time_ms=1000
+        )
+
+        self.assertEqual(action, "next_question")
+        self.assertEqual(updated["wrong_streak"], 0)

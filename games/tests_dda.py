@@ -8,7 +8,6 @@ from django.test import TestCase
 from games.dda import (
     DEFAULT_STAGE_MULTIPLIER,
     DDAConfig,
-    DDAStrategy,
     NoOpStrategy,
     apply_answer,
 )
@@ -149,3 +148,86 @@ class CoreDDATests(TestCase):
         self.assertEqual(DEFAULT_STAGE_MULTIPLIER["easy"], 1.0)
         self.assertEqual(DEFAULT_STAGE_MULTIPLIER["medium"], 1.3)
         self.assertEqual(DEFAULT_STAGE_MULTIPLIER["hard"], 1.6)
+
+
+class DemotionDDATests(TestCase):
+    def setUp(self):
+        self.config = DDAConfig(
+            stage_order=["basic", "intermediate", "advanced"],
+            promote_streak=3,
+            demote_streak=3,
+        )
+        self.strategy = NoOpStrategy()
+
+    def test_no_demotion_without_demote_streak(self):
+        """沒設定 demote_streak 的遊戲永遠不降階，回傳也不會多出 wrong_streak。"""
+        config = DDAConfig(stage_order=["basic", "intermediate", "advanced"])
+        state = {"current_stage": "advanced", "correct_streak": 0, "wrong_streak": 99}
+        updated, action = apply_answer(state, config, self.strategy, is_correct=False)
+
+        self.assertEqual(action, "no_promotion")
+        self.assertEqual(updated["current_stage"], "advanced")
+        self.assertNotIn("wrong_streak", updated)
+
+    def test_wrong_answer_increments_wrong_streak(self):
+        """答錯未達門檻時連錯 +1，不降階。"""
+        state = {"current_stage": "intermediate", "correct_streak": 0}
+        updated, action = apply_answer(
+            state, self.config, self.strategy, is_correct=False
+        )
+
+        self.assertEqual(action, "no_promotion")
+        self.assertEqual(updated["current_stage"], "intermediate")
+        self.assertEqual(updated["wrong_streak"], 1)
+
+    def test_demotion_when_wrong_streak_reaches_threshold(self):
+        """連錯達標（3 次）時退一階，連錯與連對計數歸零。"""
+        state = {"current_stage": "advanced", "correct_streak": 0, "wrong_streak": 2}
+        updated, action = apply_answer(
+            state, self.config, self.strategy, is_correct=False
+        )
+
+        self.assertEqual(action, "demoted")
+        self.assertEqual(updated["current_stage"], "intermediate")
+        self.assertEqual(updated["difficulty"], "intermediate")
+        self.assertEqual(updated["wrong_streak"], 0)
+        self.assertEqual(updated["correct_streak"], 0)
+
+    def test_no_demotion_at_lowest_stage(self):
+        """已在最低階段（basic）時不再降階，連錯計數繼續累積。"""
+        state = {"current_stage": "basic", "correct_streak": 0, "wrong_streak": 2}
+        updated, action = apply_answer(
+            state, self.config, self.strategy, is_correct=False
+        )
+
+        self.assertEqual(action, "no_promotion")
+        self.assertEqual(updated["current_stage"], "basic")
+        self.assertEqual(updated["wrong_streak"], 3)
+
+    def test_correct_answer_resets_wrong_streak(self):
+        """答對（含升階）時連錯計數歸零。"""
+        state = {"current_stage": "basic", "correct_streak": 0, "wrong_streak": 2}
+        updated, _ = apply_answer(state, self.config, self.strategy, is_correct=True)
+        self.assertEqual(updated["wrong_streak"], 0)
+
+        state = {"current_stage": "basic", "correct_streak": 2, "wrong_streak": 2}
+        updated, action = apply_answer(
+            state, self.config, self.strategy, is_correct=True
+        )
+        self.assertEqual(action, "promoted")
+        self.assertEqual(updated["wrong_streak"], 0)
+
+    def test_on_demote_hook_merged(self):
+        """自訂 Strategy 的 on_demote 回傳值會合併進 updated_fields。"""
+
+        class CustomStrategy(NoOpStrategy):
+            def on_demote(self, state, config, new_stage):
+                return {"demoted_to": new_stage}
+
+        state = {"current_stage": "intermediate", "wrong_streak": 2}
+        updated, action = apply_answer(
+            state, self.config, CustomStrategy(), is_correct=False
+        )
+
+        self.assertEqual(action, "demoted")
+        self.assertEqual(updated["demoted_to"], "basic")
