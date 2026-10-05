@@ -118,6 +118,7 @@ def start(request):
 
     seed_item = _pick_seed("basic")
     initial_state = {
+        # FORBIDDEN 檢查與 _has_finished_before 靠 state 的 user_id 判斷是誰的 session
         "user_id": user.id,
         "is_pretest": is_pretest,
         "current_stage": "basic",
@@ -125,7 +126,9 @@ def start(request):
         "current_item": seed_item,
         "expires_at": expires_at,
     }
-    session = session_service.create_session(GAME_TYPE, initial_state=initial_state)
+    session = session_service.create_session(
+        GAME_TYPE, initial_state=initial_state, user=user
+    )
 
     data = {
         "session_id": session["session_id"],

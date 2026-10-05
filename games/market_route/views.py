@@ -5,6 +5,7 @@ from rest_framework.response import Response
 
 from games import session_service
 from games.dda import DDAConfig, apply_answer
+from users.models import User
 
 from .item_bank import load_distractor_item, load_items
 from .market_score import calculate_step_score, calculate_total_score
@@ -36,9 +37,7 @@ class RouteDDAStrategy:
         stage = state.get("current_stage", "basic")
         _, tight = STAGE_EXPOSURE_RANGE.get(stage, (2000, 1500))
         current_exp = state.get("exposure_time_ms", 2000)
-        fast_streak = (
-            state.get("fast_correct_streak", 0) + 1 if is_fast else 0
-        )
+        fast_streak = state.get("fast_correct_streak", 0) + 1 if is_fast else 0
         new_exp = max(tight, current_exp - EXPOSURE_STEP_DOWN)
         return {
             "exposure_time_ms": new_exp,
@@ -56,9 +55,7 @@ class RouteDDAStrategy:
             "fast_correct_streak": 0,
         }
 
-    def on_promote(
-        self, state: dict, config: DDAConfig, new_stage: str
-    ) -> dict:
+    def on_promote(self, state: dict, config: DDAConfig, new_stage: str) -> dict:
         loose, _ = STAGE_EXPOSURE_RANGE.get(new_stage, (2000, 1500))
         return {
             "exposure_time_ms": loose,
@@ -72,6 +69,13 @@ DDA_CONFIG = DDAConfig(
     promote_streak=PROMOTE_STREAK,
 )
 DDA_STRATEGY = RouteDDAStrategy()
+
+
+def _current_user(request):
+    """有登入時使用登入者，開發階段未登入時暫時抓第一位使用者。"""
+    if request.user.is_authenticated:
+        return request.user
+    return User.objects.first()
 
 
 # 1. 取得本場遊戲設定
@@ -98,6 +102,17 @@ def config(request):
 # 2. 開始一場遊戲，建立 session
 @api_view(["POST"])
 def start(request):
+    user = _current_user(request)
+    if user is None:
+        return Response(
+            {
+                "success": False,
+                "data": None,
+                "error": {"code": "USER_NOT_FOUND", "message": "查無使用者資料"},
+            },
+            status=404,
+        )
+
     loose_exposure, _ = STAGE_EXPOSURE_RANGE["basic"]
     initial_state = {
         "current_stage": "basic",
@@ -106,7 +121,9 @@ def start(request):
         "wrong_attempts": 0,
         "exposure_time_ms": loose_exposure,
     }
-    session = session_service.create_session(GAME_TYPE, initial_state=initial_state)
+    session = session_service.create_session(
+        GAME_TYPE, initial_state=initial_state, user=user
+    )
     data = {
         "session_id": session["session_id"],
         "current_stage": session["state"]["current_stage"],
@@ -189,9 +206,7 @@ def _apply_dda(session, is_correct, is_timeout, response_time_ms):
     def extra_promote_check(st, is_fast_flag):
         current_fast_streak = st.get("fast_correct_streak", 0)
         return (
-            (current_fast_streak + 1 >= FAST_PROMOTE_STREAK)
-            if is_fast_flag
-            else False
+            (current_fast_streak + 1 >= FAST_PROMOTE_STREAK) if is_fast_flag else False
         )
 
     if is_correct:
@@ -203,6 +218,17 @@ def _apply_dda(session, is_correct, is_timeout, response_time_ms):
             is_fast=is_fast,
             extra_promote_check=extra_promote_check,
         )
+        action = "next_question"
+    elif is_timeout:
+        # 超時：這題當作未作答，直接換下一題；不算進答錯次數
+        # （答錯 3 次換題只看真的答錯，跟超時無關）
+        updated_fields, _ = apply_answer(
+            state,
+            DDA_CONFIG,
+            DDA_STRATEGY,
+            is_correct=False,
+        )
+        updated_fields["wrong_attempts"] = 0
         action = "next_question"
     else:
         wrong_attempts = state["wrong_attempts"] + 1
@@ -317,9 +343,10 @@ def finish(request):
         )
 
     step_records = session["step_records"]
-    answered_question_numbers = {r["question_number"] for r in step_records}
+    # 遊戲專屬欄位（question_number、is_timeout…）存在每筆紀錄的 detail 裡
+    answered_question_numbers = {r["detail"]["question_number"] for r in step_records}
     correct_count = sum(1 for r in step_records if r["is_correct"])
-    timeout_count = sum(1 for r in step_records if r["is_timeout"])
+    timeout_count = sum(1 for r in step_records if r["detail"]["is_timeout"])
     response_times = [
         r["response_time_ms"] for r in step_records if r["response_time_ms"] is not None
     ]
@@ -329,10 +356,11 @@ def finish(request):
     answered_count = len(answered_question_numbers)
     accuracy = round(correct_count / answered_count, 2) if answered_count else 0.0
 
-    # step_records 多存了 question_number（給上面彙總用），market_score.py
+    # detail 多存了 question_number（給上面彙總用），market_score.py
     # 的計分函式不需要這個欄位，計分前先過濾掉。
     scoring_inputs = [
-        {k: v for k, v in r.items() if k != "question_number"} for r in step_records
+        {k: v for k, v in r["detail"].items() if k != "question_number"}
+        for r in step_records
     ]
 
     result = {

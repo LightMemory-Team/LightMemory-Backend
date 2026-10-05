@@ -2,13 +2,20 @@
 已從暫時的 JSON 檔案換成 Django ORM，透過 GameSession / GameStepLog 存取）。
 
 設計目的：把「怎麼存資料」跟「遊戲邏輯」分開。各遊戲的 views.py 只呼叫這裡
-的函式，不直接碰資料庫。對外維持原本 8 個函式的簽名與回傳 dict 形狀不變
-（新增 user、is_pretest、avg_response_time_ms 為可選參數），所以這次的替換
-理論上不需要改各遊戲的 views.py。
+的函式，不直接碰資料庫。8 個函式的名稱沿用 JSON 時期，另新增 user、
+is_pretest、avg_response_time_ms 為可選參數。
 
 共通欄位（每個 session 都有，回傳的 dict 都會有這些 key）：
     session_id, game_type, status, question_number, current_question,
     step_records, result, state, is_pretest, avg_response_time_ms
+
+跟 JSON 時期不同、各遊戲要注意的兩點：
+    - session_id 是 UUID 字串（或前端自己產生的 client_session_id），
+      不是整數，網址要用 <str:session_id>
+    - step_records 每筆的格式是
+          {"step_number", "is_correct", "response_time_ms", "detail"}
+      呼叫 save_step() 時傳入的整筆原始紀錄放在 detail 裡，
+      遊戲專屬欄位（例如 stage、question_number）要從 r["detail"] 讀
 
 game_type 對應到 Game.code（例如 "market_route"）；找不到對應的 Game 時，
 會自動在「未分類」分類底下建立一筆，避免因為 seed 資料還沒建好就整個炸掉
@@ -21,8 +28,6 @@ user 是 GameSession 的必要欄位（外鍵、不可為空），所以建立 s
        （相容目前 market_sort、market_shopping 把 user_id 塞進
        initial_state 的舊寫法，這兩個檔案不用改）
     3. 兩者都沒有就拋出 ValueError，提醒呼叫端要傳 user
-       （market_route 的 start() 目前完全沒有帶使用者資訊，屬於既有缺口，
-       需要另外請該檔案的負責人補上 user，不是這次要處理的範圍）
 """
 
 from django.contrib.auth import get_user_model
@@ -122,7 +127,9 @@ def get_session(game_type, session_id):
     return _to_dict(session) if session else None
 
 
-def get_or_create_session(game_type, session_id, initial_state=None, user=None, is_pretest=False):
+def get_or_create_session(
+    game_type, session_id, initial_state=None, user=None, is_pretest=False
+):
     """依指定的 session_id 讀取 session；不存在就建立一筆新的。
 
     跟 create_session 不同：session_id 由呼叫端指定（例如前端自己產生），
