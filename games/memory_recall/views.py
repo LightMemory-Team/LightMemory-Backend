@@ -190,9 +190,7 @@ class MemoryRecallDDAStrategy:
     def on_wrong(self, state: dict, config: DDAConfig) -> dict:
         return {}
 
-    def on_promote(
-        self, state: dict, config: DDAConfig, new_stage: str
-    ) -> dict:
+    def on_promote(self, state: dict, config: DDAConfig, new_stage: str) -> dict:
         expires_at = state.get("expires_at")
         new_expires_at = expires_at
         if expires_at:
@@ -459,7 +457,10 @@ def _build_result(session):
     )
 
     total_score = calculate_total_score(
-        [{"stage": r["stage"], "is_correct": r["is_correct"]} for r in step_records]
+        [
+            {"stage": r["detail"]["stage"], "is_correct": r["is_correct"]}
+            for r in step_records
+        ]
     )
     total_bonus_seconds = 0
     if not is_pretest:
