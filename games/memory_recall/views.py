@@ -118,6 +118,7 @@ def start(request):
 
     seed_item = _pick_seed("basic")
     initial_state = {
+        # FORBIDDEN 檢查與 _has_finished_before 靠 state 的 user_id 判斷是誰的 session
         "user_id": user.id,
         "is_pretest": is_pretest,
         "current_stage": "basic",
@@ -125,7 +126,9 @@ def start(request):
         "current_item": seed_item,
         "expires_at": expires_at,
     }
-    session = session_service.create_session(GAME_TYPE, initial_state=initial_state)
+    session = session_service.create_session(
+        GAME_TYPE, initial_state=initial_state, user=user
+    )
 
     data = {
         "session_id": session["session_id"],
@@ -190,9 +193,7 @@ class MemoryRecallDDAStrategy:
     def on_wrong(self, state: dict, config: DDAConfig) -> dict:
         return {}
 
-    def on_promote(
-        self, state: dict, config: DDAConfig, new_stage: str
-    ) -> dict:
+    def on_promote(self, state: dict, config: DDAConfig, new_stage: str) -> dict:
         expires_at = state.get("expires_at")
         new_expires_at = expires_at
         if expires_at:
@@ -459,7 +460,10 @@ def _build_result(session):
     )
 
     total_score = calculate_total_score(
-        [{"stage": r["stage"], "is_correct": r["is_correct"]} for r in step_records]
+        [
+            {"stage": r["detail"]["stage"], "is_correct": r["is_correct"]}
+            for r in step_records
+        ]
     )
     total_bonus_seconds = 0
     if not is_pretest:

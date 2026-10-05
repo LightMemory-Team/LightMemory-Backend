@@ -24,9 +24,7 @@ class MemoryRecallDDATests(TestCase):
             "correct_streak": 0,
             "expires_at": "2026-10-03T12:00:00+00:00",
         }
-        updated, action = apply_answer(
-            state, DDA_CONFIG, DDA_STRATEGY, is_correct=True
-        )
+        updated, action = apply_answer(state, DDA_CONFIG, DDA_STRATEGY, is_correct=True)
 
         self.assertEqual(action, "no_promotion")
         self.assertEqual(updated["current_stage"], "basic")
@@ -41,9 +39,7 @@ class MemoryRecallDDATests(TestCase):
             "correct_streak": PROMOTE_STREAK - 1,
             "expires_at": initial_expires,
         }
-        updated, action = apply_answer(
-            state, DDA_CONFIG, DDA_STRATEGY, is_correct=True
-        )
+        updated, action = apply_answer(state, DDA_CONFIG, DDA_STRATEGY, is_correct=True)
 
         self.assertEqual(action, "promoted")
         self.assertEqual(updated["current_stage"], "intermediate")
@@ -57,9 +53,7 @@ class MemoryRecallDDATests(TestCase):
         expected_dt = datetime.fromisoformat(initial_expires) + timedelta(
             seconds=PROMOTE_BONUS_SECONDS
         )
-        self.assertEqual(
-            datetime.fromisoformat(updated["expires_at"]), expected_dt
-        )
+        self.assertEqual(datetime.fromisoformat(updated["expires_at"]), expected_dt)
 
     def test_intermediate_to_advanced_promotion(self):
         """intermediate 連對達門檻升至 advanced。"""
@@ -69,9 +63,7 @@ class MemoryRecallDDATests(TestCase):
             "correct_streak": PROMOTE_STREAK - 1,
             "expires_at": initial_expires,
         }
-        updated, action = apply_answer(
-            state, DDA_CONFIG, DDA_STRATEGY, is_correct=True
-        )
+        updated, action = apply_answer(state, DDA_CONFIG, DDA_STRATEGY, is_correct=True)
 
         self.assertEqual(action, "promoted")
         self.assertEqual(updated["current_stage"], "advanced")

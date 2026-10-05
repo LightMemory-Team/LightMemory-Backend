@@ -9,9 +9,6 @@ finish → result），驗證規格書「三、前測設計」「四、正式賽
     python manage.py test games.memory_recall
 """
 
-import shutil
-from pathlib import Path
-
 from django.test import SimpleTestCase
 from rest_framework.test import APITestCase
 
@@ -43,24 +40,15 @@ def result_url(session_id):
 
 
 class MemoryRecallTestCase(APITestCase):
-    """清空 memory_recall 的 session 檔案，讓每個測試互不干擾。
+    """memory_recall 測試共用的準備動作。
 
-    這是目前 session_service 用 JSON 檔案儲存（見 session_service.py 開頭
-    說明）的已知限制：list_sessions() 會掃描磁碟上全部檔案，測試之間若不
-    清空會互相污染（尤其是 _has_finished_before 這種依賴歷史紀錄的邏輯）。
+    session 存在資料庫（GameSession），APITestCase 每個測試結束會自動
+    rollback，不需要手動清資料，測試之間不會互相污染。
     """
 
     def setUp(self):
-        session_dir = Path(session_service.SESSION_ROOT_DIR) / "memory_recall"
-        shutil.rmtree(session_dir, ignore_errors=True)
-        # views.py 的 _current_user 在未登入時 fallback 抓第一位使用者
-        # （跟 market_shopping 同一套開發階段慣例），測試資料庫是空的，
-        # 所以需要先建一個使用者才能讓 start/ 正常運作。
-        User.objects.create_user(username="tester", password="testpass123")
-
-    def tearDown(self):
-        session_dir = Path(session_service.SESSION_ROOT_DIR) / "memory_recall"
-        shutil.rmtree(session_dir, ignore_errors=True)
+        self.user = User.objects.create_user(username="tester", password="testpass123")
+        self.client.force_authenticate(user=self.user)
 
     def _start(self):
         return self.client.post(START_URL).data["data"]
