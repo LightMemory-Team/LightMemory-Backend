@@ -60,20 +60,33 @@ games/
 
 ## 4. 共用 session 儲存（`games/session_service.py`）
 
-**每款遊戲都必須用這個模組存 session，不要自己開資料表或另寫檔案儲存。** 目前用 JSON 檔案儲存（之後可能換成資料庫，換的時候只需要重寫這個檔案內部，各遊戲的 `views.py` 完全不用改）。
+**每款遊戲都必須用這個模組存 session，不要自己開資料表或另寫檔案儲存。** 資料存在資料庫的 `GameSession`（每場一筆）與 `GameStepLog`（每次作答一筆）兩張表，各遊戲只透過這個模組的函式存取，不直接碰資料庫。
 
 ### 4.1 共通欄位（每個 session 都有，格式固定）
 
 | 欄位 | 說明 |
 | --- | --- |
-| `session_id` | 場次代碼，可以是後端自動編號的整數，也可以是前端自己產生的字串 |
+| `session_id` | 場次代碼，**字串**：後端自動產生的 UUID，或前端自己產生的字串。網址參數要用 `<str:session_id>`，不能用 `<int:...>` |
 | `game_type` | 固定字串，等於這款遊戲的資料夾名稱，用來區分不同遊戲的 session 互不干擾 |
 | `status` | `"in_progress"` 或 `"finished"` |
 | `question_number` | 目前進度（第幾題），單純累加用的計數器 |
 | `current_question` | **目前這一題的內容**（題目本身，不是題號） |
-| `step_records` | 逐題/逐次作答紀錄（陣列），不需要的遊戲可以不用 |
+| `step_records` | 逐題/逐次作答紀錄（陣列），不需要的遊戲可以不用。每筆格式見下方說明 |
 | `result` | 整場結束時的彙總結果，呼叫 `finish_session()` 時寫入 |
 | `state` | **遊戲專屬欄位全部放這裡**，session_service 不理解裡面內容 |
+
+`step_records` 每一筆長這樣，呼叫 `save_step()` 時傳入的整筆紀錄會原封不動放在 `detail` 裡：
+
+```python
+{
+    "step_number": 1,          # 第幾筆，自動編號
+    "is_correct": True,        # 從傳入的紀錄複製出來
+    "response_time_ms": 400,   # 從傳入的紀錄複製出來
+    "detail": {...},           # 傳入的整筆原始紀錄
+}
+```
+
+所以讀取遊戲專屬欄位時要從 `detail` 拿，例如 `r["detail"]["stage"]`，不能寫 `r["stage"]`。
 
 ### 4.2 遊戲專屬資料一律放進 `state`
 
@@ -87,17 +100,21 @@ games/
 
 `state` 裡要放什麼、欄位怎麼命名，完全由每款遊戲自己決定，`session_service` 不會檢查也不會限制。
 
-### 4.3 六個可用函式
+> **「是誰在玩」不要只放在 `state`。** 每個 session 都必須綁定使用者，建立時請明確傳入 `user`：
+> `session_service.create_session(GAME_TYPE, initial_state=..., user=user)`。
+> 表格裡 `user_id` 放進 `state` 是舊寫法，`session_service` 仍相容（沒傳 `user` 時會改從 `state["user_id"]` 找），新程式碼請一律傳 `user`。
+
+### 4.3 八個可用函式
 
 ```python
 from games import session_service
 
-session_service.create_session(game_type, initial_state=None)
-# 建立新 session，session_id 由後端自動編號。
+session_service.create_session(game_type, initial_state=None, user=None, is_pretest=False)
+# 建立新 session，session_id 由後端自動產生（UUID 字串）。user 請一律傳入。
 # 適合「進行中、逐題累積狀態」的玩法（market_route、market_shopping 都用這個）。
 
-session_service.get_or_create_session(game_type, session_id, initial_state=None)
-# session_id 由呼叫端指定（例如前端自己產生），不存在才建立。
+session_service.get_or_create_session(game_type, session_id, initial_state=None, user=None, is_pretest=False)
+# session_id 由呼叫端指定（例如前端自己產生），不存在才建立。user 請一律傳入。
 # 回傳 (session, created)。適合「一次性送出整批資料、需要冪等性」的玩法（market_sort 用這個）。
 
 session_service.get_session(game_type, session_id)
