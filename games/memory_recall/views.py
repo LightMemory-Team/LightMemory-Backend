@@ -15,11 +15,9 @@ GAME_TYPE = "memory_recall"
 
 STAGE_ORDER = ["basic", "intermediate", "advanced"]
 
-SAME_GROUP_DISTRACTOR_RATE = 0.7
-
 PRETEST_TOTAL_ROUNDS = 4
 BASE_TIME_LIMIT_SECONDS = 60
-PROMOTE_STREAK = 3
+PROMOTE_STREAK = 6
 PROMOTE_BONUS_SECONDS = 15
 
 # 測試用暫定值，正式上線前改為 20（規格書未定案，見 recall_memory.md 第九節討論）
@@ -145,6 +143,16 @@ def _stage_item_names(stage):
     return [i["item"] for i in load_items(stage)]
 
 
+def _all_item_names():
+    """回傳三個階段全部的物品名稱。"""
+    return [name for stage in STAGE_ORDER for name in _stage_item_names(stage)]
+
+
+def _item_stage(item):
+    """回傳物品所屬的階段（各階段物品名稱不重複）。"""
+    return next(stage for stage in STAGE_ORDER if item in _stage_item_names(stage))
+
+
 def _find_group(item):
     """回傳物品所屬的高階分組，不是高階物品就回傳 None。"""
     for group in load_advanced_groups():
@@ -158,25 +166,15 @@ def _pick_seed(stage):
 
 
 def _pick_distractor(stage, answer_item):
-    """從目前階段抽這一輪的干擾物（不能跟正解相同）。"""
-    if stage == "advanced":
-        group = _find_group(answer_item)
-        if group is not None:
-            # 不能每次都抽同組：干擾物會變下一輪正解，全抽同組就會卡在同一組兩型態來回
-            if random.random() < SAME_GROUP_DISTRACTOR_RATE:
-                return next(
-                    i["item"] for i in group["items"] if i["item"] != answer_item
-                )
-            return random.choice(
-                [
-                    i["item"]
-                    for g in load_advanced_groups()
-                    if g["group"] != group["group"]
-                    for i in g["items"]
-                ]
-            )
+    """抽這一輪的干擾物：高階從全部物品隨機抽，其他階段從同階段物品隨機抽。"""
+    pool = _all_item_names() if stage == "advanced" else _stage_item_names(stage)
+    return random.choice([name for name in pool if name != answer_item])
+
+
+def _pick_new_item(stage, option_items):
+    """抽下一輪的正解：從目前階段抽，排除這一輪畫面上的選項。"""
     return random.choice(
-        [name for name in _stage_item_names(stage) if name != answer_item]
+        [name for name in _stage_item_names(stage) if name not in option_items]
     )
 
 
@@ -204,11 +202,14 @@ def round_view(request):
         )
 
     state = session["state"]
-    stage = state["current_stage"]
     answer_item = state["current_item"]
+    # 卡片跟著正解的階段走：升階後第一輪的正解還是前一階段物品，卡片維持前一階段；
+    # new_item 則跟著目前階段走，下一輪卡片才換成新階段
+    stage = _item_stage(answer_item)
     distractor_item = _pick_distractor(stage, answer_item)
     option_items = [answer_item, distractor_item]
     random.shuffle(option_items)
+    new_item = _pick_new_item(state["current_stage"], option_items)
     group = _find_group(answer_item)
     round_number = session["question_number"] + 1
 
@@ -222,6 +223,7 @@ def round_view(request):
             "target_item": answer_item,
             "distractor_item": distractor_item,
             "option_items": option_items,
+            "new_item": new_item,
             "round_expires_at": (
                 None
                 if state["is_pretest"]
@@ -232,8 +234,13 @@ def round_view(request):
         },
     )
 
-    # 正解只留在後端，回傳不含 target_item
-    data = {"round_number": round_number, "stage": stage, "option_items": option_items}
+    # 正解只留在後端，回傳不含 target_item；new_item 是下一輪的正解，要給玩家記住
+    data = {
+        "round_number": round_number,
+        "stage": stage,
+        "option_items": option_items,
+        "new_item": new_item,
+    }
     return Response({"success": True, "data": data, "error": None})
 
 
@@ -340,6 +347,7 @@ def round_answer(request):
                 "group": current_question["group"],
                 "target_item": current_question["target_item"],
                 "option_items": current_question["option_items"],
+                "new_item": current_question["new_item"],
                 "selected_item": selected_item,
             },
         },
@@ -348,10 +356,10 @@ def round_answer(request):
     correct_streak = state["correct_streak"] + 1 if is_correct else 0
     bonus_seconds_granted = 0
     expires_at = state["expires_at"]
-    next_item = current_question["distractor_item"]
-    seed_item = None
 
-    stage_index = STAGE_ORDER.index(stage)
+    # 升階看目前階段，不看這一輪卡片的階段（升階後第一輪卡片還是前一階段）
+    current_stage = state["current_stage"]
+    stage_index = STAGE_ORDER.index(current_stage)
     promoted = (
         not is_pretest
         and is_correct
@@ -359,16 +367,13 @@ def round_answer(request):
         and stage_index < len(STAGE_ORDER) - 1
     )
     if promoted:
-        stage = STAGE_ORDER[stage_index + 1]
+        current_stage = STAGE_ORDER[stage_index + 1]
         correct_streak = 0
         bonus_seconds_granted = PROMOTE_BONUS_SECONDS
         expires_at = (
             datetime.fromisoformat(expires_at)
             + timedelta(seconds=PROMOTE_BONUS_SECONDS)
         ).isoformat()
-        # 換新階段的種子，否則下一輪正解會是舊階段物品，跟新階段干擾物混在一起
-        seed_item = _pick_seed(stage)
-        next_item = seed_item
 
     question_number = session["question_number"] + 1
 
@@ -384,9 +389,10 @@ def round_answer(request):
         session_id,
         question_number=question_number,
         state={
-            "current_stage": stage,
+            "current_stage": current_stage,
             "correct_streak": correct_streak,
-            "current_item": next_item,
+            # 記憶鏈不中斷：升階也一樣，這一輪的 new_item 就是下一輪的正解
+            "current_item": current_question["new_item"],
             "expires_at": expires_at,
         },
     )
@@ -394,12 +400,11 @@ def round_answer(request):
     data = {
         "is_correct": is_correct,
         "action": action,
-        "current_stage": stage,
+        "current_stage": current_stage,
         "correct_streak": correct_streak,
         "bonus_seconds_granted": bonus_seconds_granted,
         "expires_at": expires_at,
         "score_earned": score_earned,
-        "seed_item": seed_item,
     }
     return Response({"success": True, "data": data, "error": None})
 
