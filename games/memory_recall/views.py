@@ -6,6 +6,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from games import session_service
+from games.dda import DDAConfig, apply_answer
 from users.models import User
 
 from .item_bank import load_advanced_groups, load_item_pools, load_items
@@ -176,6 +177,40 @@ def _pick_new_item(stage, option_items):
     return random.choice(
         [name for name in _stage_item_names(stage) if name not in option_items]
     )
+
+
+class MemoryRecallDDAStrategy:
+    """memory_recall 的 DDA 策略：升階時加時間獎勵（不換種子，記憶鏈不中斷）。"""
+
+    def on_correct(
+        self, state: dict, config: DDAConfig, *, is_fast: bool = False
+    ) -> dict:
+        return {}
+
+    def on_wrong(self, state: dict, config: DDAConfig) -> dict:
+        return {}
+
+    def on_promote(
+        self, state: dict, config: DDAConfig, new_stage: str
+    ) -> dict:
+        expires_at = state.get("expires_at")
+        new_expires_at = expires_at
+        if expires_at:
+            new_expires_at = (
+                datetime.fromisoformat(expires_at)
+                + timedelta(seconds=PROMOTE_BONUS_SECONDS)
+            ).isoformat()
+        return {
+            "expires_at": new_expires_at,
+            "bonus_seconds_granted": PROMOTE_BONUS_SECONDS,
+        }
+
+
+DDA_CONFIG = DDAConfig(
+    stage_order=STAGE_ORDER,
+    promote_streak=PROMOTE_STREAK,
+)
+DDA_STRATEGY = MemoryRecallDDAStrategy()
 
 
 # 3. 取得單一題目內容
@@ -353,27 +388,30 @@ def round_answer(request):
         },
     )
 
-    correct_streak = state["correct_streak"] + 1 if is_correct else 0
-    bonus_seconds_granted = 0
-    expires_at = state["expires_at"]
+    if is_pretest:
+        # 前測不升階，只記連對數
+        updated_state = {
+            "current_stage": state["current_stage"],
+            "correct_streak": state["correct_streak"] + 1 if is_correct else 0,
+        }
+        action_status = "no_promotion"
+    else:
+        # 升階看目前階段（state 的 current_stage），不看這一輪卡片的階段
+        updated_state, action_status = apply_answer(
+            state,
+            DDA_CONFIG,
+            DDA_STRATEGY,
+            is_correct=is_correct,
+        )
+    promoted = action_status == "promoted"
+    bonus_seconds_granted = updated_state.pop("bonus_seconds_granted", 0)
+    # 記憶鏈不中斷：升階也一樣，這一輪的 new_item 就是下一輪的正解
+    updated_state["current_item"] = current_question["new_item"]
+    updated_state.setdefault("expires_at", state["expires_at"])
 
-    # 升階看目前階段，不看這一輪卡片的階段（升階後第一輪卡片還是前一階段）
-    current_stage = state["current_stage"]
-    stage_index = STAGE_ORDER.index(current_stage)
-    promoted = (
-        not is_pretest
-        and is_correct
-        and correct_streak >= PROMOTE_STREAK
-        and stage_index < len(STAGE_ORDER) - 1
-    )
-    if promoted:
-        current_stage = STAGE_ORDER[stage_index + 1]
-        correct_streak = 0
-        bonus_seconds_granted = PROMOTE_BONUS_SECONDS
-        expires_at = (
-            datetime.fromisoformat(expires_at)
-            + timedelta(seconds=PROMOTE_BONUS_SECONDS)
-        ).isoformat()
+    current_stage = updated_state["current_stage"]
+    correct_streak = updated_state["correct_streak"]
+    expires_at = updated_state["expires_at"]
 
     question_number = session["question_number"] + 1
 
@@ -388,13 +426,7 @@ def round_answer(request):
         GAME_TYPE,
         session_id,
         question_number=question_number,
-        state={
-            "current_stage": current_stage,
-            "correct_streak": correct_streak,
-            # 記憶鏈不中斷：升階也一樣，這一輪的 new_item 就是下一輪的正解
-            "current_item": current_question["new_item"],
-            "expires_at": expires_at,
-        },
+        state=updated_state,
     )
 
     data = {

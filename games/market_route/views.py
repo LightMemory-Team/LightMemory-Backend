@@ -4,6 +4,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from games import session_service
+from games.dda import DDAConfig, apply_answer
 
 from .item_bank import load_distractor_item, load_items
 from .market_score import calculate_step_score, calculate_total_score
@@ -24,6 +25,53 @@ MAX_WRONG_ATTEMPTS = 3
 EXPOSURE_STEP_DOWN = 100
 EXPOSURE_STEP_UP = 150
 POSITIONS = ["q1", "q2", "q3", "q4"]
+
+
+class RouteDDAStrategy:
+    """market_route 的 DDA 策略：計算曝光時間調整與快速連續答對。"""
+
+    def on_correct(
+        self, state: dict, config: DDAConfig, *, is_fast: bool = False
+    ) -> dict:
+        stage = state.get("current_stage", "basic")
+        _, tight = STAGE_EXPOSURE_RANGE.get(stage, (2000, 1500))
+        current_exp = state.get("exposure_time_ms", 2000)
+        fast_streak = (
+            state.get("fast_correct_streak", 0) + 1 if is_fast else 0
+        )
+        new_exp = max(tight, current_exp - EXPOSURE_STEP_DOWN)
+        return {
+            "exposure_time_ms": new_exp,
+            "fast_correct_streak": fast_streak,
+            "wrong_attempts": 0,
+        }
+
+    def on_wrong(self, state: dict, config: DDAConfig) -> dict:
+        stage = state.get("current_stage", "basic")
+        loose, _ = STAGE_EXPOSURE_RANGE.get(stage, (2000, 1500))
+        current_exp = state.get("exposure_time_ms", loose)
+        new_exp = min(loose, current_exp + EXPOSURE_STEP_UP)
+        return {
+            "exposure_time_ms": new_exp,
+            "fast_correct_streak": 0,
+        }
+
+    def on_promote(
+        self, state: dict, config: DDAConfig, new_stage: str
+    ) -> dict:
+        loose, _ = STAGE_EXPOSURE_RANGE.get(new_stage, (2000, 1500))
+        return {
+            "exposure_time_ms": loose,
+            "fast_correct_streak": 0,
+            "wrong_attempts": 0,
+        }
+
+
+DDA_CONFIG = DDAConfig(
+    stage_order=STAGE_ORDER,
+    promote_streak=PROMOTE_STREAK,
+)
+DDA_STRATEGY = RouteDDAStrategy()
 
 
 # 1. 取得本場遊戲設定
@@ -123,7 +171,7 @@ def round_view(request):
 
 
 def _apply_dda(session, is_correct, is_timeout, response_time_ms):
-    """依規格書「三、DDA 規則」計算答題後的新狀態，回傳 (更新欄位 dict, action)。
+    """依 DDA 引擎與策略計算答題後的新狀態，回傳 (更新欄位 dict, action)。
 
     額外規則（快速升階）：連續 5 題答對才升階，容易因為長者不小心誤觸提前
     達標。所以加一個更嚴格但門檻更低的條件：連續 3 題「答對且反應時間在
@@ -131,51 +179,46 @@ def _apply_dda(session, is_correct, is_timeout, response_time_ms):
     但不夠快，這個快速連續計數就歸零重算。
     """
     state = session["state"]
-    stage = state["current_stage"]
-    loose, tight = STAGE_EXPOSURE_RANGE[stage]
     exposure_time_ms = state["exposure_time_ms"]
 
-    if is_correct:
-        correct_streak = state["correct_streak"] + 1
-        wrong_attempts = 0
+    is_fast = (not is_timeout) and (
+        response_time_ms is not None
+        and response_time_ms <= exposure_time_ms * FAST_RESPONSE_RATIO
+    )
 
-        is_fast = (not is_timeout) and (
-            response_time_ms is not None
-            and response_time_ms <= exposure_time_ms * FAST_RESPONSE_RATIO
+    def extra_promote_check(st, is_fast_flag):
+        current_fast_streak = st.get("fast_correct_streak", 0)
+        return (
+            (current_fast_streak + 1 >= FAST_PROMOTE_STREAK)
+            if is_fast_flag
+            else False
         )
-        fast_correct_streak = state["fast_correct_streak"] + 1 if is_fast else 0
 
-        if (
-            correct_streak >= PROMOTE_STREAK
-            or fast_correct_streak >= FAST_PROMOTE_STREAK
-        ):
-            stage_index = STAGE_ORDER.index(stage)
-            if stage_index < len(STAGE_ORDER) - 1:
-                stage = STAGE_ORDER[stage_index + 1]
-            exposure_time_ms, _ = STAGE_EXPOSURE_RANGE[stage]
-            correct_streak = 0
-            fast_correct_streak = 0
-        else:
-            exposure_time_ms = max(tight, exposure_time_ms - EXPOSURE_STEP_DOWN)
+    if is_correct:
+        updated_fields, _ = apply_answer(
+            state,
+            DDA_CONFIG,
+            DDA_STRATEGY,
+            is_correct=True,
+            is_fast=is_fast,
+            extra_promote_check=extra_promote_check,
+        )
         action = "next_question"
     else:
-        correct_streak = 0
-        fast_correct_streak = 0
         wrong_attempts = state["wrong_attempts"] + 1
+        updated_fields, _ = apply_answer(
+            state,
+            DDA_CONFIG,
+            DDA_STRATEGY,
+            is_correct=False,
+        )
         if wrong_attempts >= MAX_WRONG_ATTEMPTS:
             action = "next_question"
             wrong_attempts = 0
         else:
-            exposure_time_ms = min(loose, exposure_time_ms + EXPOSURE_STEP_UP)
             action = "retry"
+        updated_fields["wrong_attempts"] = wrong_attempts
 
-    updated_fields = {
-        "current_stage": stage,
-        "correct_streak": correct_streak,
-        "fast_correct_streak": fast_correct_streak,
-        "wrong_attempts": wrong_attempts,
-        "exposure_time_ms": exposure_time_ms,
-    }
     return updated_fields, action
 
 
