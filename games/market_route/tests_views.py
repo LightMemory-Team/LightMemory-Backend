@@ -11,12 +11,15 @@ finish → result），驗證回傳格式與規格書欄位一致：
     python manage.py test games.market_route.tests_views
 """
 
+import uuid
+
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from games.models import GameSession
 from users.models import User
 
-from .views import POSITIONS
+from .views import DEMOTE_STREAK, FAST_PROMOTE_STREAK, POSITIONS
 
 CONFIG_URL = "/api/games/market-route/config/"
 START_URL = "/api/games/market-route/start/"
@@ -65,6 +68,19 @@ class MarketRouteTestCase(APITestCase):
 
     def _finish(self, session_id):
         return self.client.post(FINISH_URL, {"session_id": session_id}, format="json")
+
+    def _wrong_position(self, question):
+        return next(p for p in ALL_POSITIONS if p != question["target_position"])
+
+    def _promote_to_intermediate(self, session_id):
+        """連續快速答對 FAST_PROMOTE_STREAK 題升到中階，回傳最後一次作答的回應。
+
+        _answer 的 response_time_ms 是 400，低於曝光時間的 50%，每題都算快速答對。
+        """
+        for _ in range(FAST_PROMOTE_STREAK):
+            question = self._get_round(session_id)
+            response = self._answer(session_id, question["target_position"])
+        return response
 
 
 class ConfigApiTests(MarketRouteTestCase):
@@ -178,6 +194,40 @@ class RoundAnswerApiTests(MarketRouteTestCase):
         self.assertEqual(data["action"], "retry")
         self.assertEqual(data["wrong_attempts"], 1)
 
+    def test_promotion_returns_promoted_and_moves_to_next_question(self):
+        session_id = self._start()
+
+        response = self._promote_to_intermediate(session_id)
+
+        data = response.data["data"]
+        self.assertEqual(data["action"], "promoted")
+        self.assertEqual(data["current_stage"], "intermediate")
+        next_question = self._get_round(session_id)
+        self.assertEqual(next_question["question_number"], FAST_PROMOTE_STREAK + 1)
+
+    def test_wrong_streak_returns_demoted_and_resets_exposure(self):
+        """升到中階後連錯 DEMOTE_STREAK 次（跨題累計）退回初階。"""
+        session_id = self._start()
+        self._promote_to_intermediate(session_id)
+
+        actions = []
+        question = self._get_round(session_id)
+        for _ in range(DEMOTE_STREAK):
+            response = self._answer(session_id, self._wrong_position(question))
+            action = response.data["data"]["action"]
+            actions.append(action)
+            if action == "next_question":
+                question = self._get_round(session_id)
+
+        # 同一題錯 3 次換題，換題後再錯 2 次湊滿 5 次，降階優先於 retry
+        self.assertEqual(
+            actions, ["retry", "retry", "next_question", "retry", "demoted"]
+        )
+        self.assertEqual(response.data["data"]["current_stage"], "basic")
+        next_question = self._get_round(session_id)
+        self.assertEqual(next_question["stage"], "basic")
+        self.assertEqual(next_question["exposure_time_ms"], 2000)
+
 
 class FinishApiTests(MarketRouteTestCase):
     """POST /api/games/market-route/finish/"""
@@ -198,6 +248,94 @@ class FinishApiTests(MarketRouteTestCase):
         self.assertEqual(data["timeout_count"], 0)
         self.assertIsInstance(data["accuracy"], float)
         self.assertIn("total_score", data)
+
+
+class ErrorHandlingTests(MarketRouteTestCase):
+    """各支 API 的錯誤檢查：找不到、不是自己的、已結束、還沒出題。"""
+
+    def test_round_with_unknown_session_returns_404(self):
+        response = self.client.get(ROUND_URL, {"session_id": str(uuid.uuid4())})
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["error"]["code"], "SESSION_NOT_FOUND")
+
+    def test_other_user_accessing_session_returns_403(self):
+        session_id = self._start()
+        question = self._get_round(session_id)
+        other_user = User.objects.create_user(
+            username="other_tester", password="testpass123"
+        )
+        self.client.force_authenticate(user=other_user)
+
+        responses = [
+            self.client.get(ROUND_URL, {"session_id": session_id}),
+            self._answer(session_id, question["target_position"]),
+            self._finish(session_id),
+            self.client.get(result_url(session_id)),
+        ]
+
+        for response in responses:
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+            self.assertEqual(response.data["error"]["code"], "FORBIDDEN")
+
+    def test_round_and_answer_after_finished_return_409(self):
+        session_id = self._start()
+        question = self._get_round(session_id)
+        self._finish(session_id)
+
+        responses = [
+            self.client.get(ROUND_URL, {"session_id": session_id}),
+            self._answer(session_id, question["target_position"]),
+        ]
+
+        for response in responses:
+            self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+            self.assertEqual(response.data["error"]["code"], "SESSION_ALREADY_FINISHED")
+
+    def test_answer_before_round_returns_400(self):
+        session_id = self._start()
+
+        response = self._answer(session_id, "center")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["error"]["code"], "ROUND_NOT_STARTED")
+
+    def test_answer_after_moving_on_requires_new_round(self):
+        """換題後沒有呼叫 round/ 就再作答，不能重複作答已經結束的題目。"""
+        session_id = self._start()
+        question = self._get_round(session_id)
+        self._answer(session_id, question["target_position"])
+
+        response = self._answer(session_id, question["target_position"])
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["error"]["code"], "ROUND_NOT_STARTED")
+
+    def test_retry_keeps_same_question_answerable(self):
+        """retry 停在同一題，不用重新呼叫 round/ 就能再作答。"""
+        session_id = self._start()
+        question = self._get_round(session_id)
+        self._answer(session_id, self._wrong_position(question))
+
+        response = self._answer(session_id, question["target_position"])
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["data"]["is_correct"])
+
+    def test_calling_finish_twice_returns_same_result_without_recalculating(self):
+        session_id = self._start()
+        question = self._get_round(session_id)
+        self._answer(session_id, question["target_position"])
+
+        first = self._finish(session_id).data["data"]
+        finished_at = GameSession.objects.get(id=session_id).finished_at
+        second = self._finish(session_id)
+
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.data["data"], first)
+        self.assertEqual(
+            GameSession.objects.get(id=session_id).finished_at, finished_at
+        )
 
 
 class ResultApiTests(MarketRouteTestCase):

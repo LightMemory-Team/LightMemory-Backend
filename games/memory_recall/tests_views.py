@@ -18,6 +18,7 @@ from users.models import User
 from .views import (
     GAME_TYPE,
     PROMOTE_STREAK,
+    ROUND_TIMEOUT_SECONDS,
     _item_stage,
     _pick_distractor,
     _pick_new_item,
@@ -123,6 +124,12 @@ class ConfigApiTests(MemoryRecallTestCase):
         )
         self.assertNotIn("memorize_time_ms", data)
         self.assertNotIn("delay_ms", data)
+
+    def test_round_timeout_matches_backend_round_limit(self):
+        """前端靠這個值顯示本題倒數，必須跟後端實際判定 ROUND_TIME_UP 的秒數一致。"""
+        data = self.client.get(CONFIG_URL).data["data"]
+
+        self.assertEqual(data["round_timeout_seconds"], ROUND_TIMEOUT_SECONDS)
 
 
 class StartApiTests(MemoryRecallTestCase):

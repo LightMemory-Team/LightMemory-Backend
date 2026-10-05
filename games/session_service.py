@@ -6,7 +6,7 @@
 is_pretest、avg_response_time_ms 為可選參數。
 
 共通欄位（每個 session 都有，回傳的 dict 都會有這些 key）：
-    session_id, game_type, status, question_number, current_question,
+    session_id, game_type, user_id, status, question_number, current_question,
     step_records, result, state, is_pretest, avg_response_time_ms
 
 跟 JSON 時期不同、各遊戲要注意的兩點：
@@ -46,6 +46,8 @@ def _to_dict(session):
     return {
         "session_id": session.client_session_id or str(session.id),
         "game_type": session.game.code,
+        # 判斷 session 屬於誰（FORBIDDEN 檢查）用，直接讀外鍵，不依賴各遊戲的 state
+        "user_id": session.user_id,
         "status": session.status,
         "question_number": session.question_number,
         "current_question": session.current_question,
