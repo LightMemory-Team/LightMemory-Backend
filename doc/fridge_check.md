@@ -58,7 +58,7 @@ Oct 04, 2026 · @LightMemory-Backend
 
 ## 四、計分邏輯
 
-整場最終成績採 100 分制多維度加權計算，包含正確率、反應速度、難度加分與跳題懲罰：
+整場最終成績採多維度加權計算，包含正確率、反應速度、難度加分與跳題懲罰。正確率與速度分加權後滿分為 100，再加上難度加分，因此總分**可以超過 100**（不設上限）：
 
 ### 1. 正確率分數（Accuracy Score，權重 70%）
 $$\text{accuracy} = \frac{\text{total\_correct}}{\text{total\_questions}} \times 100$$
@@ -87,7 +87,11 @@ $$\text{error\_penalty} = \text{skipped\_question\_count} \times 2$$
 
 ### 5. 最終總分（Final Score）
 $$\text{raw\_final\_score} = (\text{accuracy} \times 0.7) + (\text{speed\_score} \times 0.3) + \text{difficulty\_bonus} - \text{error\_penalty}$$
-$$\text{final\_score} = \max(0, \min(100, \text{round}(\text{raw\_final\_score}, 2)))$$
+$$\text{final\_score} = \text{round}(\max(0, \text{raw\_final\_score}), 2)$$
+
+- 只限制下限為 0（避免跳題扣分造成負分），**不設上限**。
+- 例：10 題全對且皆在 3 秒內、medium 答對 3 題、hard 答對 4 題 → $70 + 30 + 5.5 = 105.5$ 分。
+- 舊版曾以 $\min(100, \cdot)$ 截斷，因此修正前完成的歷史紀錄，其 `final_score` 最高仍為 100。
 
 ## 五、資料表設計
 

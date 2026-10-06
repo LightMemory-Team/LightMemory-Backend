@@ -409,9 +409,9 @@ def calculate_final_result(session):
         - error_penalty
     )
 
-    # 限制在 0 ~ 100
+    # 只限制下限為 0（避免負分），不設上限：難度加分可讓總分超過 100
     final_score = round(
-        max(0, min(100, raw_final_score)),
+        max(0, raw_final_score),
         2,
     )
 
