@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+from datetime import timedelta
 from pathlib import Path
 from decouple import config
 
@@ -26,8 +27,10 @@ SECRET_KEY = 'django-insecure-ils*(wye_q#y7@6z_68x^t^*q@#*o_b^zl+@%*h*b=-_x#w^%z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.trycloudflare.com']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver', '.trycloudflare.com']
 
+# 透過 Cloudflare Tunnel（HTTPS）登入 admin 時，Django 會檢查表單來源網址
+CSRF_TRUSTED_ORIGINS = ['https://*.trycloudflare.com']
 
 # Application definition
 
@@ -150,6 +153,13 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+}
+
+# JWT token 有效時間（simplejwt 預設 access 只有 5 分鐘，長者玩到一半就會過期被擋 401）
+# 測試期間先拉長；前端補上「過期自動用 refresh 換新 token」後可再縮短
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
 }
 
 # 開發階段允許 Flutter 或其他前端連線
