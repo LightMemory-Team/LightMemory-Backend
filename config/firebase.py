@@ -1,16 +1,11 @@
-import os
 from pathlib import Path
 
 import firebase_admin
+from decouple import config
 from firebase_admin import credentials
-from dotenv import load_dotenv
-
 
 # 專案根目錄
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# 讀取根目錄的 .env
-load_dotenv(BASE_DIR / ".env")
 
 
 def get_firebase_app():
@@ -23,10 +18,9 @@ def get_firebase_app():
         return firebase_admin.get_app()
 
     except ValueError:
-        # 從 .env 取得 Firebase 金鑰相對路徑
-        credentials_path = os.getenv(
-            "FIREBASE_CREDENTIALS_PATH",
-            "secrets/firebase-key.json"
+        # 從 .env 取得 Firebase 金鑰相對路徑（decouple 會自動讀根目錄的 .env）
+        credentials_path = config(
+            "FIREBASE_CREDENTIALS_PATH", default="secrets/firebase-key.json"
         )
 
         # 組合成完整路徑
@@ -39,9 +33,9 @@ def get_firebase_app():
         return firebase_admin.initialize_app(
             cred,
             {
-                "projectId": os.getenv("FIREBASE_PROJECT_ID"),
-                "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET"),
-            }
+                "projectId": config("FIREBASE_PROJECT_ID"),
+                "storageBucket": config("FIREBASE_STORAGE_BUCKET"),
+            },
         )
 
 
