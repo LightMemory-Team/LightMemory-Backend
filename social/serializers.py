@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Notification
+from .models import Notification, Comment
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -16,3 +16,16 @@ class NotificationSerializer(serializers.ModelSerializer):
             'is_read',
             'created_at',
         ]
+
+class CommentSerializer(serializers.ModelSerializer):
+    sender_name = serializers.CharField(source='user.username', read_only=True)
+    text = serializers.CharField(source='content')
+
+    class Meta:
+        model = Comment
+        fields = ['id', 'sender_name', 'text', 'created_at']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['comment_id'] = data.pop('id')
+        return data
