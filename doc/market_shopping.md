@@ -85,8 +85,16 @@ $$\text{accuracy} = \frac{\text{first\_try\_correct\_count}}{\text{total\_questi
 ### 2. 總結算指標
 - `total_correct`：總成功完成題數（含重試後完成的題目，滿分 10 題）。
 - `first_try_correct_count`：從選菜到找零完全未犯錯之完美題數。
-- `accuracy`：一次正確率百分比（`0.0 ~ 100.0`）。
+- `accuracy` / `raw_score`：一次正確率百分比（`0.0 ~ 100.0`）。
 - `final_difficulty`：遊戲結束時所達到的最終難度階段。
+
+### 3. Z-Score 與跨遊戲標準分數（Standard Score）
+依參考常模（預設 $\mu=70.0, \sigma=10.0$）計算 Z 分數，並限制在 $\pm 2.0$ 範圍內，最後換算為跨遊戲統一標準分數（中心值 50，標準差 20）：
+
+$$Z_{\text{raw}} = \frac{\text{raw\_score} - \mu}{\sigma}$$
+$$Z = \max(-2.0, \min(2.0, Z_{\text{raw}}))$$
+$$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
+
 
 ## 五、資料表設計
 
@@ -137,6 +145,9 @@ $$\text{accuracy} = \frac{\text{first\_try\_correct\_count}}{\text{total\_questi
   "first_try_correct_count": 8,
   "total_questions": 10,
   "accuracy": 80.0,
+  "raw_score": 80.0,
+  "z_score": 1.0,
+  "standard_score": 70,
   "difficulty": "hard",
   "completed_at": "2026-10-04T00:25:30.123456+08:00"
 }
@@ -148,7 +159,6 @@ $$\text{accuracy} = \frac{\text{first\_try\_correct\_count}}{\text{total\_questi
 
 ### 1. POST `/api/games/market-shopping/sessions/`
 建立新遊戲局次，並取得第 1 題資料。
-*(別名路由支援：`POST /api/games/market-shopping/session/`)*
 
 **Response Body**
 
@@ -179,7 +189,6 @@ $$\text{accuracy} = \frac{\text{first\_try\_correct\_count}}{\text{total\_questi
 
 ### 2. POST `/api/games/market-shopping/sessions/{session_id}/item-answers/`
 提交選菜食材代碼列表。
-*(別名路由支援：`POST .../sessions/{id}/item-answer/`)*
 
 **Request Body**
 
@@ -228,7 +237,6 @@ $$\text{accuracy} = \frac{\text{first\_try\_correct\_count}}{\text{total\_questi
 
 ### 3. POST `/api/games/market-shopping/sessions/{session_id}/change-answers/`
 提交找零金額答案，由後端執行 DDA 升階與換題。
-*(別名路由支援：`POST .../sessions/{id}/change-answer/`)*
 
 **Request Body**
 
@@ -273,6 +281,9 @@ $$\text{accuracy} = \frac{\text{first\_try\_correct\_count}}{\text{total\_questi
     "first_try_correct_count": 8,
     "total_questions": 10,
     "accuracy": 80.0,
+    "raw_score": 80.0,
+    "z_score": 1.0,
+    "standard_score": 70,
     "difficulty": "hard",
     "completed_at": "2026-10-04T00:28:15.123456+08:00"
   },
@@ -292,7 +303,10 @@ $$\text{accuracy} = \frac{\text{first\_try\_correct\_count}}{\text{total\_questi
   "success": true,
   "data": [
     {
-      "score": 8,
+      "score": 70,
+      "raw_score": 80.0,
+      "z_score": 1.0,
+      "standard_score": 70,
       "accuracy": 80.0,
       "played_at": "2026-10-04T00:28:15.123456+08:00"
     }
