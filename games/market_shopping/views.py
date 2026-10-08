@@ -114,6 +114,7 @@ def submit_item_answer(request, session_id):
         next_question = services.move_to_next_question(session)
         if next_question is None:
             final_session = services.get_session(session_id)
+            result = final_session.get("result") or services.calculate_final_result(final_session)
             return Response(
                 {
                     "success": True,
@@ -122,8 +123,14 @@ def submit_item_answer(request, session_id):
                         "retry": False,
                         "question_skipped": True,
                         "is_completed": True,
-                        "total_correct": final_session["state"]["total_correct"],
+                        "total_correct": result["total_correct"],
+                        "first_try_correct_count": result["first_try_correct_count"],
                         "total_questions": TOTAL_QUESTIONS,
+                        "accuracy": result["accuracy"],
+                        "raw_score": result.get("raw_score"),
+                        "z_score": result.get("z_score"),
+                        "standard_score": result.get("standard_score"),
+                        "completed_at": result["completed_at"],
                     },
                     "error": None,
                 },
@@ -266,8 +273,12 @@ def submit_change_answer(request, session_id):
                         "question_skipped": True,
                         "is_completed": True,
                         "total_correct": result["total_correct"],
+                        "first_try_correct_count": result["first_try_correct_count"],
                         "total_questions": TOTAL_QUESTIONS,
                         "accuracy": result["accuracy"],
+                        "raw_score": result.get("raw_score"),
+                        "z_score": result.get("z_score"),
+                        "standard_score": result.get("standard_score"),
                         "completed_at": result["completed_at"],
                     },
                     "error": None,
@@ -309,6 +320,9 @@ def submit_change_answer(request, session_id):
                     "first_try_correct_count": result["first_try_correct_count"],
                     "total_questions": TOTAL_QUESTIONS,
                     "accuracy": result["accuracy"],
+                    "raw_score": result.get("raw_score"),
+                    "z_score": result.get("z_score"),
+                    "standard_score": result.get("standard_score"),
                     "difficulty": result["difficulty"],
                     "completed_at": result["completed_at"],
                 },

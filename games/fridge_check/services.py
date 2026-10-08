@@ -30,6 +30,43 @@ ERROR_PENALTY_PER_SKIPPED_QUESTION = 2
 MEDIUM_CORRECT_BONUS = 0.5
 HARD_CORRECT_BONUS = 1.0
 
+# 常模與 Z-score 設定
+FRIDGE_SCORE_NORM = {
+    "mean": 70.0,
+    "std": 10.0,
+}
+
+Z_SCORE_CLAMP = 2.0
+
+
+def calculate_z_score(final_score):
+    """
+    依常模計算 Fridge Check 的 Z-score 與跨遊戲標準分數 (standard_score)。
+
+    Z = (final_score - mean) / std
+    Z-score 限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]
+    standard_score = 50 + 20 * z_score
+    """
+    mean = FRIDGE_SCORE_NORM["mean"]
+    std = FRIDGE_SCORE_NORM["std"]
+
+    if std == 0:
+        z_score = 0.0
+    else:
+        z_score = (final_score - mean) / std
+
+    z_score = max(
+        -Z_SCORE_CLAMP,
+        min(Z_SCORE_CLAMP, z_score),
+    )
+
+    standard_score = 50 + 20 * z_score
+
+    return {
+        "z_score": round(z_score, 3),
+        "standard_score": round(standard_score),
+    }
+
 
 def _build_current_question(question):
     """把 generator 產生的題目整理成 Session 儲存格式。"""
@@ -415,6 +452,11 @@ def calculate_final_result(session):
         2,
     )
 
+    # Z-score 與跨遊戲標準分數
+    z_result = calculate_z_score(final_score)
+    z_score = z_result["z_score"]
+    standard_score = z_result["standard_score"]
+
     # 平均反應時間
     average_reaction_time_ms = (
         round(
@@ -443,6 +485,8 @@ def calculate_final_result(session):
         "error_penalty": error_penalty,
 
         "final_score": final_score,
+        "z_score": z_score,
+        "standard_score": standard_score,
         "final_difficulty": state.get("current_stage", state.get("difficulty", DIFFICULTY_EASY)),
 
         "average_reaction_time_ms": (
@@ -516,6 +560,8 @@ def get_history(user_id):
                 "difficulty_bonus": result["difficulty_bonus"],
                 "error_penalty": result["error_penalty"],
                 "final_score": result["final_score"],
+                "z_score": result.get("z_score"),
+                "standard_score": result.get("standard_score"),
                 "average_reaction_time_ms": average_reaction_time_ms,
                 "completed_at": completed_at,
             }

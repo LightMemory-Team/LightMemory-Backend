@@ -264,6 +264,12 @@ def submit_answer(request, session_id):
                         "final_score": (
                             result["final_score"]
                         ),
+                        "z_score": (
+                            result.get("z_score")
+                        ),
+                        "standard_score": (
+                            result.get("standard_score")
+                        ),
                         "final_difficulty": (
                             result["final_difficulty"]
                         ),
@@ -381,6 +387,12 @@ def submit_answer(request, session_id):
 
                     "final_score": (
                         result["final_score"]
+                    ),
+                    "z_score": (
+                        result.get("z_score")
+                    ),
+                    "standard_score": (
+                        result.get("standard_score")
                     ),
                     "final_difficulty": (
                         result["final_difficulty"]

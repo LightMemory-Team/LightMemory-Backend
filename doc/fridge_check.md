@@ -89,6 +89,13 @@ $$\text{error\_penalty} = \text{skipped\_question\_count} \times 2$$
 $$\text{raw\_final\_score} = (\text{accuracy} \times 0.7) + (\text{speed\_score} \times 0.3) + \text{difficulty\_bonus} - \text{error\_penalty}$$
 $$\text{final\_score} = \max(0, \min(100, \text{round}(\text{raw\_final\_score}, 2)))$$
 
+### 6. Z-Score 與跨遊戲標準分數（Standard Score）
+依參考常模（預設 $\mu=70.0, \sigma=10.0$）計算 Z 分數，並限制在 $\pm 2.0$ 範圍避免極端值失真，最後換算為跨遊戲統一標準分數（中心值 50，標準差 20）：
+
+$$Z_{\text{raw}} = \frac{\text{final\_score} - \mu}{\sigma}$$
+$$Z = \max(-2.0, \min(2.0, Z_{\text{raw}}))$$
+$$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
+
 ## 五、資料表設計
 
 沿用遊戲共用儲存架構：`GameSession`（共用場次表）+ `GameStepLog`（逐題明細）。
@@ -142,6 +149,8 @@ $$\text{final\_score} = \max(0, \min(100, \text{round}(\text{raw\_final\_score},
   "skipped_question_count": 1,
   "error_penalty": 2,
   "final_score": 80.3,
+  "z_score": 1.03,
+  "standard_score": 71,
   "final_difficulty": "hard",
   "average_reaction_time_ms": 2450,
   "completed_at": "2026-10-04T00:15:30.123456+08:00"
@@ -277,6 +286,8 @@ $$\text{final\_score} = \max(0, \min(100, \text{round}(\text{raw\_final\_score},
     "difficulty_bonus": 3.5,
     "error_penalty": 2,
     "final_score": 80.3,
+    "z_score": 1.03,
+    "standard_score": 71,
     "final_difficulty": "hard",
     "average_reaction_time_ms": 2450,
     "completed_at": "2026-10-04T00:20:15.123456+08:00"
@@ -311,6 +322,8 @@ $$\text{final\_score} = \max(0, \min(100, \text{round}(\text{raw\_final\_score},
         "difficulty_bonus": 4.0,
         "error_penalty": 0,
         "final_score": 85.5,
+        "z_score": 1.55,
+        "standard_score": 81,
         "average_reaction_time_ms": 2150,
         "completed_at": "2026-10-04T00:15:30.123456+08:00"
       }

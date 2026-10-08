@@ -22,6 +22,44 @@ DDA_CONFIG = DDAConfig(
 )
 DDA_STRATEGY = NoOpStrategy()
 
+# 常模與 Z-score 設定
+MARKET_SHOPPING_NORM = {
+    "mean": 70.0,
+    "std": 10.0,
+}
+
+Z_SCORE_CLAMP = 2.0
+
+
+def calculate_z_score(raw_score):
+    """
+    依常模計算 Market Shopping 的 Z-score 與跨遊戲標準分數 (standard_score)。
+
+    Z = (raw_score - mean) / std
+    Z-score 限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]
+    standard_score = 50 + 20 * z_score
+    """
+    mean = MARKET_SHOPPING_NORM["mean"]
+    std = MARKET_SHOPPING_NORM["std"]
+
+    if std == 0:
+        z_score = 0.0
+    else:
+        z_score = (raw_score - mean) / std
+
+    z_score = max(
+        -Z_SCORE_CLAMP,
+        min(Z_SCORE_CLAMP, z_score),
+    )
+
+    standard_score = 50 + 20 * z_score
+
+    return {
+        "z_score": round(z_score, 3),
+        "standard_score": round(standard_score),
+    }
+
+
 
 def generate_question(difficulty="easy"):
     """依難度產生題目與購物清單。"""
@@ -312,11 +350,20 @@ def calculate_final_result(session):
         state["first_try_correct_count"] / TOTAL_QUESTIONS * 100,
         2,
     )
+    raw_score = accuracy
+
+    z_result = calculate_z_score(raw_score)
+    z_score = z_result["z_score"]
+    standard_score = z_result["standard_score"]
+
     return {
         "total_correct": state["total_correct"],
         "first_try_correct_count": state["first_try_correct_count"],
         "total_questions": TOTAL_QUESTIONS,
         "accuracy": accuracy,
+        "raw_score": raw_score,
+        "z_score": z_score,
+        "standard_score": standard_score,
         "difficulty": state.get("current_stage", state.get("difficulty", "easy")),
         "completed_at": completed_at.isoformat(),
     }
@@ -349,8 +396,11 @@ def get_history(user_id):
 
     return [
         {
-            "score": session["result"]["first_try_correct_count"],
-            "accuracy": session["result"]["accuracy"],
+            "score": session["result"].get("standard_score", session["result"].get("first_try_correct_count")),
+            "raw_score": session["result"].get("raw_score", session["result"].get("accuracy")),
+            "z_score": session["result"].get("z_score"),
+            "standard_score": session["result"].get("standard_score"),
+            "accuracy": session["result"].get("accuracy"),
             "played_at": session["result"]["completed_at"],
         }
         for session in recent_sessions
