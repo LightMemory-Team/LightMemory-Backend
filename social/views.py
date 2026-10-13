@@ -60,6 +60,14 @@ class PostDetailView(APIView):
         if not post:
             return error_response("POST_NOT_FOUND", "找不到這則貼文", 404)
         return Response({"data": serialize_post(post, request.user)})
+    def delete(self, request, post_id):
+        post = get_visible_post(request.user, post_id)
+        if not post:
+            return error_response("POST_NOT_FOUND", "找不到這則貼文", 404)
+        if post.user_id != request.user.id:
+            return error_response("NOT_POST_OWNER", "只有作者能刪除這則貼文", 403)
+        post.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PostLikeView(APIView):
@@ -134,3 +142,17 @@ class PostCommentsView(APIView):
 
         serializer = CommentSerializer(comment, context={'request': request})
         return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
+    
+class CommentDeleteView(APIView):
+    """S-15 刪除留言(留言者本人或貼文作者可刪)"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, comment_id):
+        comment = (Comment.objects.select_related('post')
+                   .filter(pk=comment_id, post__is_enabled=True).first())
+        if not comment:
+            return error_response("COMMENT_NOT_FOUND", "找不到這則留言", 404)
+        if request.user.id not in (comment.user_id, comment.post.user_id):
+            return error_response("NOT_ALLOWED", "只能刪除自己的留言，或自己貼文下的留言", 403)
+        comment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

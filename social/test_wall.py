@@ -66,3 +66,39 @@ class WallApiTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data['pagination']['count'], 1)
         self.assertFalse(r.data['data'][0]['is_mine'])
+    
+    def test_delete_post_only_by_author(self):
+        url = f'/api/social/posts/{self.post.id}/'
+        r = self.client.delete(url)  # 目前登入的是 b,不是作者
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.data['error']['code'], 'NOT_POST_OWNER')
+
+        Comment.objects.create(post=self.post, user=self.b, content='hi')
+        Like.objects.create(post=self.post, user=self.b)
+        self.client.force_authenticate(self.a)
+        self.assertEqual(self.client.delete(url).status_code, 204)
+        self.assertFalse(Post.objects.filter(pk=self.post.id).exists())
+        self.assertEqual(Comment.objects.count(), 0)
+        self.assertEqual(Like.objects.count(), 0)
+        self.assertEqual(self.client.delete(url).status_code, 404)
+
+    def test_delete_comment_permissions(self):
+        other = User.objects.create_user(username='c', password='x')
+        comment = Comment.objects.create(post=self.post, user=self.b, content='hi')
+        url = f'/api/social/comments/{comment.id}/'
+
+        self.client.force_authenticate(other)  # 不是留言者也不是貼文作者
+        r = self.client.delete(url)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.data['error']['code'], 'NOT_ALLOWED')
+
+        self.client.force_authenticate(self.a)  # 貼文作者可刪
+        self.assertEqual(self.client.delete(url).status_code, 204)
+
+        comment2 = Comment.objects.create(post=self.post, user=self.b, content='again')
+        self.client.force_authenticate(self.b)  # 留言者本人可刪
+        self.assertEqual(self.client.delete(f'/api/social/comments/{comment2.id}/').status_code, 204)
+
+        r = self.client.delete(url)  # 已刪除,再刪回 404
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.data['error']['code'], 'COMMENT_NOT_FOUND')
