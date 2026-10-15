@@ -499,7 +499,7 @@ def get_history(user_id):
 
     return [
         {
-            "score": session["result"].get("standard_score", session["result"].get("raw_score")),
+            "score": session["result"].get("raw_score", session["result"].get("standard_score")),
             "first_try_correct_count": session["result"].get("first_try_correct_count"),
             "raw_score": session["result"].get("raw_score", session["result"].get("accuracy")),
             "z_score": session["result"].get("z_score"),
