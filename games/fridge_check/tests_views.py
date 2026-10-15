@@ -56,6 +56,12 @@ class FridgeCheckApiTests(TestCase):
         self.assertTrue(response.data["success"])
         self.assertTrue(response.data["data"]["is_correct"])
 
+        # 驗證 save_step 有正確記錄該題作答
+        updated_session = services.get_session(session_id)
+        self.assertEqual(len(updated_session["step_records"]), 1)
+        self.assertTrue(updated_session["step_records"][0]["is_correct"])
+        self.assertEqual(updated_session["step_records"][0]["response_time_ms"], 1500)
+
     def test_submit_answer_wrong_retry(self):
         """測試提交錯誤答案，允許 retry"""
         session_res = self.client.post("/api/games/fridge-check/sessions/")

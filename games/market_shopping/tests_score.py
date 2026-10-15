@@ -11,6 +11,7 @@ from django.test import SimpleTestCase
 from games.market_shopping.services import (
     calculate_z_score,
     calculate_final_result,
+    calculate_speed_score,
     MARKET_SHOPPING_NORM,
     Z_SCORE_CLAMP,
     TOTAL_QUESTIONS,
@@ -67,9 +68,22 @@ class MarketShoppingZScoreTests(SimpleTestCase):
         self.assertEqual(res["standard_score"], 81)
 
 
+class MarketShoppingSpeedScoreTests(SimpleTestCase):
+    def test_calculate_speed_score_tiers(self):
+        """驗證單步反應速度分數分級。"""
+        self.assertEqual(calculate_speed_score(2000), 5.0)
+        self.assertEqual(calculate_speed_score(3000), 5.0)
+        self.assertEqual(calculate_speed_score(4500), 4.0)
+        self.assertEqual(calculate_speed_score(6000), 4.0)
+        self.assertEqual(calculate_speed_score(8000), 2.5)
+        self.assertEqual(calculate_speed_score(10000), 2.5)
+        self.assertEqual(calculate_speed_score(12000), 1.5)
+        self.assertEqual(calculate_speed_score(None), 0.0)
+
+
 class MarketShoppingFinalResultTests(SimpleTestCase):
     def test_calculate_final_result_includes_z_score_and_standard_score(self):
-        """測試 calculate_final_result 完整回傳欄位與分數換算。"""
+        """測試 calculate_final_result 完整回傳欄位與分數換算（無速度分時維持純正確率相容）。"""
         fake_session = {
             "state": {
                 "total_correct": 9,
@@ -95,3 +109,29 @@ class MarketShoppingFinalResultTests(SimpleTestCase):
         # standard_score = round(50 + 20 * 1.0) = 70
         self.assertEqual(result["standard_score"], 70)
         self.assertIn("completed_at", result)
+
+    def test_calculate_final_result_with_speed_score_continuous_standard_score(self):
+        """測試加入作答速度分後，raw_score 與 standard_score 能形成連續細緻分佈（打破 5 種離散數值限制）。"""
+        fake_session = {
+            "state": {
+                "total_correct": 9,
+                "first_try_correct_count": 8,
+                "speed_score": 85.0,
+                "answer_count": 20,
+                "total_reaction_time_ms": 60000,
+                "current_stage": "hard",
+            }
+        }
+
+        result = calculate_final_result(fake_session)
+
+        # accuracy = 80.0, speed_score = 85.0
+        # raw_score = 80.0 * 0.7 + 85.0 * 0.3 = 56.0 + 25.5 = 81.5
+        self.assertEqual(result["accuracy"], 80.0)
+        self.assertEqual(result["speed_score"], 85.0)
+        self.assertEqual(result["raw_score"], 81.5)
+        # Z = (81.5 - 70) / 10 = 1.15
+        self.assertEqual(result["z_score"], 1.15)
+        # standard_score = round(50 + 20 * 1.15) = 73 (非原本離散的 70!)
+        self.assertEqual(result["standard_score"], 73)
+        self.assertEqual(result["average_reaction_time_ms"], 3000)

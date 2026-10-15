@@ -93,15 +93,16 @@ class FridgeCheckFinalResultTests(SimpleTestCase):
         # difficulty_bonus = 3 * 0.5 + 2 * 1.0 = 3.5
         self.assertEqual(result["difficulty_bonus"], 3.5)
         # error_penalty = 1 * 2 = 2
-        self.assertEqual(result["error_penalty"], 2)
-        # raw_final_score = 80.0 * 0.7 + 76 * 0.3 + 3.5 - 2 = 56.0 + 22.8 + 3.5 - 2 = 80.3
+        # raw_score = 80.0 * 0.7 + 76 * 0.3 = 78.8
+        self.assertEqual(result["raw_score"], 78.8)
+        # raw_final_score = 78.8 + 3.5 - 2 = 80.3
         self.assertEqual(result["final_score"], 80.3)
 
-        # 2. 驗證 Z-score 與 standard_score
-        # Z = (80.3 - 70) / 10 = 1.03
-        self.assertEqual(result["z_score"], 1.03)
-        # standard_score = round(50 + 20 * 1.03) = round(70.6) = 71
-        self.assertEqual(result["standard_score"], 71)
+        # 2. 驗證 Z-score 與 standard_score（以 raw_score 原始能力指標計算）
+        # Z = (78.8 - 70) / 10 = 0.88
+        self.assertEqual(result["z_score"], 0.88)
+        # standard_score = round(50 + 20 * 0.88) = round(67.6) = 68
+        self.assertEqual(result["standard_score"], 68)
 
         # 3. 驗證基本欄位存在
         self.assertEqual(result["total_correct"], 8)
