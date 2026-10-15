@@ -88,9 +88,7 @@ def calculate_raw_metrics(questions: list[dict]) -> dict:
     """
     repeat_q = [q for q in questions if q["trial_type"] == "repeat"]
     switch_q = [
-        q
-        for q in questions
-        if q["trial_type"] == "switch" and q["question_index"] != 1
+        q for q in questions if q["trial_type"] == "switch" and q["question_index"] != 1
     ]
 
     if not switch_q:
@@ -118,8 +116,12 @@ def calculate_raw_metrics(questions: list[dict]) -> dict:
         len(repeat_correct) >= MIN_CORRECT_FOR_SWITCH_COST_RT
         and len(switch_correct) >= MIN_CORRECT_FOR_SWITCH_COST_RT
     ):
-        repeat_rt_avg = statistics.mean(q["reaction_time_ms"] for q in repeat_correct) / 1000
-        switch_rt_avg = statistics.mean(q["reaction_time_ms"] for q in switch_correct) / 1000
+        repeat_rt_avg = (
+            statistics.mean(q["reaction_time_ms"] for q in repeat_correct) / 1000
+        )
+        switch_rt_avg = (
+            statistics.mean(q["reaction_time_ms"] for q in switch_correct) / 1000
+        )
         switch_cost_rt = round(switch_rt_avg - repeat_rt_avg, 2)
     else:
         switch_cost_rt = None
@@ -161,7 +163,8 @@ def calculate_learning_speed(questions: list[dict]) -> float:
     """
     if len(questions) < STAGE_BOUNDARIES[-1]:
         raise InsufficientDataError(
-            f"題目數量不足（收到 {len(questions)} 題，需要 {STAGE_BOUNDARIES[-1]} 題），無法計算學習速度",
+            f"題目數量不足（收到 {len(questions)} 題，"
+            f"需要 {STAGE_BOUNDARIES[-1]} 題），無法計算學習速度",
             code="INSUFFICIENT_QUESTION_COUNT",
         )
 
@@ -231,7 +234,9 @@ def calculate_cognitive_flexibility_score(questions: list[dict]) -> dict:
         + z_scores["learning_speed_z"] * WEIGHTS["learning_speed"]
     )
     weight_total = (
-        WEIGHTS["overall_accuracy"] + WEIGHTS["switch_accuracy"] + WEIGHTS["learning_speed"]
+        WEIGHTS["overall_accuracy"]
+        + WEIGHTS["switch_accuracy"]
+        + WEIGHTS["learning_speed"]
     )
 
     if raw_metrics["switch_cost_rt"] is not None:
@@ -251,6 +256,8 @@ def calculate_cognitive_flexibility_score(questions: list[dict]) -> dict:
     return {
         "raw_metrics": raw_metrics,
         "z_scores": z_scores,
+        # 加權後的整體 z（±2 內），給 dashboard 用
+        "z_score": round(weighted_z, 3),
         "cognitive_flexibility_score": round(final_score),
     }
 

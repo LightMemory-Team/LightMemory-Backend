@@ -13,6 +13,7 @@ from django.test import SimpleTestCase
 from rest_framework.test import APITestCase
 
 from games import session_service
+from games.models import GameSession
 from users.models import User
 
 from .views import (
@@ -274,6 +275,7 @@ class PretestFlowTests(MemoryRecallTestCase):
         self.assertEqual(data["total_rounds"], 4)
         self.assertEqual(data["final_stage"], "basic")
         self.assertIsNone(data["total_score"])
+        self.assertIsNone(data["z_score"])
         self.assertNotIn("score", data)
 
     def test_calling_finish_twice_returns_same_result_without_recalculating(self):
@@ -422,20 +424,53 @@ class OfficialGameFlowTests(MemoryRecallTestCase):
 
         self.assertEqual(data["total_bonus_seconds"], 15)
         self.assertEqual(data["final_stage"], "intermediate")
-        self.assertIsNotNone(data["total_score"])
 
-    def test_finish_returns_raw_score_without_normalized_score(self):
+    def test_total_score_is_null_without_enough_history(self):
+        # 只有前測 1 場歷史，算不出 z → total_score 回傳 null，前端顯示提示文字
         session_id = self._start_official_session()
-        for _ in range(3):  # basic 答對 3 題：原始分 30
+        for _ in range(3):
             self._answer_correctly(session_id)
 
         data = self.client.post(
             FINISH_URL, {"session_id": session_id}, format="json"
         ).data["data"]
 
-        self.assertEqual(data["total_score"], 30)
-        # 單場結束只回傳 raw 分數，0~100 分換算之後再做
-        self.assertNotIn("score", data)
+        self.assertIsNone(data["z_score"])
+        self.assertIsNone(data["total_score"])
+
+    def _play_official_one_round(self, response_time_ms):
+        """開一場正式賽、用指定反應時間答對 1 題、結束，回傳結束的 data。"""
+        session_id = self._start()["session_id"]
+        question = self._get_round(session_id)
+        self._answer(
+            session_id,
+            question["round_number"],
+            self._current_answer(session_id),
+            response_time_ms=response_time_ms,
+        )
+        return self.client.post(
+            FINISH_URL, {"session_id": session_id}, format="json"
+        ).data["data"]
+
+    def test_total_score_converted_from_z_score(self):
+        # 歷史 3 場 basic 反應時間：前測 1000、正式賽 800、1200
+        #   → 平均 1000、標準差 200；正確率都是 1，標準差 0 不計入
+        self._start_official_session()  # 前測，每題反應時間 1000
+        self._play_official_one_round(800)
+        self._play_official_one_round(1200)
+
+        data = self._play_official_one_round(800)
+
+        # z_反應時間 = -(800 - 1000) / 200 = 1 → total_score = 50 + 25 * 1 = 75
+        self.assertAlmostEqual(data["z_score"], 1.0)
+        self.assertEqual(data["total_score"], 75)
+        # 也有存進資料庫，dashboard 之後直接讀 result
+        session = (
+            GameSession.objects.filter(status="finished")
+            .order_by("-finished_at")
+            .first()
+        )
+        self.assertEqual(session.result["z_score"], data["z_score"])
 
 
 class ErrorHandlingTests(MemoryRecallTestCase):
