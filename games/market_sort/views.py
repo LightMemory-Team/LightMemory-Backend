@@ -77,6 +77,11 @@ class MarketSortSubmitView(APIView):
                 "z_scores": result["z_scores"],
                 "z_score": result["z_score"],
                 "cognitive_flexibility_score": result["cognitive_flexibility_score"],
+                # 這款遊戲玩完才一次送出，session 的開始、結束時間幾乎一樣，
+                # 遊玩時間改用 28 題反應時間加總（週報表用）
+                "play_seconds": round(
+                    sum(q["reaction_time_ms"] for q in questions) / 1000
+                ),
                 "generated_at": timezone.now().isoformat(),
             },
         )

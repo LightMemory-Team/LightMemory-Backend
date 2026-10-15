@@ -95,13 +95,20 @@ def count_finished_sessions(user, week_start):
 
 
 def get_play_time(user, week_start):
-    """這週各遊戲的遊玩秒數與總秒數；每場 = 結束時間 − 開始時間，沒玩完的不算。"""
+    """這週各遊戲的遊玩秒數與總秒數，沒玩完的不算。
+
+    每場 = 結算結果的 play_seconds（整理菜籃玩完才建立 session，只能用這個），
+    沒有的話用「結束時間 − 開始時間」。
+    """
     seconds_by_game = dict.fromkeys(GAME_SOURCES, 0)
     sessions = _finished_sessions_in_week(user, week_start).values_list(
-        "game__code", "created_at", "finished_at"
+        "game__code", "created_at", "finished_at", "result"
     )
-    for code, created_at, finished_at in sessions:
-        seconds_by_game[code] += round((finished_at - created_at).total_seconds())
+    for code, created_at, finished_at, result in sessions:
+        play_seconds = (result or {}).get("play_seconds")
+        if play_seconds is None:
+            play_seconds = round((finished_at - created_at).total_seconds())
+        seconds_by_game[code] += play_seconds
 
     return {
         "total_seconds": sum(seconds_by_game.values()),

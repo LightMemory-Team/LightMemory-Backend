@@ -103,6 +103,18 @@ class MarketSortSubmitEndpointTests(APITestCase):
         z_score = session.result["z_score"]
         self.assertTrue(-2 <= z_score <= 2)
 
+    def test_submit_saves_play_seconds_from_reaction_times(self):
+        payload = {
+            "session_id": "test_play_time",
+            "is_complete": True,
+            "questions": build_questions(),
+        }
+        self.client.post(SUBMIT_URL, payload, format="json")
+
+        session = GameSession.objects.get(client_session_id="test_play_time")
+        # 5 x 2000 + 2500 + 2100 + 21 x 2000 = 56600 ms → 57 秒
+        self.assertEqual(session.result["play_seconds"], 57)
+
     def test_incomplete_session_does_not_calculate_score(self):
         payload = {
             "session_id": "test_3",
