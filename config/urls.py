@@ -25,4 +25,5 @@ urlpatterns = [
     path("api/users/", include("users.urls")),  # 使用者
     path("api/games/", include("games.urls")),  # 遊戲
     path("api/diary/", include("diary.urls")),  # 聲影日記
+    path("api/dashboard/", include("dashboard.urls")),  # 儀表板
 ]
