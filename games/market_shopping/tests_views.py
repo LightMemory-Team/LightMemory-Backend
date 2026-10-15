@@ -191,7 +191,8 @@ class FullGameFlowTests(MarketShoppingTestCase):
 
         response = self.client.get(HISTORY_URL)
         history_item = response.data["data"][0]
-        self.assertEqual(history_item["score"], 10)
+        self.assertEqual(history_item["score"], 90)
+        self.assertEqual(history_item["first_try_correct_count"], 10)
         self.assertEqual(history_item["standard_score"], 90)
         self.assertEqual(history_item["speed_score"], 100.0)
         self.assertEqual(history_item["average_reaction_time_ms"], 2750)
