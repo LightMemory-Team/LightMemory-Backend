@@ -19,6 +19,14 @@ DIFFICULTY_MULTIPLIER = {
 SPEED_BONUS_SCORE = 2
 SPEED_BONUS_RATIO = 0.5
 
+# 單場理論最高分：每場固定從 basic 開始，最快連續 3 題快速答對就升階
+# basic 3 題 x 12 + intermediate 3 題 x 15 + advanced 14 題 x 18 = 333
+MAX_TOTAL_SCORE = 333
+
+# 結束畫面給長者看的分數範圍，最低 1 分（不出現 0 分）
+MIN_DISPLAY_SCORE = 1
+MAX_DISPLAY_SCORE = 100
+
 
 def calculate_base_score(attempt_number, is_correct, is_timeout):
     """依這次嘗試的結果算基礎分。
@@ -61,3 +69,9 @@ def calculate_total_score(step_results):
     step_results: list of dict，每筆為一次嘗試，欄位同 calculate_step_score 的參數。
     """
     return sum(calculate_step_score(**step) for step in step_results)
+
+
+def normalize_total_score(raw_total_score):
+    """把單場原始總分（0～333）等比例換算成結束畫面的 1～100 分。"""
+    score = round(raw_total_score / MAX_TOTAL_SCORE * 100)
+    return max(MIN_DISPLAY_SCORE, min(MAX_DISPLAY_SCORE, score))
