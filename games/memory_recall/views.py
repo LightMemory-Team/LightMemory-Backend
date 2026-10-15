@@ -10,7 +10,8 @@ from games.dda import DDAConfig, apply_answer
 from games.utils import get_current_user
 
 from .item_bank import load_advanced_groups, load_item_pools, load_items
-from .score import calculate_step_score, calculate_total_score
+from .memory_zscore import calculate_working_memory_z_score
+from .score import calculate_step_score, z_score_to_total_score
 
 GAME_TYPE = "memory_recall"
 
@@ -454,12 +455,14 @@ def _build_result(session):
         round(sum(response_times) / len(response_times)) if response_times else 0
     )
 
-    total_score = calculate_total_score(
-        [
-            {"stage": r["detail"]["stage"], "is_correct": r["is_correct"]}
-            for r in step_records
-        ]
+    # 工作記憶 z-score 給 dashboard 用，也換算成結束畫面的 total_score。
+    # 前測不計分；這場還沒結束，會跟「所有已結束場次」比，結果跟之後再算一樣
+    z_score = (
+        None if is_pretest else calculate_working_memory_z_score(session["session_id"])
     )
+    if z_score is not None:
+        z_score = round(z_score, 3)
+
     total_bonus_seconds = 0
     if not is_pretest:
         stage_index = STAGE_ORDER.index(state["current_stage"])
@@ -473,7 +476,8 @@ def _build_result(session):
         "avg_response_time_ms": avg_response_time_ms,
         "final_stage": state["current_stage"],
         "total_bonus_seconds": total_bonus_seconds,
-        "total_score": None if is_pretest else total_score,
+        "total_score": z_score_to_total_score(z_score),
+        "z_score": z_score,
     }
 
 
