@@ -151,14 +151,15 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
   "total_questions": 10,
   "accuracy": 80.0,
   "speed_score": 76,
+  "raw_score": 78.8,
   "medium_correct": 3,
   "hard_correct": 2,
   "difficulty_bonus": 3.5,
   "skipped_question_count": 1,
   "error_penalty": 2,
   "final_score": 80.3,
-  "z_score": 1.03,
-  "standard_score": 71,
+  "z_score": 0.88,
+  "standard_score": 68,
   "final_difficulty": "hard",
   "average_reaction_time_ms": 2450,
   "completed_at": "2026-10-04T00:15:30.123456+08:00"
@@ -291,11 +292,12 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
     "total_questions": 10,
     "accuracy": 80.0,
     "speed_score": 76,
+    "raw_score": 78.8,
     "difficulty_bonus": 3.5,
     "error_penalty": 2,
     "final_score": 80.3,
-    "z_score": 1.03,
-    "standard_score": 71,
+    "z_score": 0.88,
+    "standard_score": 68,
     "final_difficulty": "hard",
     "average_reaction_time_ms": 2450,
     "completed_at": "2026-10-04T00:20:15.123456+08:00"
@@ -317,7 +319,7 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
   "data": {
     "history": [
       {
-        "score": 85.5,
+        "score": 91.6,
         "accuracy": 90.0,
         "reaction_time": 2.15,
         "final_difficulty": "hard",
@@ -327,11 +329,12 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
         "total_correct": 9,
         "total_questions": 10,
         "speed_score": 82,
+        "raw_score": 87.6,
         "difficulty_bonus": 4.0,
         "error_penalty": 0,
-        "final_score": 85.5,
-        "z_score": 1.55,
-        "standard_score": 81,
+        "final_score": 91.6,
+        "z_score": 1.76,
+        "standard_score": 85,
         "average_reaction_time_ms": 2150,
         "completed_at": "2026-10-04T00:15:30.123456+08:00"
       }

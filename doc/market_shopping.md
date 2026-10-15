@@ -101,8 +101,10 @@ $$\text{raw\_score} = (\text{accuracy} \times 0.7) + (\text{speed\_score} \times
 - `accuracy`：一次正確率百分比（`0.0 ~ 100.0`）。
 - `speed_score`：整場作答速度分（`0.0 ~ 100.0`）。
 - `raw_score`：原始能力分數（`0.0 ~ 100.0`）。
+- `z_score`：常模標準差分數（`-2.0 ~ +2.0`）。
+- `standard_score`：跨遊戲標準分數（`10 ~ 90`）。
 - `average_reaction_time_ms`：平均作答反應時間（毫秒）。
-- `final_difficulty`：遊戲結束時所達到的最終難度階段。
+- `difficulty`：遊戲結束時所達到的最終難度階段（`easy` / `medium` / `hard`）。
 
 ### 5. Z-Score 與跨遊戲標準分數（Standard Score）
 依參考常模（預設 $\mu=70.0, \sigma=10.0$）以 `raw_score` 計算 Z 分數，並限制在 $\pm 2.0$ 範圍內，最後換算為跨遊戲統一標準分數（中心值 50，標準差 20）：
@@ -297,9 +299,11 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
     "first_try_correct_count": 8,
     "total_questions": 10,
     "accuracy": 80.0,
+    "speed_score": 80.0,
     "raw_score": 80.0,
     "z_score": 1.0,
     "standard_score": 70,
+    "average_reaction_time_ms": 1500,
     "difficulty": "hard",
     "completed_at": "2026-10-04T00:28:15.123456+08:00"
   },
@@ -319,11 +323,15 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
   "success": true,
   "data": [
     {
-      "score": 70,
+      "score": 80.0,
+      "first_try_correct_count": 8,
       "raw_score": 80.0,
       "z_score": 1.0,
       "standard_score": 70,
       "accuracy": 80.0,
+      "speed_score": 80.0,
+      "average_reaction_time_ms": 1500,
+      "reaction_time": 1.5,
       "played_at": "2026-10-04T00:28:15.123456+08:00"
     }
   ],
