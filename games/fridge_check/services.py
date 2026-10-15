@@ -30,6 +30,43 @@ ERROR_PENALTY_PER_SKIPPED_QUESTION = 2
 MEDIUM_CORRECT_BONUS = 0.5
 HARD_CORRECT_BONUS = 1.0
 
+# 常模與 Z-score 設定
+FRIDGE_SCORE_NORM = {
+    "mean": 70.0,
+    "std": 10.0,
+}
+
+Z_SCORE_CLAMP = 2.0
+
+
+def calculate_z_score(raw_score):
+    """
+    依常模計算 Fridge Check 的 Z-score 與跨遊戲標準分數 (standard_score)。
+
+    Z = (raw_score - mean) / std
+    Z-score 限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]
+    standard_score = 50 + 20 * z_score
+    """
+    mean = FRIDGE_SCORE_NORM["mean"]
+    std = FRIDGE_SCORE_NORM["std"]
+
+    if std == 0:
+        z_score = 0.0
+    else:
+        z_score = (raw_score - mean) / std
+
+    z_score = max(
+        -Z_SCORE_CLAMP,
+        min(Z_SCORE_CLAMP, z_score),
+    )
+
+    standard_score = 50 + 20 * z_score
+
+    return {
+        "z_score": round(z_score, 3),
+        "standard_score": round(standard_score),
+    }
+
 
 def _build_current_question(question):
     """把 generator 產生的題目整理成 Session 儲存格式。"""
@@ -388,23 +425,28 @@ def calculate_final_result(session):
     # 10 題，每題最高 10，所以自然是 0 ~ 100
     speed_score = state["speed_score"]
 
-    # 3. 難度加分
+    # 3. 原始能力指標 (正確率 70% + 速度分 30%，不含難度加分與跳題扣分，反映長者真實認知表現)
+    raw_score = round(
+        accuracy * 0.7 + speed_score * 0.3,
+        2,
+    )
+
+    # 4. 難度加分
     difficulty_bonus = round(
         state["medium_correct"] * MEDIUM_CORRECT_BONUS
         + state["hard_correct"] * HARD_CORRECT_BONUS,
         2,
     )
 
-    # 4. 錯三次跳題扣分
+    # 5. 錯三次跳題扣分
     error_penalty = (
         state["skipped_question_count"]
         * ERROR_PENALTY_PER_SKIPPED_QUESTION
     )
 
-    # 5. 最終總分
+    # 6. 遊戲最終總分 (包含難度加分與跳題扣分，作為長者端遊戲反饋)
     raw_final_score = (
-        accuracy * 0.7
-        + speed_score * 0.3
+        raw_score
         + difficulty_bonus
         - error_penalty
     )
@@ -414,6 +456,11 @@ def calculate_final_result(session):
         max(0, raw_final_score),
         2,
     )
+
+    # 7. Z-score 與跨遊戲標準分數：改由原始能力指標 raw_score 計算！
+    z_result = calculate_z_score(raw_score)
+    z_score = z_result["z_score"]
+    standard_score = z_result["standard_score"]
 
     # 平均反應時間
     average_reaction_time_ms = (
@@ -430,8 +477,8 @@ def calculate_final_result(session):
         "total_questions": TOTAL_QUESTIONS,
 
         "accuracy": accuracy,
-
         "speed_score": speed_score,
+        "raw_score": raw_score,
 
         "medium_correct": state["medium_correct"],
         "hard_correct": state["hard_correct"],
@@ -443,6 +490,8 @@ def calculate_final_result(session):
         "error_penalty": error_penalty,
 
         "final_score": final_score,
+        "z_score": z_score,
+        "standard_score": standard_score,
         "final_difficulty": state.get("current_stage", state.get("difficulty", DIFFICULTY_EASY)),
 
         "average_reaction_time_ms": (
@@ -513,9 +562,12 @@ def get_history(user_id):
                 "total_correct": result["total_correct"],
                 "total_questions": result["total_questions"],
                 "speed_score": result["speed_score"],
+                "raw_score": result.get("raw_score"),
                 "difficulty_bonus": result["difficulty_bonus"],
                 "error_penalty": result["error_penalty"],
                 "final_score": result["final_score"],
+                "z_score": result.get("z_score"),
+                "standard_score": result.get("standard_score"),
                 "average_reaction_time_ms": average_reaction_time_ms,
                 "completed_at": completed_at,
             }

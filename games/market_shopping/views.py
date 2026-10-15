@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from games import session_service
 from games.utils import get_current_user
 
 from . import services
@@ -88,10 +89,25 @@ def submit_item_answer(request, session_id):
         )
 
     is_correct = services.check_item_answer(session, selected_food_codes)
+    reaction_time_ms = request.data.get("reaction_time_ms")
+    session_service.save_step(
+        GAME_TYPE,
+        session_id,
+        {
+            "question_number": session["question_number"],
+            "step_type": "select_items",
+            "difficulty": session["state"].get(
+                "current_stage", session["state"].get("difficulty", "easy")
+            ),
+            "is_correct": is_correct,
+            "response_time_ms": reaction_time_ms,
+            "selected_food_codes": selected_food_codes,
+        },
+    )
 
     # 選錯
     if not is_correct:
-        session = services.record_item_wrong(session)
+        session = services.record_item_wrong(session, reaction_time_ms=reaction_time_ms)
         current_wrong_count = session["state"]["current_wrong_count"]
 
         if current_wrong_count < 3:
@@ -114,6 +130,7 @@ def submit_item_answer(request, session_id):
         next_question = services.move_to_next_question(session)
         if next_question is None:
             final_session = services.get_session(session_id)
+            result = final_session.get("result") or services.calculate_final_result(final_session)
             return Response(
                 {
                     "success": True,
@@ -122,8 +139,16 @@ def submit_item_answer(request, session_id):
                         "retry": False,
                         "question_skipped": True,
                         "is_completed": True,
-                        "total_correct": final_session["state"]["total_correct"],
+                        "total_correct": result["total_correct"],
+                        "first_try_correct_count": result["first_try_correct_count"],
                         "total_questions": TOTAL_QUESTIONS,
+                        "accuracy": result["accuracy"],
+                        "speed_score": result.get("speed_score"),
+                        "raw_score": result.get("raw_score"),
+                        "z_score": result.get("z_score"),
+                        "standard_score": result.get("standard_score"),
+                        "average_reaction_time_ms": result.get("average_reaction_time_ms"),
+                        "completed_at": result["completed_at"],
                     },
                     "error": None,
                 },
@@ -146,18 +171,7 @@ def submit_item_answer(request, session_id):
         )
 
     # 選對 → 進入找零
-    session = services.session_service.update_session(
-        GAME_TYPE,
-        session_id,
-        state={
-            "item_attempt_count": session["state"]["item_attempt_count"] + 1,
-            "item_first_try_correct": (
-                True
-                if session["state"]["item_attempt_count"] == 0
-                else session["state"]["item_first_try_correct"]
-            ),
-        },
-    )
+    session = services.record_item_correct(session, reaction_time_ms=reaction_time_ms)
     state = session["state"]
     change_options = services.generate_change_options(state["correct_change"])
     difficulty = state.get("current_stage", state.get("difficulty", "easy"))
@@ -230,10 +244,25 @@ def submit_change_answer(request, session_id):
         )
 
     is_correct = services.check_change_answer(session, selected_amount)
+    reaction_time_ms = request.data.get("reaction_time_ms")
+    session_service.save_step(
+        GAME_TYPE,
+        session_id,
+        {
+            "question_number": session["question_number"],
+            "step_type": "calculate_change",
+            "difficulty": session["state"].get(
+                "current_stage", session["state"].get("difficulty", "easy")
+            ),
+            "is_correct": is_correct,
+            "response_time_ms": reaction_time_ms,
+            "selected_amount": selected_amount,
+        },
+    )
 
     # 找零答錯
     if not is_correct:
-        session = services.record_change_wrong(session)
+        session = services.record_change_wrong(session, reaction_time_ms=reaction_time_ms)
         current_wrong_count = session["state"]["current_wrong_count"]
 
         if current_wrong_count < 3:
@@ -266,8 +295,14 @@ def submit_change_answer(request, session_id):
                         "question_skipped": True,
                         "is_completed": True,
                         "total_correct": result["total_correct"],
+                        "first_try_correct_count": result["first_try_correct_count"],
                         "total_questions": TOTAL_QUESTIONS,
                         "accuracy": result["accuracy"],
+                        "speed_score": result.get("speed_score"),
+                        "raw_score": result.get("raw_score"),
+                        "z_score": result.get("z_score"),
+                        "standard_score": result.get("standard_score"),
+                        "average_reaction_time_ms": result.get("average_reaction_time_ms"),
                         "completed_at": result["completed_at"],
                     },
                     "error": None,
@@ -291,7 +326,7 @@ def submit_change_answer(request, session_id):
         )
 
     # 找零答對
-    session, difficulty_upgraded = services.record_change_correct_and_apply_dda(session)
+    session, difficulty_upgraded = services.record_change_correct_and_apply_dda(session, reaction_time_ms=reaction_time_ms)
     state = session["state"]
     question_number = session["question_number"]
 
@@ -309,6 +344,11 @@ def submit_change_answer(request, session_id):
                     "first_try_correct_count": result["first_try_correct_count"],
                     "total_questions": TOTAL_QUESTIONS,
                     "accuracy": result["accuracy"],
+                    "speed_score": result.get("speed_score"),
+                    "raw_score": result.get("raw_score"),
+                    "z_score": result.get("z_score"),
+                    "standard_score": result.get("standard_score"),
+                    "average_reaction_time_ms": result.get("average_reaction_time_ms"),
                     "difficulty": result["difficulty"],
                     "completed_at": result["completed_at"],
                 },

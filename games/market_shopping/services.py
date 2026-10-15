@@ -22,6 +22,72 @@ DDA_CONFIG = DDAConfig(
 )
 DDA_STRATEGY = NoOpStrategy()
 
+# 常模與 Z-score 設定
+MARKET_SHOPPING_NORM = {
+    "mean": 70.0,
+    "std": 10.0,
+}
+
+Z_SCORE_CLAMP = 2.0
+
+
+def calculate_z_score(raw_score):
+    """
+    依常模計算 Market Shopping 的 Z-score 與跨遊戲標準分數 (standard_score)。
+
+    Z = (raw_score - mean) / std
+    Z-score 限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]
+    standard_score = 50 + 20 * z_score
+    """
+    mean = MARKET_SHOPPING_NORM["mean"]
+    std = MARKET_SHOPPING_NORM["std"]
+
+    if std == 0:
+        z_score = 0.0
+    else:
+        z_score = (raw_score - mean) / std
+
+    z_score = max(
+        -Z_SCORE_CLAMP,
+        min(Z_SCORE_CLAMP, z_score),
+    )
+
+    standard_score = 50 + 20 * z_score
+
+    return {
+        "z_score": round(z_score, 3),
+        "standard_score": round(standard_score),
+    }
+
+
+def calculate_speed_score(reaction_time_ms):
+    """
+    單步答對時的反應速度分數（滿分 5.0 分，一題兩步滿分 10.0 分，10 題滿分 100.0 分）。
+
+    <= 3 秒：5.0
+    <= 6 秒：4.0
+    <= 10 秒：2.5
+    > 10 秒：1.5
+
+    答錯時不要呼叫此函式加分。
+    """
+    if reaction_time_ms is None:
+        return 0.0
+
+    seconds = reaction_time_ms / 1000
+
+    if seconds <= 3:
+        return 5.0
+
+    if seconds <= 6:
+        return 4.0
+
+    if seconds <= 10:
+        return 2.5
+
+    return 1.5
+
+
 
 def generate_question(difficulty="easy"):
     """依難度產生題目與購物清單。"""
@@ -115,6 +181,10 @@ def create_game_session(user):
         "change_attempt_count": 0,
         "item_first_try_correct": None,
         "change_first_try_correct": None,
+        # 速度與反應時間統計
+        "speed_score": 0.0,
+        "total_reaction_time_ms": 0,
+        "answer_count": 0,
     }
 
     current_question = {
@@ -155,7 +225,7 @@ def check_change_answer(session, selected_amount):
     return selected_amount == session["state"]["correct_change"]
 
 
-def record_item_wrong(session):
+def record_item_wrong(session, reaction_time_ms=None):
     """記錄選菜錯誤，更新 DDA 連對為 0。"""
     state = session["state"]
     current_wrong = state["current_wrong_count"] + 1
@@ -176,6 +246,12 @@ def record_item_wrong(session):
     if state["item_attempt_count"] == 0:
         state_update["item_first_try_correct"] = False
 
+    if reaction_time_ms is not None:
+        state_update["total_reaction_time_ms"] = (
+            state.get("total_reaction_time_ms", 0) + reaction_time_ms
+        )
+        state_update["answer_count"] = state.get("answer_count", 0) + 1
+
     return session_service.update_session(
         GAME_TYPE,
         session["session_id"],
@@ -183,7 +259,38 @@ def record_item_wrong(session):
     )
 
 
-def record_change_wrong(session):
+def record_item_correct(session, reaction_time_ms=None):
+    """記錄選菜答對，進入找零階段。"""
+    state = session["state"]
+    item_attempt_count = state["item_attempt_count"] + 1
+    item_first_try = (
+        True
+        if state["item_attempt_count"] == 0
+        else state.get("item_first_try_correct", False)
+    )
+
+    state_update = {
+        "item_attempt_count": item_attempt_count,
+        "item_first_try_correct": item_first_try,
+    }
+
+    if reaction_time_ms is not None:
+        state_update["total_reaction_time_ms"] = (
+            state.get("total_reaction_time_ms", 0) + reaction_time_ms
+        )
+        state_update["answer_count"] = state.get("answer_count", 0) + 1
+        state_update["speed_score"] = (
+            state.get("speed_score", 0.0) + calculate_speed_score(reaction_time_ms)
+        )
+
+    return session_service.update_session(
+        GAME_TYPE,
+        session["session_id"],
+        state=state_update,
+    )
+
+
+def record_change_wrong(session, reaction_time_ms=None):
     """記錄找零錯誤，更新 DDA 連對為 0。"""
     state = session["state"]
     current_wrong = state["current_wrong_count"] + 1
@@ -204,6 +311,12 @@ def record_change_wrong(session):
     if state["change_attempt_count"] == 0:
         state_update["change_first_try_correct"] = False
 
+    if reaction_time_ms is not None:
+        state_update["total_reaction_time_ms"] = (
+            state.get("total_reaction_time_ms", 0) + reaction_time_ms
+        )
+        state_update["answer_count"] = state.get("answer_count", 0) + 1
+
     return session_service.update_session(
         GAME_TYPE,
         session["session_id"],
@@ -211,12 +324,13 @@ def record_change_wrong(session):
     )
 
 
-def record_change_correct_and_apply_dda(session):
+def record_change_correct_and_apply_dda(session, reaction_time_ms=None):
     """
     找零答對，完成本題：
     - total_correct + 1
     - 若本題無任何錯誤，first_try_correct_count + 1，並計入連對
     - 透過 DDA 引擎 apply_answer 處理升階
+    - 累計反應時間與速度分
     """
     state = session["state"]
     had_error = state["current_question_had_error"]
@@ -232,6 +346,15 @@ def record_change_correct_and_apply_dda(session):
     }
     if state["change_attempt_count"] == 0:
         state_update["change_first_try_correct"] = True
+
+    if reaction_time_ms is not None:
+        state_update["total_reaction_time_ms"] = (
+            state.get("total_reaction_time_ms", 0) + reaction_time_ms
+        )
+        state_update["answer_count"] = state.get("answer_count", 0) + 1
+        state_update["speed_score"] = (
+            state.get("speed_score", 0.0) + calculate_speed_score(reaction_time_ms)
+        )
 
     # 只有從頭到尾完全沒錯才算 DDA 答對，否則算中斷
     if not had_error:
@@ -312,11 +435,38 @@ def calculate_final_result(session):
         state["first_try_correct_count"] / TOTAL_QUESTIONS * 100,
         2,
     )
+    speed_score = state.get("speed_score")
+    answer_count = state.get("answer_count", 0)
+    total_reaction_time_ms = state.get("total_reaction_time_ms", 0)
+
+    # 若有累積速度分或反應時間，以 正確率 70% + 速度分 30% 計算原始能力分
+    if speed_score is not None and (answer_count > 0 or speed_score > 0):
+        clamped_speed_score = round(max(0.0, min(100.0, float(speed_score))), 2)
+        raw_score = round(accuracy * 0.7 + clamped_speed_score * 0.3, 2)
+    else:
+        clamped_speed_score = 0.0
+        raw_score = accuracy
+
+    average_reaction_time_ms = (
+        round(total_reaction_time_ms / answer_count)
+        if answer_count > 0
+        else None
+    )
+
+    z_result = calculate_z_score(raw_score)
+    z_score = z_result["z_score"]
+    standard_score = z_result["standard_score"]
+
     return {
         "total_correct": state["total_correct"],
         "first_try_correct_count": state["first_try_correct_count"],
         "total_questions": TOTAL_QUESTIONS,
         "accuracy": accuracy,
+        "speed_score": clamped_speed_score,
+        "raw_score": raw_score,
+        "z_score": z_score,
+        "standard_score": standard_score,
+        "average_reaction_time_ms": average_reaction_time_ms,
         "difficulty": state.get("current_stage", state.get("difficulty", "easy")),
         "completed_at": completed_at.isoformat(),
     }
@@ -349,8 +499,19 @@ def get_history(user_id):
 
     return [
         {
-            "score": session["result"]["first_try_correct_count"],
-            "accuracy": session["result"]["accuracy"],
+            "score": session["result"].get("raw_score", session["result"].get("standard_score")),
+            "first_try_correct_count": session["result"].get("first_try_correct_count"),
+            "raw_score": session["result"].get("raw_score", session["result"].get("accuracy")),
+            "z_score": session["result"].get("z_score"),
+            "standard_score": session["result"].get("standard_score"),
+            "accuracy": session["result"].get("accuracy"),
+            "speed_score": session["result"].get("speed_score"),
+            "average_reaction_time_ms": session["result"].get("average_reaction_time_ms"),
+            "reaction_time": (
+                round(session["result"]["average_reaction_time_ms"] / 1000, 2)
+                if session["result"].get("average_reaction_time_ms") is not None
+                else None
+            ),
             "played_at": session["result"]["completed_at"],
         }
         for session in recent_sessions

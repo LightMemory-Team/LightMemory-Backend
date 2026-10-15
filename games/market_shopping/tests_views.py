@@ -46,16 +46,22 @@ class MarketShoppingTestCase(APITestCase):
         """建立一場新遊戲，回傳第一題的 data（含 session_id）。"""
         return self.client.post(SESSIONS_URL).data["data"]
 
-    def _answer_items(self, session_id, food_codes):
+    def _answer_items(self, session_id, food_codes, reaction_time_ms=None):
+        payload = {"selected_food_codes": food_codes}
+        if reaction_time_ms is not None:
+            payload["reaction_time_ms"] = reaction_time_ms
         return self.client.post(
             item_answer_url(session_id),
-            {"selected_food_codes": food_codes},
+            payload,
             format="json",
         )
 
-    def _answer_change(self, session_id, amount):
+    def _answer_change(self, session_id, amount, reaction_time_ms=None):
+        payload = {"selected_amount": amount}
+        if reaction_time_ms is not None:
+            payload["reaction_time_ms"] = reaction_time_ms
         return self.client.post(
-            change_answer_url(session_id), {"selected_amount": amount}, format="json"
+            change_answer_url(session_id), payload, format="json"
         )
 
     def _correct_change(self, session_id):
@@ -102,6 +108,11 @@ class ItemAnswerApiTests(MarketShoppingTestCase):
         self.assertIn(
             self._correct_change(question["session_id"]), data["change_options"]
         )
+
+        session_obj = session_service.get_session(GAME_TYPE, question["session_id"])
+        self.assertEqual(len(session_obj["step_records"]), 1)
+        self.assertTrue(session_obj["step_records"][0]["is_correct"])
+        self.assertEqual(session_obj["step_records"][0]["detail"]["step_type"], "select_items")
 
     def test_wrong_items_return_retry(self):
         question = self._create()
@@ -156,3 +167,34 @@ class FullGameFlowTests(MarketShoppingTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data["data"]), 1)
+
+    def test_full_game_with_reaction_time_finishes_and_records_speed(self):
+        question = self._create()
+        session_id = question["session_id"]
+
+        for _ in range(TOTAL_QUESTIONS):
+            codes = [item["food_code"] for item in question["shopping_list"]]
+            self._answer_items(session_id, codes, reaction_time_ms=2500)
+            change_res = self._answer_change(session_id, self._correct_change(session_id), reaction_time_ms=3000)
+            data = change_res.data["data"]
+            if data["is_completed"]:
+                break
+            question = data["next_question"]
+
+        self.assertTrue(data["is_completed"])
+        self.assertEqual(data["total_correct"], TOTAL_QUESTIONS)
+        self.assertEqual(data["accuracy"], 100.0)
+        self.assertEqual(data["speed_score"], 100.0)
+        self.assertEqual(data["raw_score"], 100.0)
+        self.assertEqual(data["standard_score"], 90)
+        self.assertEqual(data["average_reaction_time_ms"], 2750)
+
+        response = self.client.get(HISTORY_URL)
+        history_item = response.data["data"][0]
+        self.assertEqual(history_item["score"], 100.0)
+        self.assertEqual(history_item["raw_score"], 100.0)
+        self.assertEqual(history_item["first_try_correct_count"], 10)
+        self.assertEqual(history_item["standard_score"], 90)
+        self.assertEqual(history_item["speed_score"], 100.0)
+        self.assertEqual(history_item["average_reaction_time_ms"], 2750)
+        self.assertEqual(history_item["reaction_time"], 2.75)

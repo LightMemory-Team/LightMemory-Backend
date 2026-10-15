@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from games import session_service
 from games.utils import get_current_user
 
 from . import services
@@ -156,6 +157,21 @@ def submit_answer(request, session_id):
         answer,
     )
 
+    session_service.save_step(
+        services.GAME_TYPE,
+        session_id,
+        {
+            "question_number": session["question_number"],
+            "question_type": session.get("current_question", {}).get("question_type"),
+            "difficulty": session["state"].get(
+                "current_stage", session["state"].get("difficulty")
+            ),
+            "is_correct": is_correct,
+            "response_time_ms": reaction_time_ms,
+            "answer": answer,
+        },
+    )
+
     # =====================================================
     # 答錯
     # =====================================================
@@ -263,6 +279,15 @@ def submit_answer(request, session_id):
 
                         "final_score": (
                             result["final_score"]
+                        ),
+                        "raw_score": (
+                            result.get("raw_score")
+                        ),
+                        "z_score": (
+                            result.get("z_score")
+                        ),
+                        "standard_score": (
+                            result.get("standard_score")
                         ),
                         "final_difficulty": (
                             result["final_difficulty"]
@@ -381,6 +406,15 @@ def submit_answer(request, session_id):
 
                     "final_score": (
                         result["final_score"]
+                    ),
+                    "raw_score": (
+                        result.get("raw_score")
+                    ),
+                    "z_score": (
+                        result.get("z_score")
+                    ),
+                    "standard_score": (
+                        result.get("standard_score")
                     ),
                     "final_difficulty": (
                         result["final_difficulty"]

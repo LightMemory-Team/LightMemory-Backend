@@ -85,13 +85,24 @@ $$\text{difficulty\_bonus} = (\text{medium\_correct} \times 0.5) + (\text{hard\_
 
 $$\text{error\_penalty} = \text{skipped\_question\_count} \times 2$$
 
-### 5. 最終總分（Final Score）
-$$\text{raw\_final\_score} = (\text{accuracy} \times 0.7) + (\text{speed\_score} \times 0.3) + \text{difficulty\_bonus} - \text{error\_penalty}$$
+### 5. 原始能力分（Raw Score）與遊戲最終總分（Final Score）
+- **原始認知能力分（`raw_score`）**：由正確率與作答速度組成，不包含遊戲難度加分與跳題扣分，客觀反映認知水準並用於常模與 Z 分數計算：
+$$\text{raw\_score} = \text{round}((\text{accuracy} \times 0.7) + (\text{speed\_score} \times 0.3), 2)$$
+
+- **遊戲端最終總分（`final_score`）**：納入難度加成與懲罰，給予長者即時成就反饋：
+$$\text{raw\_final\_score} = \text{raw\_score} + \text{difficulty\_bonus} - \text{error\_penalty}$$
 $$\text{final\_score} = \text{round}(\max(0, \text{raw\_final\_score}), 2)$$
 
-- 只限制下限為 0（避免跳題扣分造成負分），**不設上限**。
-- 例：10 題全對且皆在 3 秒內、medium 答對 3 題、hard 答對 4 題 → $70 + 30 + 5.5 = 105.5$ 分。
+- 只限制下限為 0（避免跳題扣分造成負分），難度加分可使總分超過 100（例：10 題全對且皆在 3 秒內、medium 答對 3 題、hard 答對 4 題 → $70 + 30 + 5.5 = 105.5$ 分）。
 - 舊版曾以 $\min(100, \cdot)$ 截斷，因此修正前完成的歷史紀錄，其 `final_score` 最高仍為 100。
+
+
+### 6. Z-Score 與跨遊戲標準分數（Standard Score）
+依參考常模（預設 $\mu=70.0, \sigma=10.0$）由**原始能力分（`raw_score`）**計算 Z 分數，排除難度加分干擾；並限制在 $\pm 2.0$ 範圍避免極端值失真，最後換算為跨遊戲統一標準分數（中心值 50，標準差 20）：
+
+$$Z_{\text{raw}} = \frac{\text{raw\_score} - \mu}{\sigma}$$
+$$Z = \max(-2.0, \min(2.0, Z_{\text{raw}}))$$
+$$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
 
 ## 五、資料表設計
 
@@ -140,12 +151,15 @@ $$\text{final\_score} = \text{round}(\max(0, \text{raw\_final\_score}), 2)$$
   "total_questions": 10,
   "accuracy": 80.0,
   "speed_score": 76,
+  "raw_score": 78.8,
   "medium_correct": 3,
   "hard_correct": 2,
   "difficulty_bonus": 3.5,
   "skipped_question_count": 1,
   "error_penalty": 2,
   "final_score": 80.3,
+  "z_score": 0.88,
+  "standard_score": 68,
   "final_difficulty": "hard",
   "average_reaction_time_ms": 2450,
   "completed_at": "2026-10-04T00:15:30.123456+08:00"
@@ -278,9 +292,12 @@ $$\text{final\_score} = \text{round}(\max(0, \text{raw\_final\_score}), 2)$$
     "total_questions": 10,
     "accuracy": 80.0,
     "speed_score": 76,
+    "raw_score": 78.8,
     "difficulty_bonus": 3.5,
     "error_penalty": 2,
     "final_score": 80.3,
+    "z_score": 0.88,
+    "standard_score": 68,
     "final_difficulty": "hard",
     "average_reaction_time_ms": 2450,
     "completed_at": "2026-10-04T00:20:15.123456+08:00"
@@ -302,7 +319,7 @@ $$\text{final\_score} = \text{round}(\max(0, \text{raw\_final\_score}), 2)$$
   "data": {
     "history": [
       {
-        "score": 85.5,
+        "score": 91.6,
         "accuracy": 90.0,
         "reaction_time": 2.15,
         "final_difficulty": "hard",
@@ -312,9 +329,12 @@ $$\text{final\_score} = \text{round}(\max(0, \text{raw\_final\_score}), 2)$$
         "total_correct": 9,
         "total_questions": 10,
         "speed_score": 82,
+        "raw_score": 87.6,
         "difficulty_bonus": 4.0,
         "error_penalty": 0,
-        "final_score": 85.5,
+        "final_score": 91.6,
+        "z_score": 1.76,
+        "standard_score": 85,
         "average_reaction_time_ms": 2150,
         "completed_at": "2026-10-04T00:15:30.123456+08:00"
       }
