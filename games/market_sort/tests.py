@@ -11,6 +11,8 @@ from django.test import SimpleTestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from games.models import GameSession
+
 from .services import calculate_cognitive_flexibility_score
 
 User = get_user_model()
@@ -88,6 +90,18 @@ class MarketSortSubmitEndpointTests(APITestCase):
         response = self.client.post(SUBMIT_URL, payload, format="json")
 
         self.assertEqual(response.data["data"]["recent_scores"], [])
+
+    def test_submit_saves_z_score_for_dashboard(self):
+        payload = {
+            "session_id": "test_z",
+            "is_complete": True,
+            "questions": build_questions(),
+        }
+        self.client.post(SUBMIT_URL, payload, format="json")
+
+        session = GameSession.objects.get(client_session_id="test_z")
+        z_score = session.result["z_score"]
+        self.assertTrue(-2 <= z_score <= 2)
 
     def test_incomplete_session_does_not_calculate_score(self):
         payload = {
@@ -301,3 +315,25 @@ class MarketSortScoringFormulaTests(SimpleTestCase):
             questions
         )  # 不應該拋出例外，且不能被第1題影響
         self.assertIn("switch_accuracy", result["raw_metrics"])
+
+
+class MarketSortWeightedZScoreTests(SimpleTestCase):
+    """整體加權 z（給 dashboard 用）跟分數要對得起來。"""
+
+    def test_z_score_within_two(self):
+        for correct_count in (0, 14, 28):
+            result = calculate_cognitive_flexibility_score(
+                build_game_with_accuracy(correct_count, seed=correct_count)
+            )
+            self.assertTrue(-2 <= result["z_score"] <= 2)
+
+    def test_score_is_fifty_plus_twenty_z(self):
+        result = calculate_cognitive_flexibility_score(
+            build_game_with_accuracy(20, seed=9)
+        )
+        # cognitive_flexibility_score = round(50 + 20 * 加權 z)
+        self.assertAlmostEqual(
+            result["cognitive_flexibility_score"],
+            50 + 20 * result["z_score"],
+            delta=0.5,
+        )

@@ -75,6 +75,7 @@ class MarketSortSubmitView(APIView):
             result={
                 "raw_metrics": result["raw_metrics"],
                 "z_scores": result["z_scores"],
+                "z_score": result["z_score"],
                 "cognitive_flexibility_score": result["cognitive_flexibility_score"],
                 "generated_at": timezone.now().isoformat(),
             },
