@@ -8,6 +8,7 @@ class Post(models.Model):
     image_path = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     is_enabled = models.BooleanField(default=True)
+    diary = models.OneToOneField('diary.Diary', on_delete=models.CASCADE, null=True, blank=True, related_name='social_post')
 
     def __str__(self):
         return f"{self.user} 的貼文 ({self.created_at.date()})"

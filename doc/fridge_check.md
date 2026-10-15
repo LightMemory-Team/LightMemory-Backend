@@ -58,7 +58,7 @@ Oct 04, 2026 · @LightMemory-Backend
 
 ## 四、計分邏輯
 
-整場最終成績採 100 分制多維度加權計算，包含正確率、反應速度、難度加分與跳題懲罰：
+整場最終成績採多維度加權計算，包含正確率、反應速度、難度加分與跳題懲罰。正確率與速度分加權後滿分為 100，再加上難度加分，因此總分**可以超過 100**（不設上限）：
 
 ### 1. 正確率分數（Accuracy Score，權重 70%）
 $$\text{accuracy} = \frac{\text{total\_correct}}{\text{total\_questions}} \times 100$$
@@ -91,7 +91,11 @@ $$\text{raw\_score} = \text{round}((\text{accuracy} \times 0.7) + (\text{speed\_
 
 - **遊戲端最終總分（`final_score`）**：納入難度加成與懲罰，給予長者即時成就反饋：
 $$\text{raw\_final\_score} = \text{raw\_score} + \text{difficulty\_bonus} - \text{error\_penalty}$$
-$$\text{final\_score} = \max(0, \min(100, \text{round}(\text{raw\_final\_score}, 2)))$$
+$$\text{final\_score} = \text{round}(\max(0, \text{raw\_final\_score}), 2)$$
+
+- 只限制下限為 0（避免跳題扣分造成負分），難度加分可使總分超過 100（例：10 題全對且皆在 3 秒內、medium 答對 3 題、hard 答對 4 題 → $70 + 30 + 5.5 = 105.5$ 分）。
+- 舊版曾以 $\min(100, \cdot)$ 截斷，因此修正前完成的歷史紀錄，其 `final_score` 最高仍為 100。
+
 
 ### 6. Z-Score 與跨遊戲標準分數（Standard Score）
 依參考常模（預設 $\mu=70.0, \sigma=10.0$）由**原始能力分（`raw_score`）**計算 Z 分數，排除難度加分干擾；並限制在 $\pm 2.0$ 範圍避免極端值失真，最後換算為跨遊戲統一標準分數（中心值 50，標準差 20）：

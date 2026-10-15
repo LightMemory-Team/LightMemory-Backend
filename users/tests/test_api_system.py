@@ -19,6 +19,8 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.settings import api_settings
 
+from games.catalog import GAMES
+
 User = get_user_model()
 
 REGISTER_URL = '/api/users/register/'
@@ -303,8 +305,8 @@ class HomeEndpointSystemTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['user_name'], '王')
 
-    def test_games_list_returns_empty_list_when_no_games(self):
+    def test_games_list_returns_catalog_games(self):
         response = self.client.get('/api/home/games/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {'games': []})
+        self.assertEqual(response.data, {'games': GAMES})

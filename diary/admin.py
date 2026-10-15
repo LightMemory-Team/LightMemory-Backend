@@ -21,9 +21,9 @@ class DiaryAdmin(admin.ModelAdmin):
 class DiaryAnalysisAdmin(admin.ModelAdmin):
     list_display = (
         "diary",
-        "language_fluency",
-        "logic_completeness",
-        "emotion_description_completeness",
+        "is_valid",
+        "total_score",
+        "average_score",
         "analysis_time",
     )
     list_select_related = ("diary__user",)

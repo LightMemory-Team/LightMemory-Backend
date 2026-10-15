@@ -212,3 +212,40 @@ def finish_session(game_type, session_id, result, avg_response_time_ms=None):
     session.finished_at = timezone.now()
     session.save()
     return _to_dict(session)
+
+
+def list_previous_step_records(game_type, session_id, *, same_user=True):
+    """列出「這場之前」已結束場次的作答紀錄，給 z-score 當歷史比較基準用。
+
+    回傳 list，每個元素是一場的 step_records（格式同 _to_dict 的
+    step_records）。只取比這場更早結束的場次（這場還沒結束就取全部已結束
+    場次），所以不管 dashboard 什麼時候來算，同一場的結果都一樣。
+
+    same_user=True 只取同一位使用者；False 取全體使用者（冷啟動用）。
+    找不到 session 會拋出 SessionNotFound。
+    """
+    session = _lookup(game_type, session_id)
+    if session is None:
+        raise SessionNotFound(session_id)
+
+    previous_sessions = GameSession.objects.filter(
+        game=session.game, status="finished"
+    ).exclude(pk=session.pk)
+    if session.finished_at is not None:
+        previous_sessions = previous_sessions.filter(
+            finished_at__lt=session.finished_at
+        )
+    if same_user:
+        previous_sessions = previous_sessions.filter(user_id=session.user_id)
+
+    # 一次查出所有作答紀錄，再依場次分組，避免每場各查一次資料庫
+    records_by_session = {}
+    step_logs = (
+        GameStepLog.objects.filter(session__in=previous_sessions)
+        .order_by("session_id", "step_number")
+        .values("session_id", "step_number", "is_correct", "response_time_ms", "detail")
+    )
+    for log in step_logs:
+        session_key = log.pop("session_id")
+        records_by_session.setdefault(session_key, []).append(log)
+    return list(records_by_session.values())
