@@ -562,6 +562,7 @@ def get_history(user_id):
                 "total_correct": result["total_correct"],
                 "total_questions": result["total_questions"],
                 "speed_score": result["speed_score"],
+                "raw_score": result.get("raw_score"),
                 "difficulty_bonus": result["difficulty_bonus"],
                 "error_penalty": result["error_penalty"],
                 "final_score": result["final_score"],

@@ -162,6 +162,7 @@ def submit_answer(request, session_id):
         session_id,
         {
             "question_number": session["question_number"],
+            "question_type": session.get("current_question", {}).get("question_type"),
             "difficulty": session["state"].get(
                 "current_stage", session["state"].get("difficulty")
             ),
@@ -278,6 +279,9 @@ def submit_answer(request, session_id):
 
                         "final_score": (
                             result["final_score"]
+                        ),
+                        "raw_score": (
+                            result.get("raw_score")
                         ),
                         "z_score": (
                             result.get("z_score")
@@ -402,6 +406,9 @@ def submit_answer(request, session_id):
 
                     "final_score": (
                         result["final_score"]
+                    ),
+                    "raw_score": (
+                        result.get("raw_score")
                     ),
                     "z_score": (
                         result.get("z_score")

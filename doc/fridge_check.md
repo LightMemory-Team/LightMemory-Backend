@@ -85,14 +85,18 @@ $$\text{difficulty\_bonus} = (\text{medium\_correct} \times 0.5) + (\text{hard\_
 
 $$\text{error\_penalty} = \text{skipped\_question\_count} \times 2$$
 
-### 5. 最終總分（Final Score）
-$$\text{raw\_final\_score} = (\text{accuracy} \times 0.7) + (\text{speed\_score} \times 0.3) + \text{difficulty\_bonus} - \text{error\_penalty}$$
+### 5. 原始能力分（Raw Score）與遊戲最終總分（Final Score）
+- **原始認知能力分（`raw_score`）**：由正確率與作答速度組成，不包含遊戲難度加分與跳題扣分，客觀反映認知水準並用於常模與 Z 分數計算：
+$$\text{raw\_score} = \text{round}((\text{accuracy} \times 0.7) + (\text{speed\_score} \times 0.3), 2)$$
+
+- **遊戲端最終總分（`final_score`）**：納入難度加成與懲罰，給予長者即時成就反饋：
+$$\text{raw\_final\_score} = \text{raw\_score} + \text{difficulty\_bonus} - \text{error\_penalty}$$
 $$\text{final\_score} = \max(0, \min(100, \text{round}(\text{raw\_final\_score}, 2)))$$
 
 ### 6. Z-Score 與跨遊戲標準分數（Standard Score）
-依參考常模（預設 $\mu=70.0, \sigma=10.0$）計算 Z 分數，並限制在 $\pm 2.0$ 範圍避免極端值失真，最後換算為跨遊戲統一標準分數（中心值 50，標準差 20）：
+依參考常模（預設 $\mu=70.0, \sigma=10.0$）由**原始能力分（`raw_score`）**計算 Z 分數，排除難度加分干擾；並限制在 $\pm 2.0$ 範圍避免極端值失真，最後換算為跨遊戲統一標準分數（中心值 50，標準差 20）：
 
-$$Z_{\text{raw}} = \frac{\text{final\_score} - \mu}{\sigma}$$
+$$Z_{\text{raw}} = \frac{\text{raw\_score} - \mu}{\sigma}$$
 $$Z = \max(-2.0, \min(2.0, Z_{\text{raw}}))$$
 $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
 
