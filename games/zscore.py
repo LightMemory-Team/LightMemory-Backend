@@ -18,6 +18,10 @@ STAGE_ORDER = ["basic", "intermediate", "advanced"]
 
 MIN_HISTORY_SESSIONS = 3
 
+# 每個指標的 z 限制在 ±2，避免單一極端值（例如某題反應特別慢）把整體分數拉爆；
+# 每個指標都在 ±2 內，加權平均後的維度分數自然也在 ±2 內
+Z_SCORE_CLAMP = 2
+
 # 依這場「最高到達的階段」決定各階段權重，越高階越能反映能力上限
 STAGE_WEIGHTS_BY_HIGHEST_STAGE = {
     "basic": {"basic": 1.0},
@@ -50,12 +54,15 @@ def to_z_score(value, baseline, *, lower_is_better=False):
     """z = (這次的值 - 歷史平均) / 歷史標準差。
 
     lower_is_better=True（例如反應時間）會乘 -1，讓所有 z 都是「越高越好」。
+    結果限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]。
     """
     if value is None or baseline is None:
         return None
     mean, std = baseline
     z = (value - mean) / std
-    return -z if lower_is_better else z
+    if lower_is_better:
+        z = -z
+    return max(-Z_SCORE_CLAMP, min(Z_SCORE_CLAMP, z))
 
 
 def weighted_average(scores_and_weights):
