@@ -1,7 +1,8 @@
+from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from . import services
+from . import services, weekly_report
 
 
 def _error_response(code, message, *, data=None, status=200):
@@ -42,6 +43,23 @@ def dashboard(request):
                 "period_days": services.PERIOD_DAYS,
                 "dimensions": services.get_dashboard_dimensions(request.user),
             },
+            "error": None,
+        }
+    )
+
+
+# 週報表：上一個完整的週（週一～週日）的回顧，不設解鎖門檻
+@api_view(["GET"])
+def weekly_report_view(request):
+    if not request.user.is_authenticated:
+        return _error_response("NOT_AUTHENTICATED", "請先登入", status=401)
+
+    return Response(
+        {
+            "success": True,
+            "data": weekly_report.build_weekly_report(
+                request.user, timezone.localdate()
+            ),
             "error": None,
         }
     )
