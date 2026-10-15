@@ -208,6 +208,19 @@ class WeeklyReportDataTests(TestCase):
         self.assertEqual(games["memory_recall"]["seconds"], 0)
         self.assertEqual(play_time["total_seconds"], 7 * 60)
 
+    def test_play_time_prefers_play_seconds_in_result(self):
+        # 整理菜籃玩完才建立 session，開始＝結束，改用結算存的 play_seconds
+        make_session(self.user, "market_sort", created_at=at(5), finished_at=at(5))
+        GameSession.objects.filter(game__code="market_sort").update(
+            result={"z_score": 0.1, "play_seconds": 57}
+        )
+
+        play_time = get_play_time(self.user, WEEK_START)
+
+        games = {g["source"]: g for g in play_time["games"]}
+        self.assertEqual(games["market_sort"]["seconds"], 57)
+        self.assertEqual(play_time["total_seconds"], 57)
+
     def test_week_diaries_only_done_and_talk_seconds(self):
         make_diary(
             self.user,
