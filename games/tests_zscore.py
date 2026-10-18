@@ -57,6 +57,18 @@ class ToZScoreTests(SimpleTestCase):
         self.assertIsNone(to_z_score(None, (0.6, 0.1)))
         self.assertIsNone(to_z_score(0.8, None))
 
+    def test_above_two_is_clamped(self):
+        # (1.0 - 0.6) / 0.1 = 4 → 限制成 2
+        self.assertAlmostEqual(to_z_score(1.0, (0.6, 0.1)), 2.0)
+
+    def test_below_minus_two_is_clamped(self):
+        # (0.2 - 0.6) / 0.1 = -4 → 限制成 -2
+        self.assertAlmostEqual(to_z_score(0.2, (0.6, 0.1)), -2.0)
+
+    def test_lower_is_better_is_clamped_after_reversing(self):
+        # 反應時間 1200 比平均 800 慢很多 → -1 * (1200 - 800) / 100 = -4 → -2
+        self.assertAlmostEqual(to_z_score(1200, (800, 100), lower_is_better=True), -2.0)
+
 
 class WeightedAverageTests(SimpleTestCase):
     def test_weighted_sum(self):
@@ -124,6 +136,12 @@ class CalculateDimensionZScoreTests(SimpleTestCase):
         current = _session(basic=(0.8, 700), intermediate=(0.9, 500))
         score = calculate_dimension_z_score(current, BASIC_HISTORY, [], RULES)
         self.assertAlmostEqual(score, 1.5)
+
+    def test_dimension_score_stays_within_two(self):
+        # z_正確率 = (1.0 - 0.6) / 0.1 = 4 → 2；z_反應時間 = -(300 - 800) / 100 = 5 → 2
+        current = _session(basic=(1.0, 300))
+        score = calculate_dimension_z_score(current, BASIC_HISTORY, [], RULES)
+        self.assertAlmostEqual(score, 2.0)
 
     def test_no_history_at_all_is_none(self):
         current = _session(basic=(0.8, 700))
