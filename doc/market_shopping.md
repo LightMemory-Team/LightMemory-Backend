@@ -212,9 +212,15 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
 
 ```json
 {
-  "selected_food_codes": ["tomato", "egg"]
+  "selected_food_codes": ["tomato", "egg"],
+  "reaction_time_ms": 2350
 }
 ```
+
+| 欄位 | 型別 | 必填 | 說明 |
+| --- | --- | --- | --- |
+| `selected_food_codes` | 字串陣列 | 是 | 玩家選的食材代碼 |
+| `reaction_time_ms` | 整數（毫秒） | 否（建議都送） | 從這一步可以作答開始，到按下送出的時間；答錯重試時每次送出都要帶。有送才會計算速度分與平均反應時間，沒送則 `speed_score` 為 0、`average_reaction_time_ms` 為 `null` |
 
 **Response Body（選菜正確，進入找零階段）**
 
@@ -260,9 +266,15 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
 
 ```json
 {
-  "selected_amount": 115
+  "selected_amount": 115,
+  "reaction_time_ms": 4100
 }
 ```
+
+| 欄位 | 型別 | 必填 | 說明 |
+| --- | --- | --- | --- |
+| `selected_amount` | 整數 | 是 | 玩家選的找零金額 |
+| `reaction_time_ms` | 整數（毫秒） | 否（建議都送） | 從這一步可以作答開始，到按下送出的時間；答錯重試時每次送出都要帶。有送才會計算速度分與平均反應時間，沒送則 `speed_score` 為 0、`average_reaction_time_ms` 為 `null` |
 
 **Response Body（找零正確，出下一題）**
 
@@ -349,6 +361,7 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
 | SESSION\_COMPLETED | 400 | 此遊戲局次已結束，不可重複作答 | item-answers, change-answers |
 | INVALID\_ITEM\_ANSWER | 400 | selected\_food\_codes 格式錯誤（非陣列） | item-answers |
 | INVALID\_CHANGE\_ANSWER | 400 | selected\_amount 格式錯誤（非整數） | change-answers |
+| INVALID\_REACTION\_TIME | 400 | reaction\_time\_ms 有送但不是大於或等於 0 的整數（例如字串、小數、負數） | item-answers, change-answers |
 | USER\_NOT\_FOUND | 404 | 查無使用者資訊 | sessions/, history/ |
 
 ## 七、API 呼叫順序
