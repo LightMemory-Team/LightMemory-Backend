@@ -11,6 +11,30 @@ GAME_TYPE = services.GAME_TYPE
 TOTAL_QUESTIONS = services.TOTAL_QUESTIONS
 
 
+def _invalid_reaction_time_response(reaction_time_ms):
+    """reaction_time_ms 可以不送；有送就必須是 >= 0 的整數，否則回傳 400。
+
+    沒擋的話，字串會在累加反應時間時出錯（500）。檢查規則同冰箱檢查。
+    """
+    if reaction_time_ms is None or (
+        isinstance(reaction_time_ms, int)
+        and not isinstance(reaction_time_ms, bool)
+        and reaction_time_ms >= 0
+    ):
+        return None
+    return Response(
+        {
+            "success": False,
+            "data": None,
+            "error": {
+                "code": "INVALID_REACTION_TIME",
+                "message": "reaction_time_ms 必須為大於或等於 0 的整數",
+            },
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
 # 第一支 API：建立遊戲 Session
 @api_view(["POST"])
 def create_session(request):
@@ -61,6 +85,11 @@ def submit_item_answer(request, session_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    reaction_time_ms = request.data.get("reaction_time_ms")
+    error_response = _invalid_reaction_time_response(reaction_time_ms)
+    if error_response is not None:
+        return error_response
+
     session = services.get_session(session_id)
     if session is None:
         return Response(
@@ -89,7 +118,6 @@ def submit_item_answer(request, session_id):
         )
 
     is_correct = services.check_item_answer(session, selected_food_codes)
-    reaction_time_ms = request.data.get("reaction_time_ms")
     session_service.save_step(
         GAME_TYPE,
         session_id,
@@ -130,7 +158,9 @@ def submit_item_answer(request, session_id):
         next_question = services.move_to_next_question(session)
         if next_question is None:
             final_session = services.get_session(session_id)
-            result = final_session.get("result") or services.calculate_final_result(final_session)
+            result = final_session.get("result") or services.calculate_final_result(
+                final_session
+            )
             return Response(
                 {
                     "success": True,
@@ -147,7 +177,9 @@ def submit_item_answer(request, session_id):
                         "raw_score": result.get("raw_score"),
                         "z_score": result.get("z_score"),
                         "standard_score": result.get("standard_score"),
-                        "average_reaction_time_ms": result.get("average_reaction_time_ms"),
+                        "average_reaction_time_ms": result.get(
+                            "average_reaction_time_ms"
+                        ),
                         "completed_at": result["completed_at"],
                     },
                     "error": None,
@@ -216,6 +248,11 @@ def submit_change_answer(request, session_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    reaction_time_ms = request.data.get("reaction_time_ms")
+    error_response = _invalid_reaction_time_response(reaction_time_ms)
+    if error_response is not None:
+        return error_response
+
     session = services.get_session(session_id)
     if session is None:
         return Response(
@@ -244,7 +281,6 @@ def submit_change_answer(request, session_id):
         )
 
     is_correct = services.check_change_answer(session, selected_amount)
-    reaction_time_ms = request.data.get("reaction_time_ms")
     session_service.save_step(
         GAME_TYPE,
         session_id,
@@ -262,7 +298,9 @@ def submit_change_answer(request, session_id):
 
     # 找零答錯
     if not is_correct:
-        session = services.record_change_wrong(session, reaction_time_ms=reaction_time_ms)
+        session = services.record_change_wrong(
+            session, reaction_time_ms=reaction_time_ms
+        )
         current_wrong_count = session["state"]["current_wrong_count"]
 
         if current_wrong_count < 3:
@@ -302,7 +340,9 @@ def submit_change_answer(request, session_id):
                         "raw_score": result.get("raw_score"),
                         "z_score": result.get("z_score"),
                         "standard_score": result.get("standard_score"),
-                        "average_reaction_time_ms": result.get("average_reaction_time_ms"),
+                        "average_reaction_time_ms": result.get(
+                            "average_reaction_time_ms"
+                        ),
                         "completed_at": result["completed_at"],
                     },
                     "error": None,
@@ -326,7 +366,9 @@ def submit_change_answer(request, session_id):
         )
 
     # 找零答對
-    session, difficulty_upgraded = services.record_change_correct_and_apply_dda(session, reaction_time_ms=reaction_time_ms)
+    session, difficulty_upgraded = services.record_change_correct_and_apply_dda(
+        session, reaction_time_ms=reaction_time_ms
+    )
     state = session["state"]
     question_number = session["question_number"]
 
