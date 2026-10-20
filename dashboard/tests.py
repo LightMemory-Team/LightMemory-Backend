@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from diary.models import Diary, DiaryAnalysis
 from games import session_service
 from games.models import GameSession
 from users.models import User
@@ -33,6 +34,27 @@ class DashboardApiTests(APITestCase):
             result={"z_score": z_score},
             finished_at=timezone.now() - timedelta(days=days_ago),
         )
+
+    def _diary(self, sub_score, *, user=None, days_ago=1, is_valid=True):
+        """建立一篇 days_ago 天前的日記，5 個小分數都是 sub_score。
+
+        常模是中點（平均 2、標準差 1），所以這篇的語言 z = sub_score − 2。
+        """
+        diary = Diary.objects.create(user=user or self.user, status="done")
+        Diary.objects.filter(pk=diary.pk).update(
+            created_at=timezone.now() - timedelta(days=days_ago)
+        )
+        scores = {
+            name: (sub_score if is_valid else None)
+            for name in (
+                "fluency_score",
+                "information_score",
+                "sentence_score",
+                "naming_score",
+                "semantic_score",
+            )
+        }
+        DiaryAnalysis.objects.create(diary=diary, is_valid=is_valid, **scores)
 
     def _unlock_all_games(self, z_score=0.0, days_ago=1):
         """五款遊戲各玩 REQUIRED_SESSIONS 場，讓儀表板解鎖。"""
@@ -162,13 +184,49 @@ class DashboardApiTests(APITestCase):
         self.assertIsNone(math["z_score"])
         self.assertEqual(math["session_count"], 0)
 
-    def test_language_is_fixed_zero_and_not_required_to_unlock(self):
-        # 沒寫過日記也能解鎖
+    # ---- 語言軸（聲影日記）----
+
+    def test_language_not_required_to_unlock_and_null_without_diary(self):
+        # 沒寫過日記也能解鎖，語言軸是 null
         self._unlock_all_games()
 
         response = self.client.get(DASHBOARD_URL)
 
+        self.assertTrue(response.data["success"])
         language = self._dimension(response, "language")
         self.assertEqual(language["source"], "diary")
-        self.assertEqual(language["z_score"], 0)
+        self.assertIsNone(language["z_score"])
         self.assertEqual(language["session_count"], 0)
+
+    def test_language_is_average_of_recent_diaries(self):
+        self._unlock_all_games()
+        self._diary(3)  # 語言 z = +1
+        self._diary(2.5)  # 語言 z = +0.5
+
+        language = self._dimension(self.client.get(DASHBOARD_URL), "language")
+
+        # (1 + 0.5) / 2 = 0.75
+        self.assertEqual(language["z_score"], 0.75)
+        self.assertEqual(language["session_count"], 2)
+
+    def test_language_excludes_invalid_old_and_other_users_diaries(self):
+        self._unlock_all_games()
+        self._diary(3)  # 語言 z = +1，唯一算進去的
+        self._diary(4, is_valid=False)  # 無效日記（錄音太短等）
+        self._diary(0, days_ago=8)  # 超過 7 天
+        other = User.objects.create_user(username="other", password="pw123456")
+        self._diary(0, user=other)
+
+        language = self._dimension(self.client.get(DASHBOARD_URL), "language")
+
+        self.assertEqual(language["z_score"], 1.0)
+        self.assertEqual(language["session_count"], 1)
+
+    def test_diaries_do_not_unlock_dashboard(self):
+        # 日記寫再多，遊戲沒玩滿還是資料不足
+        for _ in range(5):
+            self._diary(3)
+
+        response = self.client.get(DASHBOARD_URL)
+
+        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")

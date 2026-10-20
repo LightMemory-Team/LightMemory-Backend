@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from ai_service.weekly_summary import build_fallback_summary
-from diary.models import Diary, DiaryReply
+from diary.models import Diary, DiaryAnalysis, DiaryReply
 from games import session_service
 from games.models import GameSession
 from users.models import User
@@ -65,6 +65,29 @@ def finished_on(user, game, day, z_score, *, hour=10, minute=0):
         created_at=finished_at - timedelta(minutes=5),
         finished_at=finished_at,
         z_score=z_score,
+    )
+
+
+def diary_on(user, day, sub_score, *, is_valid=True):
+    """建立一篇 day（date）那天寫的日記，5 個小分數都是 sub_score。
+
+    常模是中點（平均 2、標準差 1），所以這篇的語言 z = sub_score − 2。
+    """
+    diary = Diary.objects.create(user=user, status="done")
+    Diary.objects.filter(pk=diary.pk).update(
+        created_at=timezone.make_aware(datetime.combine(day, time(10)))
+    )
+    names = (
+        "fluency_score",
+        "information_score",
+        "sentence_score",
+        "naming_score",
+        "semantic_score",
+    )
+    DiaryAnalysis.objects.create(
+        diary=diary,
+        is_valid=is_valid,
+        **{name: (sub_score if is_valid else None) for name in names},
     )
 
 
@@ -377,13 +400,50 @@ class AbilitiesTests(TestCase):
         self.assertIsNone(math["best"])
         self.assertIsNone(math["trend"])
 
-    def test_language_has_no_score_but_played_from_diary(self):
+    def test_language_score_from_diaries(self):
+        diary_on(self.user, date(2026, 9, 21), 3.2)  # z +1.2 → 80，個人最佳
+        diary_on(self.user, date(2026, 9, 30), 2)  # 上週 z 0 → 50
+        diary_on(self.user, date(2026, 10, 6), 3)  # 本週 z +1
+        diary_on(self.user, date(2026, 10, 8), 2.6)  # 本週 z +0.6
+        diary_on(self.user, date(2026, 10, 9), 0, is_valid=False)  # 無效，不算
+        diary_on(self.user, date(2026, 10, 13), 4)  # 報告週之後，不算
+
+        abilities = build_abilities(self.user, WEEK_START, {"diary"})
+
+        language = self._ability(abilities, "language")
+        # 本週平均 z 0.8 → 50 + 25 x 0.8 = 70
+        self.assertEqual(
+            language,
+            {
+                "dimension": "language",
+                "label": "語言",
+                "played": True,
+                "this_week": 70,
+                "last_week": 50,
+                "best": 80,
+                "trend": "up",
+            },
+        )
+
+    def test_language_without_valid_diary_is_null(self):
+        # 寫了日記但無效（錄音太短等）：有玩，但沒有分數
+        diary_on(self.user, date(2026, 10, 6), 0, is_valid=False)
+
         abilities = build_abilities(self.user, WEEK_START, {"diary"})
 
         language = self._ability(abilities, "language")
         self.assertTrue(language["played"])
         self.assertIsNone(language["this_week"])
         self.assertIsNone(language["trend"])
+
+    def test_overall_includes_language(self):
+        finished_on(self.user, "market_route", date(2026, 10, 6), 0.6)  # 65
+        diary_on(self.user, date(2026, 10, 7), 3)  # 75
+
+        overall = build_abilities(self.user, WEEK_START, set())["overall"]
+
+        # (65 + 75) / 2 = 70
+        self.assertEqual(overall["this_week"], 70)
 
     def test_six_dimensions_in_radar_order(self):
         abilities = build_abilities(self.user, WEEK_START, set())
