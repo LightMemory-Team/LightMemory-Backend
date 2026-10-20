@@ -485,9 +485,9 @@ standard_score = round(50 + 20 × z)          → 10～90
 
 ## 11. 儀表板與週報表
 
-程式：`dashboard/services.py`（儀表板）、`dashboard/weekly_report.py`（週報表）、`ai_service/weekly_summary.py`（週報一句話總結）
+程式：`dashboard/services.py`（儀表板）、`dashboard/weekly_report.py`（週報表）、`dashboard/diary_zscore.py`（聲影日記語言 z）、`ai_service/weekly_summary.py`（週報一句話總結）
 
-兩支 API 都**只讀資料、不寫入任何資料表**，每次請求當下從 `GameSession.result.z_score` 計算。
+兩支 API 都**只讀資料、不寫入任何資料表**，每次請求當下計算：遊戲從 `GameSession.result.z_score`，聲影日記從 `DiaryAnalysis` 的小分數現算（見 11-4）。
 
 ### 11-1. 遊戲與維度對照
 
@@ -498,7 +498,7 @@ standard_score = round(50 + 20 × z)          → 10～90
 | 3 | 執行功能 | `market_sort` | 整理菜籃 z |
 | 4 | 視覺空間 | `fridge_check` | 冰箱檢查 z |
 | 5 | 數學 | `market_shopping` | 市場買菜 z |
-| 6 | 語言 | `diary` | 聲影日記，**分析尚未完成**：儀表板固定回傳 0、週報分數為 `null` |
+| 6 | 語言 | `diary` | 聲影日記語言 z（見 11-4） |
 
 ### 11-2. 儀表板 `GET /api/dashboard/`（雷達圖）
 
@@ -508,6 +508,8 @@ standard_score = round(50 + 20 × z)          → 10～90
 
 - **解鎖門檻**：五款遊戲**各自累計**至少 3 場「有 z_score」的場次才顯示，否則回傳 `INSUFFICIENT_DATA` 和各遊戲進度
 - 解鎖後近 7 天沒玩的遊戲，該軸 `z_score` 為 `null`
+- **語言軸**：近 7 天有效日記的語言 z 平均，`session_count` 是日記篇數；近 7 天沒有有效日記時為 `null`
+- 日記**不列入解鎖門檻**，沒寫日記也能解鎖
 
 ### 11-3. 週報表 `GET /api/dashboard/weekly-report/`
 
@@ -516,10 +518,37 @@ standard_score = round(50 + 20 × z)          → 10～90
 | 項目 | 算法 |
 |---|---|
 | 有活動的日子 | 那天有開始玩遊戲或寫日記（沒有登入紀錄表，用這個代替） |
-| 能力週分數 | 那週結束場次的 z 平均 → `round(50 + 25 × z)`，限制 1～100 |
+| 能力週分數 | 那週的 z 平均（遊戲依結束時間、日記依建立時間）→ `round(50 + 25 × z)`，限制 1～100 |
 | 個人最佳 | 到報告週為止，每週分數的最高值 |
 | 趨勢 | 本週 − 上週 ≥ +3 → `up`、≤ −3 → `practice`（多練習）、其他 → `steady` |
-| 整體表現 | 有分數的能力取平均 |
+| 整體表現 | 有分數的能力（含語言）取平均 |
 | 一句話總結 | 只把正向事實交給 AI；AI 失敗、超過 40 字或出現禁用詞 → 固定句型 |
 
 > 週報給長者看，**不出現 z 分數等專有名詞、不出現負面字眼**，回傳的都是 1～100 分數和趨勢代碼。
+
+### 11-4. 聲影日記語言 z
+
+程式：`dashboard/diary_zscore.py` 的 `calculate_diary_z_score`。**不改 `diary/analysis.py`**，只讀它算好、存在 `DiaryAnalysis` 的 5 個小分數。
+
+比照整理菜籃：每篇日記跟寫死的常模比、每個指標限制 ±2、再加權。
+
+```
+① 一篇日記的 5 個小分數（每個 0～4 分）
+② z = (小分數 − 常模平均) ÷ 常模標準差，限制在 [−2, +2]
+③ 語言 z = Σ(z × 權重)
+④ 儀表板：近 7 天各篇語言 z 的平均；週報：每週平均 → 50 + 25z
+```
+
+| 指標 | 權重 | 常模（平均／標準差） |
+|---|---|---|
+| 流暢度 `fluency_score` | 0.20 | 2／1 |
+| 資訊量 `information_score` | 0.20 | 2／1 |
+| 句子組織 `sentence_score` | 0.20 | 2／1 |
+| 命名 `naming_score` | 0.15 | 2／1 |
+| 語意 `semantic_score` | 0.25 | 2／1 |
+
+- **權重**沿用 `analysis.py` 的 `communication_score`（雲奇 9/22 訂的，來源待確認）；測試會檢查兩邊一致
+- **常模是暫定起始值**：先用 0～4 分量表的中點（平均 2、標準差 1）。此時一篇的語言 z 剛好等於 `communication_score − 2`；累積足夠日記後，再替每個指標換上依真實資料算的常模
+- **無效日記**（`is_valid = False`，錄音太短或疑似辨識錯誤）沒有小分數，不算
+- 常模固定，z 隨時都能現算，**不用存進資料表**
+- 範例：小分數 4、2.67、3、2.8、3.33 → z 為 +2、+0.67、+1、+0.8、+1.33 → 語言 z ≈ 1.19
