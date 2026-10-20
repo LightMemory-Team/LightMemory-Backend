@@ -21,7 +21,13 @@ from diary.models import Diary
 from games.memory_recall.score import z_score_to_total_score
 from games.models import GameSession
 
-from .services import DIARY_SOURCE, DIMENSIONS, GAME_SOURCES, GAME_TITLES
+from .services import (
+    DIARY_SOURCE,
+    DIMENSIONS,
+    GAME_SOURCES,
+    GAME_TITLES,
+    diary_z_scores,
+)
 
 WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"]
 
@@ -177,13 +183,20 @@ def suggest_untried_source(played_sources):
     return "每一項都玩過了，下週繼續保持！"
 
 
+def _monday_of(moment):
+    """某個時間點（台灣時間）所在那週的週一日期。"""
+    day = timezone.localdate(moment)
+    return day - timedelta(days=day.weekday())
+
+
 def get_weekly_scores_history(user, until_week_start):
-    """每週各遊戲的分數，回傳 {週一日期: {遊戲 id: 分數}}。
+    """每週各能力的分數，回傳 {週一日期: {source: 分數}}。
 
-    只取到 until_week_start 那週為止。
+    只取到 until_week_start 那週為止。source 是遊戲 id，或聲影日記的 "diary"。
 
-    週分數 = 那週（依結束時間）各場 z 的平均，再換成 1～100 分（跟煮菜過程
-    結束畫面同一個公式）。z 是 None 的場次不算；那週沒有分數的遊戲不會出現。
+    週分數 = 那週各場（遊戲依結束時間、日記依建立時間）z 的平均，再換成
+    1～100 分（跟煮菜過程結束畫面同一個公式）。z 是 None 的場次、無效日記
+    不算；那週沒有分數的能力不會出現。
     """
     _, end = _week_bounds(until_week_start)
     sessions = _game_sessions(user).filter(status="finished", finished_at__lt=end)
@@ -195,9 +208,10 @@ def get_weekly_scores_history(user, until_week_start):
         z_score = (result or {}).get("z_score")
         if z_score is None:
             continue
-        day = timezone.localdate(finished_at)
-        week_start = day - timedelta(days=day.weekday())
-        z_by_week[week_start][code].append(z_score)
+        z_by_week[_monday_of(finished_at)][code].append(z_score)
+
+    for created_at, z_score in diary_z_scores(user, end=end):
+        z_by_week[_monday_of(created_at)][DIARY_SOURCE].append(z_score)
 
     return {
         week_start: {
@@ -208,11 +222,11 @@ def get_weekly_scores_history(user, until_week_start):
     }
 
 
-def _overall_score(scores_by_game):
-    """整體表現 = 那週有分數的遊戲取平均；一款都沒有就是 None。"""
-    if not scores_by_game:
+def _overall_score(scores_by_source):
+    """整體表現 = 那週有分數的能力（含語言）取平均；一項都沒有就是 None。"""
+    if not scores_by_source:
         return None
-    return round(statistics.mean(scores_by_game.values()))
+    return round(statistics.mean(scores_by_source.values()))
 
 
 def get_trend(this_week, last_week):
@@ -253,10 +267,6 @@ def build_abilities(user, week_start, played_sources):
             "label": item["label"],
             "played": source in played_sources,
         }
-        if source == DIARY_SOURCE:
-            # 聲影日記的語言分析還沒做，先沒有分數；分析完成後換成真的值
-            dimensions.append({**base, **_ability(None, None, None)})
-            continue
         best = max(
             (scores[source] for scores in history.values() if source in scores),
             default=None,

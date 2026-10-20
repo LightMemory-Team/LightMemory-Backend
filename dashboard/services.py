@@ -68,8 +68,8 @@ def average_z_scores(user, start=None, end=None):
     }
 
 
-def average_diary_z_score(user, start=None, end=None):
-    """期間內有效日記的語言 z 平均，回傳 (平均 z 或 None, 篇數)。
+def diary_z_scores(user, start=None, end=None):
+    """期間內每篇有效日記的 (建立時間, 語言 z)。
 
     以日記建立時間（Diary.created_at）判斷是否在期間內；
     無效日記（錄音太短、疑似辨識錯誤）沒有小分數，不算。
@@ -80,13 +80,17 @@ def average_diary_z_score(user, start=None, end=None):
     if end is not None:
         analyses = analyses.filter(diary__created_at__lt=end)
 
-    z_scores = [
-        z
-        for z in (
-            calculate_diary_z_score(row) for row in analyses.values(*DIARY_WEIGHTS)
-        )
-        if z is not None
-    ]
+    results = []
+    for row in analyses.values("diary__created_at", *DIARY_WEIGHTS):
+        z_score = calculate_diary_z_score(row)
+        if z_score is not None:
+            results.append((row["diary__created_at"], z_score))
+    return results
+
+
+def average_diary_z_score(user, start=None, end=None):
+    """期間內有效日記的語言 z 平均，回傳 (平均 z 或 None, 篇數)。"""
+    z_scores = [z for _, z in diary_z_scores(user, start, end)]
     if not z_scores:
         return None, 0
     return round(statistics.mean(z_scores), 3), len(z_scores)
