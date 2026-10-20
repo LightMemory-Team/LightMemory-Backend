@@ -84,7 +84,7 @@ class Command(BaseCommand):
             round_index=1,
             question="今天去了哪裡散步呢？",
             transcript="我昨天下午去大安森林公園散步，花開得很漂亮。",
-            audio_path="https://actions.google.com/sounds/v1/ambiences/park_fountain.ogg",
+            audio_path="https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg",
             is_skipped=False,
         )
         DiaryReply.objects.create(
