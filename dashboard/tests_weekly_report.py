@@ -160,7 +160,9 @@ class LongestStreakTests(SimpleTestCase):
 class SuggestUntriedSourceTests(SimpleTestCase):
     def test_first_untried_in_radar_order(self):
         played = set(GAME_SOURCES)  # 五款遊戲都玩了，只差日記
-        self.assertEqual(suggest_untried_source(played), "這週還沒玩語言，下週試試看")
+        self.assertEqual(
+            suggest_untried_source(played), "這週還沒寫日記，下週寫一篇看看"
+        )
 
     def test_nothing_played_suggests_first_dimension(self):
         first_label = DIMENSIONS[0]["label"]
