@@ -179,6 +179,9 @@ def suggest_untried_source(played_sources):
     """
     for item in DIMENSIONS:
         if item["source"] not in played_sources:
+            # 語言是寫日記練的，不是遊戲，不能說「玩語言」
+            if item["source"] == DIARY_SOURCE:
+                return "這週還沒寫日記，下週寫一篇看看"
             return f"這週還沒玩{item['label']}，下週試試看"
     return "每一項都玩過了，下週繼續保持！"
 

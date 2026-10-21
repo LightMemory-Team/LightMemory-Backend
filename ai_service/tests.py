@@ -140,6 +140,18 @@ class GenerateWeeklySummaryTests(SimpleTestCase):
         self.assertEqual(summary, "這週你玩了 4 天，比上週多 1 天！")
 
     @patch(CLIENT_PATH)
+    def test_play_language_uses_fallback(self, mock_client):
+        # 語言是寫日記練的，AI 寫成「玩語言」就改用固定句型
+        mock_client.return_value.chat.completions.create.return_value = fake_ai_reply(
+            "這週玩語言很認真，真棒！"
+        )
+
+        with self.assertLogs("ai_service.weekly_summary", level="WARNING"):
+            summary = generate_weekly_summary(self.FACTS)
+
+        self.assertEqual(summary, "這週你玩了 4 天，比上週多 1 天！")
+
+    @patch(CLIENT_PATH)
     def test_too_long_uses_fallback(self, mock_client):
         mock_client.return_value.chat.completions.create.return_value = fake_ai_reply(
             "很棒" * 30
