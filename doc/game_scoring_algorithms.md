@@ -542,10 +542,30 @@ standard_score = round(50 + 25 × z)          → 1～100
 各維度 z_score = 近 7 天結束場次的 z 平均（四捨五入到小數 3 位，範圍 ±2）
 ```
 
-- **解鎖門檻**：五款遊戲**各自累計**至少 3 場「有 z_score」的場次才顯示，否則回傳 `INSUFFICIENT_DATA` 和各遊戲進度
+- **解鎖門檻**：五款遊戲**和聲影日記**各自累計至少 3 場（篇）「有 z_score」的紀錄才顯示，否則回傳 `INSUFFICIENT_DATA` 和各項進度（`progress` 最後一筆是 `source: "diary"`、`label: "聲影日記"`）
 - 解鎖後近 7 天沒玩的遊戲，該軸 `z_score` 為 `null`
 - **語言軸**：近 7 天有效日記的語言 z 平均，`session_count` 是日記篇數；近 7 天沒有有效日記時為 `null`
-- 日記**不列入解鎖門檻**，沒寫日記也能解鎖
+- 日記要算得出語言 z 才算進解鎖的 3 篇：更早的日記（自己的、全體的）都不滿 3 篇時算不出來，所以全新系統的第一位使用者要寫 6 篇才會解鎖（10/26 起日記列入解鎖門檻）
+
+**機器人卡片 `encouragement`**（程式：`dashboard/encouragement.py`）
+
+已解鎖時回傳（解鎖後 6 個能力都一定有資料）；看的是**總體狀況**，不是只看一週：
+
+```json
+"encouragement": { "trend": "up", "overall_score": 71, "previous_overall_score": 66 }
+```
+
+```
+① 每週分數：同週報（每週各能力 z 平均 → 50 + 25z），那週有分數的能力取平均
+② 總體分數：以某一週為基準，基準週和之前所有有資料的週加權平均
+   權重 = 0.8 ^ (跟基準週差幾週)，越近的週越重（WEEK_WEIGHT_DECAY）
+③ overall_score = 以最近一個有資料的週為基準；previous_overall_score = 以再前一個有資料的週為基準
+④ trend：差 ≥ +3 → up、≤ −3 → practice、其他 → steady；只有一週資料 → null
+```
+
+- 範例：三週分數 60、70、80 → (60×0.64 + 70×0.8 + 80×1) ÷ 2.44 ≈ 71，前一次 (60×0.8 + 70×1) ÷ 1.8 ≈ 66 → `up`
+- 後端只回傳代碼，前端對照文字：`up` 進步了／`steady` 請保持／`practice` 多練習／`null` 歡迎開始
+- 趨勢門檻 `TREND_THRESHOLD`、`get_trend`、`overall_score` 放在 `dashboard/services.py`，週報和機器人卡片共用
 
 ### 11-3. 週報表 `GET /api/dashboard/weekly-report/`
 
