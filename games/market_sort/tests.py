@@ -13,7 +13,10 @@ from rest_framework.test import APITestCase
 
 from games.models import GameSession
 
-from .services import calculate_cognitive_flexibility_score
+from .services import (
+    calculate_cognitive_flexibility_score,
+    determine_encouragement_tier,
+)
 
 User = get_user_model()
 
@@ -91,17 +94,55 @@ class MarketSortSubmitEndpointTests(APITestCase):
 
         self.assertEqual(response.data["data"]["recent_scores"], [])
 
-    def test_submit_saves_z_score_for_dashboard(self):
+    def _submit(self, session_id, questions):
         payload = {
-            "session_id": "test_z",
+            "session_id": session_id,
             "is_complete": True,
-            "questions": build_questions(),
+            "questions": questions,
         }
-        self.client.post(SUBMIT_URL, payload, format="json")
+        return self.client.post(SUBMIT_URL, payload, format="json")
+
+    def test_first_play_has_no_score_yet(self):
+        """系統裡還沒有任何歷史：資料不足，分數和鼓勵等級都是 null，不會出錯。"""
+        response = self._submit("test_first", build_questions())
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.data["data"]
+        self.assertIsNone(data["current_score"])
+        self.assertIsNone(data["highest_score"])
+        self.assertIsNone(data["encouragement_tier"])
+        session = GameSession.objects.get(client_session_id="test_first")
+        self.assertIsNone(session.result["z_score"])
+
+    def test_submit_saves_z_score_for_dashboard(self):
+        """玩滿 3 場之後，第 4 場跟自己的歷史比，算得出 ±2 內的 z。"""
+        for i, correct_count in enumerate((14, 18, 22)):
+            questions = build_game_with_accuracy(correct_count, seed=i)
+            self._submit(f"history_{i}", questions)
+
+        response = self._submit("test_z", build_questions())
 
         session = GameSession.objects.get(client_session_id="test_z")
         z_score = session.result["z_score"]
         self.assertTrue(-2 <= z_score <= 2)
+        self.assertEqual(
+            response.data["data"]["current_score"],
+            session.result["cognitive_flexibility_score"],
+        )
+
+    def test_highest_and_recent_scores_skip_null(self):
+        """前幾場資料不足（null）不算進最高分和近期分數。"""
+        for i, correct_count in enumerate((14, 18, 22)):
+            questions = build_game_with_accuracy(correct_count, seed=i)
+            self._submit(f"history_{i}", questions)
+
+        response = self._submit("test_after_history", build_questions())
+
+        data = response.data["data"]
+        self.assertIsNotNone(data["current_score"])
+        self.assertEqual(data["highest_score"], data["current_score"])
+        self.assertEqual(data["recent_scores"], [])
+        self.assertIsNotNone(data["encouragement_tier"])
 
     def test_submit_saves_play_seconds_from_reaction_times(self):
         payload = {
@@ -235,37 +276,47 @@ def build_game_with_accuracy(correct_count, total=28, seed=0):
     return questions
 
 
+def history_of(*correct_counts):
+    """過去場次的原始指標：用幾場不同正確率的模擬遊戲組成歷史。"""
+    return [
+        calculate_cognitive_flexibility_score(
+            build_game_with_accuracy(n, seed=200 + i)
+        )["raw_metrics"]
+        for i, n in enumerate(correct_counts)
+    ]
+
+
+# 這位玩家過去大約答對一半到八成
+HISTORY = history_of(14, 17, 20, 23)
+
+
+def score_with_history(questions):
+    return calculate_cognitive_flexibility_score(questions, HISTORY)
+
+
 class MarketSortScoringFormulaTests(SimpleTestCase):
-    """短期修正後的計分公式測試，直接測 services.py 的計算邏輯（不透過
-    API），對應 Wen 分析文件裡「筠淇：更新 games/market_sort/tests.py，
-    加入不同正確率的分數測試」這項工作。"""
+    """計分公式測試，直接測 services.py 的計算邏輯（不透過 API），對應
+    Wen 分析文件裡「筠淇：更新 games/market_sort/tests.py，加入不同正確率
+    的分數測試」這項工作。2026-10-26 起跟自己的歷史（HISTORY）比。"""
 
     def test_low_accuracy_yields_low_score(self):
         """答對 4/28（幾乎沒答對）分數應該落在低分區，不能再像舊公式
         一樣還有 77 分左右。"""
-        result = calculate_cognitive_flexibility_score(
-            build_game_with_accuracy(4, seed=1)
-        )
+        result = score_with_history(build_game_with_accuracy(4, seed=1))
         score = result["cognitive_flexibility_score"]
         self.assertLess(score, 30, f"答對 4/28 卻拿到 {score} 分，太高了")
 
     def test_high_accuracy_yields_high_score(self):
         """答對 27/28（幾乎全對）分數應該落在高分區。"""
-        result = calculate_cognitive_flexibility_score(
-            build_game_with_accuracy(27, seed=2)
-        )
+        result = score_with_history(build_game_with_accuracy(27, seed=2))
         score = result["cognitive_flexibility_score"]
         self.assertGreater(score, 70, f"答對 27/28 卻只拿到 {score} 分，太低了")
 
     def test_half_accuracy_no_longer_scores_near_ceiling(self):
         """舊公式答對一半（14/28）中位數會到 88 分，新公式應該明顯低於
         高正確率的分數，不能卡在分數上限附近。"""
-        half_result = calculate_cognitive_flexibility_score(
-            build_game_with_accuracy(14, seed=3)
-        )
-        high_result = calculate_cognitive_flexibility_score(
-            build_game_with_accuracy(27, seed=4)
-        )
+        half_result = score_with_history(build_game_with_accuracy(14, seed=3))
+        high_result = score_with_history(build_game_with_accuracy(27, seed=4))
         self.assertLess(
             half_result["cognitive_flexibility_score"],
             high_result["cognitive_flexibility_score"] - 20,
@@ -275,9 +326,9 @@ class MarketSortScoringFormulaTests(SimpleTestCase):
         """正確率越高，分數應該要單調遞增（不要求嚴格線性，但方向要對）。"""
         accuracies = [4, 10, 14, 20, 27]
         scores = [
-            calculate_cognitive_flexibility_score(
-                build_game_with_accuracy(n, seed=100 + n)
-            )["cognitive_flexibility_score"]
+            score_with_history(build_game_with_accuracy(n, seed=100 + n))[
+                "cognitive_flexibility_score"
+            ]
             for n in accuracies
         ]
         self.assertEqual(
@@ -295,15 +346,13 @@ class MarketSortScoringFormulaTests(SimpleTestCase):
                 q["is_correct"] = False
                 q["error_type"] = "random"
 
-        result = calculate_cognitive_flexibility_score(questions)  # 不應該拋出例外
+        result = score_with_history(questions)  # 不應該拋出例外
         self.assertEqual(result["raw_metrics"]["switch_accuracy"], 0)
 
     def test_persistent_error_rate_removed_from_scoring(self):
         """短期修正把 persistent_error_rate 從計分拿掉（現在的玩法測不
         到），raw_metrics／z_scores 都不應該再出現這個欄位。"""
-        result = calculate_cognitive_flexibility_score(
-            build_game_with_accuracy(15, seed=6)
-        )
+        result = score_with_history(build_game_with_accuracy(15, seed=6))
         self.assertNotIn("persistent_error_rate", result["raw_metrics"])
         self.assertNotIn("persistent_error_rate_z", result["z_scores"])
 
@@ -311,7 +360,7 @@ class MarketSortScoringFormulaTests(SimpleTestCase):
         """repeat、switch 兩邊沒有都至少答對 3 題時，switch_cost_rt 應該
         跳過（為 None），但整體分數還是算得出來，權重自動分給其他指標。"""
         questions = build_game_with_accuracy(4, seed=7)
-        result = calculate_cognitive_flexibility_score(questions)
+        result = score_with_history(questions)
         self.assertIsNone(result["raw_metrics"]["switch_cost_rt"])
         self.assertIsNone(result["z_scores"]["switch_cost_rt_z"])
         self.assertIsInstance(result["cognitive_flexibility_score"], int)
@@ -323,9 +372,7 @@ class MarketSortScoringFormulaTests(SimpleTestCase):
         questions[0]["trial_type"] = "switch"
         questions[0]["is_correct"] = False
 
-        result = calculate_cognitive_flexibility_score(
-            questions
-        )  # 不應該拋出例外，且不能被第1題影響
+        result = score_with_history(questions)  # 不應該拋出例外，且不能被第1題影響
         self.assertIn("switch_accuracy", result["raw_metrics"])
 
 
@@ -334,18 +381,47 @@ class MarketSortWeightedZScoreTests(SimpleTestCase):
 
     def test_z_score_within_two(self):
         for correct_count in (0, 14, 28):
-            result = calculate_cognitive_flexibility_score(
+            result = score_with_history(
                 build_game_with_accuracy(correct_count, seed=correct_count)
             )
             self.assertTrue(-2 <= result["z_score"] <= 2)
 
-    def test_score_is_fifty_plus_twenty_z(self):
-        result = calculate_cognitive_flexibility_score(
-            build_game_with_accuracy(20, seed=9)
-        )
-        # cognitive_flexibility_score = round(50 + 20 * 加權 z)
+    def test_score_is_fifty_plus_twenty_five_z(self):
+        result = score_with_history(build_game_with_accuracy(20, seed=9))
+        # cognitive_flexibility_score = round(50 + 25 * 加權 z)
         self.assertAlmostEqual(
             result["cognitive_flexibility_score"],
-            50 + 20 * result["z_score"],
+            50 + 25 * result["z_score"],
             delta=0.5,
         )
+
+    def test_no_history_gives_null_score(self):
+        """自己和全體都不滿 3 場：z 和分數都是 None，原始指標照算。"""
+        result = calculate_cognitive_flexibility_score(build_questions())
+
+        self.assertIsNone(result["z_score"])
+        self.assertIsNone(result["cognitive_flexibility_score"])
+        self.assertIn("overall_accuracy", result["raw_metrics"])
+
+    def test_personal_history_preferred_over_population(self):
+        """自己已滿 3 場時跟自己比，全體使用者的歷史不影響結果。"""
+        questions = build_game_with_accuracy(20, seed=10)
+        personal_only = calculate_cognitive_flexibility_score(questions, HISTORY)
+        with_population = calculate_cognitive_flexibility_score(
+            questions, HISTORY, history_of(1, 2, 3)
+        )
+        self.assertEqual(personal_only["z_score"], with_population["z_score"])
+
+    def test_new_player_borrows_population_history(self):
+        questions = build_game_with_accuracy(20, seed=10)
+        result = calculate_cognitive_flexibility_score(questions, [], HISTORY)
+        self.assertEqual(result["z_score"], score_with_history(questions)["z_score"])
+
+
+class DetermineEncouragementTierTests(SimpleTestCase):
+    def test_new_best_is_great(self):
+        self.assertEqual(determine_encouragement_tier(80, 80), "great")
+
+    def test_null_score_has_no_tier(self):
+        self.assertIsNone(determine_encouragement_tier(None, None))
+        self.assertIsNone(determine_encouragement_tier(None, 70))

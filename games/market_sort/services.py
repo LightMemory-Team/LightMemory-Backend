@@ -30,9 +30,22 @@ error 真的判得出來，待團隊會議決定，不在這次範圍內）：
        改標成 repeat，這裡的過濾是防止時序不一致時後端還是拿到錯誤標記）
 
 詳見 Wen 2026-09-29 的分析文件「整理菜籃計分問題與修改建議」。
+
+【2026-10-26 改成跟自己的歷史比】
+團隊討論後決定不再使用寫死的常模（上面第 3 點的數字沒有實際資料支撐）：
+    1. 每個指標改跟自己過去場次的原始指標比（games/zscore.py），自己不滿
+       3 場借全體使用者的歷史，全體也不夠就是 None（資料不足，不給假分數）
+    2. 分數改成 50 + 25z（1～100），跟其他遊戲、週報一致
+等測試資料累積夠了，再依真實資料決定常模。
 """
 
 import statistics
+
+from games.zscore import (
+    metric_z_scores,
+    weighted_metric_z_score,
+    z_score_to_display_score,
+)
 
 # ---- 自訂例外：讓 View 層可以分別接住不同的錯誤情況 ----
 
@@ -47,27 +60,18 @@ class InsufficientDataError(Exception):
         self.code = code
 
 
-# ---- 常數設定：常模、加權、階段題數、z 分數上下限 ----
-# ⚠️ 常模數字目前仍是暫定值，待真實測試資料校正，見計算邏輯文件第5節
+# ---- 常數設定：指標規則、階段題數 ----
 
-NORM_REFERENCE = {
-    "overall_accuracy": {"mean": 0.80, "std": 0.10, "direction": "larger_is_better"},
-    "switch_accuracy": {"mean": 0.70, "std": 0.15, "direction": "larger_is_better"},
-    "switch_cost_rt": {"mean": 0.8, "std": 0.4, "direction": "smaller_is_better"},
-    "learning_speed": {"mean": 2.0, "std": 0.8, "direction": "smaller_is_better"},
-}
-
-WEIGHTS = {
-    "overall_accuracy": 0.40,
-    "switch_accuracy": 0.25,
-    "switch_cost_rt": 0.20,
-    "learning_speed": 0.15,
+# {指標: (權重, 是否越低越好)}；每個指標跟自己的歷史比，z 限制在 ±2
+METRIC_RULES = {
+    "overall_accuracy": (0.40, False),
+    "switch_accuracy": (0.25, False),
+    "switch_cost_rt": (0.20, True),
+    "learning_speed": (0.15, True),
 }
 
 # switch_cost_rt 至少要 repeat、switch 各答對這麼多題才計算，不夠就跳過
 MIN_CORRECT_FOR_SWITCH_COST_RT = 3
-
-Z_SCORE_CLAMP = 2.0
 
 # 28題版四階段累計題數：階段一結束於第5題、階段二第10題...
 STAGE_BOUNDARIES = [5, 10, 15, 28]
@@ -194,79 +198,64 @@ def calculate_learning_speed(questions: list[dict]) -> float:
 # ---- Step3~5：z分數（含 ±2 上下限）、加權（略過的指標自動不計入分母）、換算分數 ----
 
 
-def to_z_score(value: float, metric_name: str) -> float:
-    """算出 z 分數並限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]，避免單一指標
-    因為極端值（例如反應時間異常快/慢）就把整體分數拉爆。"""
-    norm = NORM_REFERENCE[metric_name]
-    if norm["direction"] == "smaller_is_better":
-        z = (norm["mean"] - value) / norm["std"]
-    else:
-        z = (value - norm["mean"]) / norm["std"]
-    return max(-Z_SCORE_CLAMP, min(Z_SCORE_CLAMP, z))
-
-
-def calculate_cognitive_flexibility_score(questions: list[dict]) -> dict:
+def calculate_executive_function_z_score(
+    raw_metrics: dict, personal_history: list[dict], population_history: list[dict]
+) -> tuple:
     """
-    整合入口：輸入完整 questions[]，跑完 Step2~5，回傳完整結果。
+    執行功能（認知彈性）z：4 個指標各自跟歷史比、限制在 ±2，再依 METRIC_RULES 加權。
+
+    personal_history / population_history: 過去場次的 raw_metrics 清單（不含這場）。
+    沒有資料的指標（切換成本 RT 答對題數不夠、或歷史不足）跳過，權重自動分給
+    其他項目。回傳 (加權 z 或 None, {指標: z 或 None})。
+    """
+    z_by_metric = metric_z_scores(
+        raw_metrics, personal_history, population_history, METRIC_RULES
+    )
+    return weighted_metric_z_score(z_by_metric, METRIC_RULES), z_by_metric
+
+
+def _round_or_none(value):
+    return None if value is None else round(value, 3)
+
+
+def calculate_cognitive_flexibility_score(
+    questions: list[dict],
+    personal_history: list[dict] = (),
+    population_history: list[dict] = (),
+) -> dict:
+    """
+    整合入口：輸入完整 questions[] 與歷史原始指標，跑完 Step2~5，回傳完整結果。
     這支函式就是 View 唯一需要呼叫的東西。
 
-    switch_cost_rt 資料不足（兩邊答對題數沒有都 >= 3）時會被跳過，
-    weighted_z 的分母只加總「實際有算出來的那幾項」的權重，跳掉的權重
-    自動分給其他項目，不需要另外歸一化處理。
+    歷史不足（自己和全體都不滿 3 場）時 z_score、cognitive_flexibility_score
+    為 None，前端顯示「資料不足」。
     """
     raw_metrics = calculate_raw_metrics(questions)
     learning_speed = calculate_learning_speed(questions)
     raw_metrics["learning_speed"] = round(learning_speed, 2)
 
-    z_scores = {
-        "overall_accuracy_z": round(
-            to_z_score(raw_metrics["overall_accuracy"], "overall_accuracy"), 3
-        ),
-        "switch_accuracy_z": round(
-            to_z_score(raw_metrics["switch_accuracy"], "switch_accuracy"), 3
-        ),
-        "learning_speed_z": round(to_z_score(learning_speed, "learning_speed"), 3),
-    }
-
-    weighted_sum = (
-        z_scores["overall_accuracy_z"] * WEIGHTS["overall_accuracy"]
-        + z_scores["switch_accuracy_z"] * WEIGHTS["switch_accuracy"]
-        + z_scores["learning_speed_z"] * WEIGHTS["learning_speed"]
+    weighted_z, z_by_metric = calculate_executive_function_z_score(
+        raw_metrics, list(personal_history), list(population_history)
     )
-    weight_total = (
-        WEIGHTS["overall_accuracy"]
-        + WEIGHTS["switch_accuracy"]
-        + WEIGHTS["learning_speed"]
-    )
-
-    if raw_metrics["switch_cost_rt"] is not None:
-        z_scores["switch_cost_rt_z"] = round(
-            to_z_score(raw_metrics["switch_cost_rt"], "switch_cost_rt"), 3
-        )
-        weighted_sum += z_scores["switch_cost_rt_z"] * WEIGHTS["switch_cost_rt"]
-        weight_total += WEIGHTS["switch_cost_rt"]
-    else:
-        z_scores["switch_cost_rt_z"] = None
-
-    weighted_z = weighted_sum / weight_total
-    # 每個 z 分數都已限制在 [-2, 2]，加權平均後仍落在同一範圍內，
-    # 換算後的分數自然落在 10~90，不需要再另外 clamp（見分析文件）。
-    final_score = 50 + 20 * weighted_z
+    z_score = _round_or_none(weighted_z)
 
     return {
         "raw_metrics": raw_metrics,
-        "z_scores": z_scores,
+        "z_scores": {f"{name}_z": _round_or_none(z) for name, z in z_by_metric.items()},
         # 加權後的整體 z（±2 內），給 dashboard 用
-        "z_score": round(weighted_z, 3),
-        "cognitive_flexibility_score": round(final_score),
+        "z_score": z_score,
+        "cognitive_flexibility_score": z_score_to_display_score(z_score),
     }
 
 
-def determine_encouragement_tier(current_score: int, highest_score: int) -> str:
+def determine_encouragement_tier(current_score, highest_score):
     """
     ⚠️ 門檻為暫定值，待確認
-    固定三種值，對應結算畫面的星星／打勾／旗子三個等級圖示
+    固定三種值，對應結算畫面的星星／打勾／旗子三個等級圖示；
+    這場或歷史沒有分數（資料不足）時回傳 None。
     """
+    if current_score is None or highest_score is None:
+        return None
     diff = highest_score - current_score
     if diff <= 0:
         return "great"
