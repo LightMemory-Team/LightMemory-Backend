@@ -27,14 +27,13 @@ from .services import (
     GAME_SOURCES,
     GAME_TITLES,
     diary_z_scores,
+    get_trend,
+    overall_score,
 )
 
 WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"]
 
 DISCLAIMER = "這不是醫療診斷，僅供自我了解"
-
-# 本週跟上週的分數差多少以上，才算「進步」或「多練習」；差距小於這個算「持平」
-TREND_THRESHOLD = 3
 
 
 def get_report_week(today):
@@ -225,28 +224,6 @@ def get_weekly_scores_history(user, until_week_start):
     }
 
 
-def _overall_score(scores_by_source):
-    """整體表現 = 那週有分數的能力（含語言）取平均；一項都沒有就是 None。"""
-    if not scores_by_source:
-        return None
-    return round(statistics.mean(scores_by_source.values()))
-
-
-def get_trend(this_week, last_week):
-    """進步 up／持平 steady／多練習 practice；任一週沒分數就是 None。
-
-    用代碼回傳，前端翻成中文；退步用「多練習」，不出現負面字眼。
-    """
-    if this_week is None or last_week is None:
-        return None
-    diff = this_week - last_week
-    if diff >= TREND_THRESHOLD:
-        return "up"
-    if diff <= -TREND_THRESHOLD:
-        return "practice"
-    return "steady"
-
-
 def _ability(this_week, last_week, best):
     return {
         "this_week": this_week,
@@ -282,11 +259,11 @@ def build_abilities(user, week_start, played_sources):
         )
 
     overall_best = max(
-        (_overall_score(scores) for scores in history.values()), default=None
+        (overall_score(scores) for scores in history.values()), default=None
     )
     return {
         "overall": _ability(
-            _overall_score(this_scores), _overall_score(last_scores), overall_best
+            overall_score(this_scores), overall_score(last_scores), overall_best
         ),
         "dimensions": dimensions,
     }

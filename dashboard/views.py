@@ -2,7 +2,7 @@ from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from . import services, weekly_report
+from . import encouragement, services, weekly_report
 
 
 def _error_response(code, message, *, data=None, status=200):
@@ -42,6 +42,8 @@ def dashboard(request):
             "data": {
                 "period_days": services.PERIOD_DAYS,
                 "dimensions": services.get_dashboard_dimensions(request.user),
+                # 機器人卡片：總體分數的趨勢代碼，前端翻成鼓勵文字
+                "encouragement": encouragement.get_encouragement(request.user),
             },
             "error": None,
         }

@@ -37,8 +37,14 @@ GAME_TITLES = {game["id"]: game["title"] for game in GAMES}
 
 PERIOD_DAYS = 7
 
-# 每款遊戲累計至少要有幾場「算得出 z_score」的場次，儀表板才顯示
+# 兩段期間的分數差多少以上，才算「進步」或「多練習」；差距小於這個算「持平」
+# 週報（本週 vs 上週）和儀表板機器人卡片（近 7 天 vs 前 7 天）共用
+TREND_THRESHOLD = 3
+
+# 每款遊戲、聲影日記累計至少要有幾場（篇）「算得出 z_score」的紀錄，儀表板才顯示
 REQUIRED_SESSIONS = 3
+
+DIARY_LABEL = "聲影日記"
 
 
 def _z_scores_by_game(user, start=None, end=None):
@@ -120,9 +126,15 @@ def average_diary_z_score(user, start=None, end=None):
 
 
 def get_unlock_progress(user):
-    """各遊戲累計（不限期間）有 z_score 的場次數，給「資料尚不足分析」時顯示進度。"""
+    """各遊戲、聲影日記累計（不限期間）有 z_score 的場次（篇）數。
+
+    給「資料尚不足分析」時顯示進度。
+
+    日記要算得出語言 z 才算：更早的日記不滿 3 篇（自己的和全體的都不夠）時，
+    那篇沒有 z，不算進去。
+    """
     z_scores = _z_scores_by_game(user)
-    return [
+    progress = [
         {
             "source": source,
             "label": GAME_TITLES[source],
@@ -130,10 +142,18 @@ def get_unlock_progress(user):
         }
         for source in GAME_SOURCES
     ]
+    progress.append(
+        {
+            "source": DIARY_SOURCE,
+            "label": DIARY_LABEL,
+            "session_count": len(diary_z_scores(user)),
+        }
+    )
+    return progress
 
 
 def is_unlocked(progress):
-    """五款遊戲都至少玩滿 REQUIRED_SESSIONS 場才解鎖。"""
+    """5 款遊戲和聲影日記都至少累積 REQUIRED_SESSIONS 場（篇）才解鎖。"""
     return all(item["session_count"] >= REQUIRED_SESSIONS for item in progress)
 
 
@@ -149,3 +169,25 @@ def get_dashboard_dimensions(user, days=PERIOD_DAYS):
         z_score, session_count = averages[item["source"]]
         dimensions.append({**item, "z_score": z_score, "session_count": session_count})
     return dimensions
+
+
+def overall_score(scores_by_source):
+    """整體表現 = 有分數的能力（含語言）取平均；一項都沒有就是 None。"""
+    if not scores_by_source:
+        return None
+    return round(statistics.mean(scores_by_source.values()))
+
+
+def get_trend(this_score, last_score):
+    """進步 up／持平 steady／多練習 practice；任一期沒分數就是 None。
+
+    用代碼回傳，前端翻成中文；退步用「多練習」，不出現負面字眼。
+    """
+    if this_score is None or last_score is None:
+        return None
+    diff = this_score - last_score
+    if diff >= TREND_THRESHOLD:
+        return "up"
+    if diff <= -TREND_THRESHOLD:
+        return "practice"
+    return "steady"
