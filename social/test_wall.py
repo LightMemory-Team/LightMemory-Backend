@@ -54,21 +54,23 @@ class WallApiTests(APITestCase):
         self.assertEqual(r.status_code, 201)
         data = r.data['data']
         self.assertEqual(data['text'], '好漂亮')
-        self.assertEqual(data['sender_name'], '匿名')
+        self.assertEqual(data['sender_name'], '我')
         self.assertNotIn('author', data)
         self.assertTrue(data['is_mine'])
         self.assertEqual(Notification.objects.count(), 0)
 
-    def test_comment_list_hides_commenter_names(self):
+    def test_comment_list_sender_names(self):
         Comment.objects.create(post=self.post, user=self.a, content='謝謝')
         Comment.objects.create(post=self.post, user=self.b, content='早期留言')
+        Comment.objects.create(post=self.post, user=None, nickname='小明', content='親友留言')
+        Comment.objects.create(post=self.post, user=None, nickname='', content='沒暱稱')
         r = self.client.get(f'/api/social/posts/{self.post.id}/comments/')
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.data['pagination']['count'], 2)
+        self.assertEqual(r.data['pagination']['count'], 4)
         for item in r.data['data']:
-            self.assertEqual(item['sender_name'], '匿名')
             self.assertNotIn('author', item)
-        self.assertEqual([c['is_mine'] for c in r.data['data']], [True, False])
+        self.assertEqual([c['sender_name'] for c in r.data['data']], ['我', '匿名', '小明', '匿名'])
+        self.assertEqual([c['is_mine'] for c in r.data['data']], [True, False, False, False])
 
     def test_delete_post_removes_comments(self):
         url = f'/api/social/posts/{self.post.id}/'
