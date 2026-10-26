@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from .models import Notification, Comment
-from .utils import author_dict, get_display_name
 
 class NotificationSerializer(serializers.ModelSerializer):
     notification_type_display = serializers.CharField(source='get_notification_type_display', read_only=True)
@@ -28,7 +27,6 @@ class CommentSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         viewer = self.context['request'].user
         data['comment_id'] = data.pop('id')
-        data['sender_name'] = get_display_name(instance.user)
-        data['author'] = author_dict(instance.user)
+        data['sender_name'] = '匿名'
         data['is_mine'] = instance.user_id == viewer.id
         return data

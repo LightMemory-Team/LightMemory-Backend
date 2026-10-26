@@ -161,7 +161,6 @@ class DiaryShareEndpointTests(APITestCase):
         self.assertTrue(data['is_share_enabled'])
         self.assertIsNotNone(data['share_url'])
         self.assertIn('/share/', data['share_url'])
-        self.assertEqual(data['like_count'], 0)
         self.assertEqual(data['comment_count'], 0)
 
         # 驗證資料庫確實建立 Post

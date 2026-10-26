@@ -1,10 +1,10 @@
 from django.conf import settings
-from django.db.models import Count, Exists, OuterRef
+from django.db.models import Count
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.utils.urls import replace_query_param
 
-from .models import Like, Post
+from .models import Post
 
 
 def get_display_name(user):
@@ -49,15 +49,11 @@ def paginate(request, queryset, serialize, default_size=10, max_size=50):
 
 
 def post_queryset(user):
-    """所有看得到的貼文,並附上按讚數、留言數、我是否按讚。"""
+    """只回傳自己的貼文(帳號隔離),並附上留言數。"""
     return (
-        Post.objects.filter(is_enabled=True)
+        Post.objects.filter(is_enabled=True, user=user)
         .select_related("user", "diary")
-        .annotate(
-            like_total=Count("likes", distinct=True),
-            comment_total=Count("comments", distinct=True),
-            liked_by_me=Exists(Like.objects.filter(post=OuterRef("pk"), user=user)),
-        )
+        .annotate(comment_total=Count("comments", distinct=True))
     )
 
 
@@ -83,8 +79,6 @@ def serialize_post(post, viewer):
         "category": diary.category if diary else "",
         "date": timezone.localtime(base_time).date().isoformat(),
         "posted_at": timezone.localtime(post.created_at).isoformat(),
-        "like_count": post.like_total,
-        "is_liked": post.liked_by_me,
         "comment_count": post.comment_total,
         "voice_reply_count": 0,
         "share_url": share_url if is_mine else None,
