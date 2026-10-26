@@ -4,11 +4,13 @@
 - 遊戲：從已結束場次 GameSession.result 裡的 z_score 計算。z_score 由各遊戲
   結算時存入，已限制在 ±2 內；算不出來（前測、歷史不足）時為 None。
 - 聲影日記（語言）：從 DiaryAnalysis 的 5 個小分數現算每篇的語言 z
-  （見 diary_zscore.py），只算有效的日記。
+  （跟更早的有效日記比，見 diary_zscore.py），只算有效的日記。
 """
 
 import statistics
 from datetime import timedelta
+from itertools import groupby
+from operator import itemgetter
 
 from django.utils import timezone
 
@@ -16,7 +18,8 @@ from diary.models import DiaryAnalysis
 from games.catalog import GAMES
 from games.models import GameSession
 
-from .diary_zscore import DIARY_WEIGHTS, calculate_diary_z_score
+from .diary_zscore import METRIC_RULES as LANGUAGE_METRIC_RULES
+from .diary_zscore import calculate_language_z_score
 
 # 雷達圖的軸，順序就是前端畫的順序；source 是資料來源（遊戲 id 或聲影日記）
 DIMENSIONS = [
@@ -69,22 +72,42 @@ def average_z_scores(user, start=None, end=None):
 
 
 def diary_z_scores(user, start=None, end=None):
-    """期間內每篇有效日記的 (建立時間, 語言 z)。
+    """期間內這位使用者每篇有效日記的 (建立時間, 語言 z)。
 
     以日記建立時間（Diary.created_at）判斷是否在期間內；
     無效日記（錄音太短、疑似辨識錯誤）沒有小分數，不算。
+
+    每篇跟「更早建立」的有效日記比：自己的不滿 3 篇就借全體使用者的，
+    所以期間以前的日記、別人的日記也要拿來當歷史。一次查出 end 以前全部的
+    有效日記、依建立時間掃過去，避免每篇各查一次資料庫。歷史不足、算不出 z
+    的日記不列入。
     """
-    analyses = DiaryAnalysis.objects.filter(diary__user=user, is_valid=True)
-    if start is not None:
-        analyses = analyses.filter(diary__created_at__gte=start)
+    analyses = DiaryAnalysis.objects.filter(is_valid=True)
     if end is not None:
         analyses = analyses.filter(diary__created_at__lt=end)
+    rows = analyses.order_by("diary__created_at").values(
+        "diary__user_id", "diary__created_at", *LANGUAGE_METRIC_RULES
+    )
 
+    personal_history, population_history = [], []
     results = []
-    for row in analyses.values("diary__created_at", *DIARY_WEIGHTS):
-        z_score = calculate_diary_z_score(row)
-        if z_score is not None:
-            results.append((row["diary__created_at"], z_score))
+    for created_at, same_time_rows in groupby(
+        rows, key=itemgetter("diary__created_at")
+    ):
+        same_time_rows = list(same_time_rows)
+        in_period = start is None or created_at >= start
+        for row in same_time_rows:
+            if in_period and row["diary__user_id"] == user.id:
+                z_score = calculate_language_z_score(
+                    row, personal_history, population_history
+                )
+                if z_score is not None:
+                    results.append((created_at, z_score))
+        # 算完同一時間的日記才放進歷史：同時建立的日記不互相比
+        for row in same_time_rows:
+            population_history.append(row)
+            if row["diary__user_id"] == user.id:
+                personal_history.append(row)
     return results
 
 

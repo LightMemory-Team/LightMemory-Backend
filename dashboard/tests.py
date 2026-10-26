@@ -23,6 +23,8 @@ class DashboardApiTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="tester", password="pw123456")
         self.client.force_authenticate(user=self.user)
+        # 日記用固定的「現在」：同一個 days_ago 建立時間完全相同，不會互相比
+        self.now = timezone.now()
 
     def _finished_session(self, game, z_score, *, user=None, days_ago=1):
         """建立一場 days_ago 天前結束、結算結果帶 z_score 的場次。"""
@@ -38,11 +40,12 @@ class DashboardApiTests(APITestCase):
     def _diary(self, sub_score, *, user=None, days_ago=1, is_valid=True):
         """建立一篇 days_ago 天前的日記，5 個小分數都是 sub_score。
 
-        常模是中點（平均 2、標準差 1），所以這篇的語言 z = sub_score − 2。
+        先用 _diary_history 建好歷史（平均 2、標準差 1），
+        這篇的語言 z 就是 sub_score − 2。
         """
         diary = Diary.objects.create(user=user or self.user, status="done")
         Diary.objects.filter(pk=diary.pk).update(
-            created_at=timezone.now() - timedelta(days=days_ago)
+            created_at=self.now - timedelta(days=days_ago)
         )
         scores = {
             name: (sub_score if is_valid else None)
@@ -55,6 +58,11 @@ class DashboardApiTests(APITestCase):
             )
         }
         DiaryAnalysis.objects.create(diary=diary, is_valid=is_valid, **scores)
+
+    def _diary_history(self, *values, days_ago=30):
+        """建立 days_ago 天前的歷史日記；預設 1、2、3 分 → 平均 2、標準差 1。"""
+        for value in values or (1, 2, 3):
+            self._diary(value, days_ago=days_ago)
 
     def _unlock_all_games(self, z_score=0.0, days_ago=1):
         """五款遊戲各玩 REQUIRED_SESSIONS 場，讓儀表板解鎖。"""
@@ -200,6 +208,8 @@ class DashboardApiTests(APITestCase):
 
     def test_language_is_average_of_recent_diaries(self):
         self._unlock_all_games()
+        self._diary_history()
+        # 兩篇同一時間建立，都只跟歷史比
         self._diary(3)  # 語言 z = +1
         self._diary(2.5)  # 語言 z = +0.5
 
@@ -211,9 +221,10 @@ class DashboardApiTests(APITestCase):
 
     def test_language_excludes_invalid_old_and_other_users_diaries(self):
         self._unlock_all_games()
+        self._diary_history(1, 3)
+        self._diary(2, days_ago=8)  # 超過 7 天不算平均，但當歷史 → 1、3、2
         self._diary(3)  # 語言 z = +1，唯一算進去的
         self._diary(4, is_valid=False)  # 無效日記（錄音太短等）
-        self._diary(0, days_ago=8)  # 超過 7 天
         other = User.objects.create_user(username="other", password="pw123456")
         self._diary(0, user=other)
 
