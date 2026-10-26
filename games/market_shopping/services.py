@@ -8,6 +8,11 @@ from django.utils import timezone
 
 from games import session_service
 from games.dda import DDAConfig, NoOpStrategy, apply_answer
+from games.zscore import (
+    metric_z_scores,
+    weighted_metric_z_score,
+    z_score_to_display_score,
+)
 
 from .constants import BUDGET_OPTIONS, FOODS
 
@@ -22,42 +27,40 @@ DDA_CONFIG = DDAConfig(
 )
 DDA_STRATEGY = NoOpStrategy()
 
-# 常模與 Z-score 設定
-MARKET_SHOPPING_NORM = {
-    "mean": 70.0,
-    "std": 10.0,
-}
-
-Z_SCORE_CLAMP = 2.0
+# Z-score 設定：只用原始能力分 raw_score 一個指標，越高越好
+METRIC_RULES = {"raw_score": (1.0, False)}
 
 
-def calculate_z_score(raw_score):
+def calculate_math_z_score(raw_score, personal_history, population_history):
     """
-    依常模計算 Market Shopping 的 Z-score 與跨遊戲標準分數 (standard_score)。
+    數學 Z-score 與跨遊戲標準分數 (standard_score)。
 
-    Z = (raw_score - mean) / std
-    Z-score 限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]
-    standard_score = 50 + 20 * z_score
+    raw_score 跟自己過去場次的 raw_score 比（games/zscore.py）：
+    自己不滿 3 場借全體使用者的歷史，全體也不夠就是 None（資料不足）。
+    Z-score 限制在 ±2，standard_score = 50 + 25 * z_score（1～100）。
+
+    personal_history / population_history: 過去場次的 result 清單（不含這場）
     """
-    mean = MARKET_SHOPPING_NORM["mean"]
-    std = MARKET_SHOPPING_NORM["std"]
-
-    if std == 0:
-        z_score = 0.0
-    else:
-        z_score = (raw_score - mean) / std
-
-    z_score = max(
-        -Z_SCORE_CLAMP,
-        min(Z_SCORE_CLAMP, z_score),
+    z_by_metric = metric_z_scores(
+        {"raw_score": raw_score}, personal_history, population_history, METRIC_RULES
     )
-
-    standard_score = 50 + 20 * z_score
+    z_score = weighted_metric_z_score(z_by_metric, METRIC_RULES)
+    if z_score is not None:
+        z_score = round(z_score, 3)
 
     return {
-        "z_score": round(z_score, 3),
-        "standard_score": round(standard_score),
+        "z_score": z_score,
+        "standard_score": z_score_to_display_score(z_score),
     }
+
+
+def _previous_results(session):
+    """這場之前已結束場次的 result（自己的、全體的），給 z-score 當比較基準。"""
+    session_id = session["session_id"]
+    return (
+        session_service.list_previous_results(GAME_TYPE, session_id),
+        session_service.list_previous_results(GAME_TYPE, session_id, same_user=False),
+    )
 
 
 def calculate_speed_score(reaction_time_ms):
@@ -427,8 +430,11 @@ def move_to_next_question(session):
     )
 
 
-def calculate_final_result(session):
-    """計算整場最終成績。"""
+def calculate_final_result(session, personal_history=None, population_history=None):
+    """計算整場最終成績。
+
+    personal_history / population_history 沒給時，從資料庫查這場之前的場次。
+    """
     state = session["state"]
     completed_at = timezone.now()
     accuracy = round(
@@ -453,7 +459,10 @@ def calculate_final_result(session):
         else None
     )
 
-    z_result = calculate_z_score(raw_score)
+    # 原始能力分跟自己的歷史比
+    if personal_history is None or population_history is None:
+        personal_history, population_history = _previous_results(session)
+    z_result = calculate_math_z_score(raw_score, personal_history, population_history)
     z_score = z_result["z_score"]
     standard_score = z_result["standard_score"]
 

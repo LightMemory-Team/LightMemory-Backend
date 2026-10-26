@@ -244,7 +244,8 @@ class FullGameFlowTests(MarketShoppingTestCase):
         self.assertEqual(data["accuracy"], 100.0)
         self.assertEqual(data["speed_score"], 100.0)
         self.assertEqual(data["raw_score"], 100.0)
-        self.assertEqual(data["standard_score"], 90)
+        # 系統裡第一場，沒有歷史可比 → 資料不足，standard_score 為 null
+        self.assertIsNone(data["standard_score"])
         self.assertEqual(data["average_reaction_time_ms"], 2750)
 
         response = self.client.get(HISTORY_URL)
@@ -252,7 +253,7 @@ class FullGameFlowTests(MarketShoppingTestCase):
         self.assertEqual(history_item["score"], 100.0)
         self.assertEqual(history_item["raw_score"], 100.0)
         self.assertEqual(history_item["first_try_correct_count"], 10)
-        self.assertEqual(history_item["standard_score"], 90)
+        self.assertIsNone(history_item["standard_score"])
         self.assertEqual(history_item["speed_score"], 100.0)
         self.assertEqual(history_item["average_reaction_time_ms"], 2750)
         self.assertEqual(history_item["reaction_time"], 2.75)

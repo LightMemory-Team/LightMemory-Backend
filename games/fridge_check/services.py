@@ -2,6 +2,11 @@ from django.utils import timezone
 
 from games import session_service
 from games.dda import DDAConfig, NoOpStrategy, apply_answer
+from games.zscore import (
+    metric_z_scores,
+    weighted_metric_z_score,
+    z_score_to_display_score,
+)
 
 from .constants import (
     DIFFICULTY_EASY,
@@ -30,42 +35,40 @@ ERROR_PENALTY_PER_SKIPPED_QUESTION = 2
 MEDIUM_CORRECT_BONUS = 0.5
 HARD_CORRECT_BONUS = 1.0
 
-# 常模與 Z-score 設定
-FRIDGE_SCORE_NORM = {
-    "mean": 70.0,
-    "std": 10.0,
-}
-
-Z_SCORE_CLAMP = 2.0
+# Z-score 設定：只用原始能力分 raw_score 一個指標，越高越好
+METRIC_RULES = {"raw_score": (1.0, False)}
 
 
-def calculate_z_score(raw_score):
+def calculate_visual_spatial_z_score(raw_score, personal_history, population_history):
     """
-    依常模計算 Fridge Check 的 Z-score 與跨遊戲標準分數 (standard_score)。
+    視覺空間 Z-score 與跨遊戲標準分數 (standard_score)。
 
-    Z = (raw_score - mean) / std
-    Z-score 限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]
-    standard_score = 50 + 20 * z_score
+    raw_score 跟自己過去場次的 raw_score 比（games/zscore.py）：
+    自己不滿 3 場借全體使用者的歷史，全體也不夠就是 None（資料不足）。
+    Z-score 限制在 ±2，standard_score = 50 + 25 * z_score（1～100）。
+
+    personal_history / population_history: 過去場次的 result 清單（不含這場）
     """
-    mean = FRIDGE_SCORE_NORM["mean"]
-    std = FRIDGE_SCORE_NORM["std"]
-
-    if std == 0:
-        z_score = 0.0
-    else:
-        z_score = (raw_score - mean) / std
-
-    z_score = max(
-        -Z_SCORE_CLAMP,
-        min(Z_SCORE_CLAMP, z_score),
+    z_by_metric = metric_z_scores(
+        {"raw_score": raw_score}, personal_history, population_history, METRIC_RULES
     )
-
-    standard_score = 50 + 20 * z_score
+    z_score = weighted_metric_z_score(z_by_metric, METRIC_RULES)
+    if z_score is not None:
+        z_score = round(z_score, 3)
 
     return {
-        "z_score": round(z_score, 3),
-        "standard_score": round(standard_score),
+        "z_score": z_score,
+        "standard_score": z_score_to_display_score(z_score),
     }
+
+
+def _previous_results(session):
+    """這場之前已結束場次的 result（自己的、全體的），給 z-score 當比較基準。"""
+    session_id = session["session_id"]
+    return (
+        session_service.list_previous_results(GAME_TYPE, session_id),
+        session_service.list_previous_results(GAME_TYPE, session_id, same_user=False),
+    )
 
 
 def _build_current_question(question):
@@ -409,8 +412,11 @@ def move_to_next_question(session):
     return session
 
 
-def calculate_final_result(session):
-    """計算整場 Fridge Check 最終成績。"""
+def calculate_final_result(session, personal_history=None, population_history=None):
+    """計算整場 Fridge Check 最終成績。
+
+    personal_history / population_history 沒給時，從資料庫查這場之前的場次。
+    """
     state = session["state"]
 
     # 1. 正確率 0 ~ 100
@@ -425,7 +431,8 @@ def calculate_final_result(session):
     # 10 題，每題最高 10，所以自然是 0 ~ 100
     speed_score = state["speed_score"]
 
-    # 3. 原始能力指標 (正確率 70% + 速度分 30%，不含難度加分與跳題扣分，反映長者真實認知表現)
+    # 3. 原始能力指標 (正確率 70% + 速度分 30%)
+    #    不含難度加分與跳題扣分，反映長者真實認知表現
     raw_score = round(
         accuracy * 0.7 + speed_score * 0.3,
         2,
@@ -457,8 +464,12 @@ def calculate_final_result(session):
         2,
     )
 
-    # 7. Z-score 與跨遊戲標準分數：改由原始能力指標 raw_score 計算！
-    z_result = calculate_z_score(raw_score)
+    # 7. Z-score 與跨遊戲標準分數：由原始能力指標 raw_score 跟自己的歷史比
+    if personal_history is None or population_history is None:
+        personal_history, population_history = _previous_results(session)
+    z_result = calculate_visual_spatial_z_score(
+        raw_score, personal_history, population_history
+    )
     z_score = z_result["z_score"]
     standard_score = z_result["standard_score"]
 
