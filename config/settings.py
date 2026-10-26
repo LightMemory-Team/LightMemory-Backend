@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'assessments',
     'ai_service',
     'home',
+    'public_share',
 ]
 
 AUTH_USER_MODEL = 'users.User'

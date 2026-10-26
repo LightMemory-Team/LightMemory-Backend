@@ -23,12 +23,14 @@ class Post(models.Model):
 
 class Comment(models.Model):
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='comments')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='comments')
+    nickname = models.CharField(max_length=20, blank=True, default='')
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.user} 對 {self.post} 的留言"
+        name = self.nickname or (str(self.user) if self.user else "匿名")
+        return f"{name} 對 {self.post} 的留言"
 
 
 class Like(models.Model):
