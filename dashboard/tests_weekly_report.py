@@ -71,7 +71,7 @@ def finished_on(user, game, day, z_score, *, hour=10, minute=0):
 def diary_on(user, day, sub_score, *, is_valid=True):
     """建立一篇 day（date）那天寫的日記，5 個小分數都是 sub_score。
 
-    常模是中點（平均 2、標準差 1），所以這篇的語言 z = sub_score − 2。
+    語言 z 跟更早的有效日記比；先用 diary_baseline 建好歷史。
     """
     diary = Diary.objects.create(user=user, status="done")
     Diary.objects.filter(pk=diary.pk).update(
@@ -89,6 +89,15 @@ def diary_on(user, day, sub_score, *, is_valid=True):
         is_valid=is_valid,
         **{name: (sub_score if is_valid else None) for name in names},
     )
+
+
+def diary_baseline(user):
+    """9/1～9/3 的 3 篇歷史日記，小分數 1、2、3 → 平均 2、標準差 1。
+
+    這 3 篇自己沒有足夠的歷史，算不出 z，不影響任何一週的分數。
+    """
+    for day, sub_score in ((1, 1), (2, 2), (3, 3)):
+        diary_on(user, date(2026, 9, day), sub_score)
 
 
 def make_diary(user, *, created_at, status="done", reply_times=(), **fields):
@@ -403,25 +412,27 @@ class AbilitiesTests(TestCase):
         self.assertIsNone(math["trend"])
 
     def test_language_score_from_diaries(self):
-        diary_on(self.user, date(2026, 9, 21), 3.2)  # z +1.2 → 80，個人最佳
-        diary_on(self.user, date(2026, 9, 30), 2)  # 上週 z 0 → 50
-        diary_on(self.user, date(2026, 10, 6), 3)  # 本週 z +1
-        diary_on(self.user, date(2026, 10, 8), 2.6)  # 本週 z +0.6
+        # 每篇跟「更早的有效日記」比，寫完就變成下一篇的歷史
+        diary_baseline(self.user)  # 1、2、3
+        diary_on(self.user, date(2026, 9, 21), 3.2)  # 跟 1、2、3 比：z +1.2 → 80
+        diary_on(self.user, date(2026, 9, 30), 2)  # 跟 1、2、3、3.2 比：z −0.296
+        diary_on(self.user, date(2026, 10, 6), 3)  # 本週 z +0.856
+        diary_on(self.user, date(2026, 10, 8), 2.6)  # 本週 z +0.274
         diary_on(self.user, date(2026, 10, 9), 0, is_valid=False)  # 無效，不算
         diary_on(self.user, date(2026, 10, 13), 4)  # 報告週之後，不算
 
         abilities = build_abilities(self.user, WEEK_START, {"diary"})
 
         language = self._ability(abilities, "language")
-        # 本週平均 z 0.8 → 50 + 25 x 0.8 = 70
+        # 上週 50 + 25 x −0.296 = 43；本週平均 z 0.565 → 64；最佳是 9/21 那週的 80
         self.assertEqual(
             language,
             {
                 "dimension": "language",
                 "label": "語言",
                 "played": True,
-                "this_week": 70,
-                "last_week": 50,
+                "this_week": 64,
+                "last_week": 43,
                 "best": 80,
                 "trend": "up",
             },
@@ -440,7 +451,8 @@ class AbilitiesTests(TestCase):
 
     def test_overall_includes_language(self):
         finished_on(self.user, "market_route", date(2026, 10, 6), 0.6)  # 65
-        diary_on(self.user, date(2026, 10, 7), 3)  # 75
+        diary_baseline(self.user)
+        diary_on(self.user, date(2026, 10, 7), 3)  # 跟 1、2、3 比：z +1 → 75
 
         overall = build_abilities(self.user, WEEK_START, set())["overall"]
 
