@@ -86,7 +86,7 @@ $$\text{difficulty\_bonus} = (\text{medium\_correct} \times 0.5) + (\text{hard\_
 $$\text{error\_penalty} = \text{skipped\_question\_count} \times 2$$
 
 ### 5. 原始能力分（Raw Score）與遊戲最終總分（Final Score）
-- **原始認知能力分（`raw_score`）**：由正確率與作答速度組成，不包含遊戲難度加分與跳題扣分，客觀反映認知水準並用於常模與 Z 分數計算：
+- **原始認知能力分（`raw_score`）**：由正確率與作答速度組成，不包含遊戲難度加分與跳題扣分，客觀反映認知水準並用於 Z 分數計算（跟自己的歷史比）：
 $$\text{raw\_score} = \text{round}((\text{accuracy} \times 0.7) + (\text{speed\_score} \times 0.3), 2)$$
 
 - **遊戲端最終總分（`final_score`）**：納入難度加成與懲罰，給予長者即時成就反饋：
@@ -98,11 +98,16 @@ $$\text{final\_score} = \text{round}(\max(0, \text{raw\_final\_score}), 2)$$
 
 
 ### 6. Z-Score 與跨遊戲標準分數（Standard Score）
-依參考常模（預設 $\mu=70.0, \sigma=10.0$）由**原始能力分（`raw_score`）**計算 Z 分數，排除難度加分干擾；並限制在 $\pm 2.0$ 範圍避免極端值失真，最後換算為跨遊戲統一標準分數（中心值 50，標準差 20）：
+由**原始能力分（`raw_score`）**跟**自己過去場次的 `raw_score`** 比，算出 Z 分數（排除難度加分干擾）；限制在 $\pm 2.0$ 範圍避免極端值失真，最後換算為跨遊戲統一的 1～100 分（中心值 50，五款遊戲與週報表相同）：
 
+$$\mu, \sigma = \text{自己過去場次 raw\_score 的平均、樣本標準差}$$
 $$Z_{\text{raw}} = \frac{\text{raw\_score} - \mu}{\sigma}$$
 $$Z = \max(-2.0, \min(2.0, Z_{\text{raw}}))$$
-$$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
+$$\text{standard\_score} = \min(100, \max(1, \text{round}(50 + 25 \times Z)))$$
+
+- **冷啟動**：自己過去不滿 3 場 → 改用全體使用者過去的場次；全體也不滿 3 場（或標準差為 0）→ `z_score`、`standard_score` 皆為 `null`，前端顯示「資料不足」
+- 不使用寫死的常模（舊版為 $\mu=70, \sigma=10$，沒有實際資料依據）；等測試資料累積後再依真實資料決定
+- 程式：`calculate_visual_spatial_z_score`，共用工具見 `games/zscore.py`
 
 ## 五、資料表設計
 
@@ -145,6 +150,8 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
 
 **result 內容範例（遊戲結束）**
 
+（以下範例假設自己過去場次的 `raw_score` 平均 70、標準差 10）
+
 ```json
 {
   "total_correct": 8,
@@ -159,7 +166,7 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
   "error_penalty": 2,
   "final_score": 80.3,
   "z_score": 0.88,
-  "standard_score": 68,
+  "standard_score": 72,
   "final_difficulty": "hard",
   "average_reaction_time_ms": 2450,
   "completed_at": "2026-10-04T00:15:30.123456+08:00"
@@ -297,7 +304,7 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
     "error_penalty": 2,
     "final_score": 80.3,
     "z_score": 0.88,
-    "standard_score": 68,
+    "standard_score": 72,
     "final_difficulty": "hard",
     "average_reaction_time_ms": 2450,
     "completed_at": "2026-10-04T00:20:15.123456+08:00"
@@ -334,7 +341,7 @@ $$\text{standard\_score} = \text{round}(50 + 20 \times Z)$$
         "error_penalty": 0,
         "final_score": 91.6,
         "z_score": 1.76,
-        "standard_score": 85,
+        "standard_score": 94,
         "average_reaction_time_ms": 2150,
         "completed_at": "2026-10-04T00:15:30.123456+08:00"
       }

@@ -25,10 +25,11 @@
 | 3 | `executive_function` | 執行功能 | 整理菜籃 `market_sort` | 同上 |
 | 4 | `visual_spatial` | 視覺空間 | 冰箱檢查 `fridge_check` | 同上 |
 | 5 | `math` | 數學 | 市場買菜 `market_shopping` | 同上 |
-| 6 | `language` | 語言 | 聲影日記 `diary` | 從 `DiaryAnalysis` 的 5 個小分數現算，只算有效日記 |
+| 6 | `language` | 語言 | 聲影日記 `diary` | 從 `DiaryAnalysis` 的 5 個小分數現算（跟更早的有效日記比），只算有效日記 |
 
 - 陣列順序同儀表板雷達圖（`dashboard/services.py` 的 `DIMENSIONS`）
 - 每款遊戲 z 的算法見 [`game_scoring_algorithms.md`](game_scoring_algorithms.md) 第 3～7 節，聲影日記見第 11-4 節
+- 所有 z 都是**跟自己的歷史比**：自己不滿 3 場（篇）先借全體使用者的歷史，全體也不夠就算不出來；不使用寫死的常模
 - 所有 z 都已限制在 **−2 ～ +2**；算不出來的場次（前測、歷史不足、無效日記）不算
 
 ---
@@ -216,7 +217,7 @@
 | `dashboard/services.py` | `DIMENSIONS`（六大能力對照）、`diary_z_scores`（每篇日記的語言 z） |
 | `dashboard/diary_zscore.py` | 單篇日記語言 z 的計算 |
 | `ai_service/weekly_summary.py` | 一句話總結：正向事實、AI 呼叫、禁用詞檢查、固定句型 |
-| `games/memory_recall/score.py` | `z_score_to_total_score`：z → 1～100 分 |
+| `games/zscore.py` | `z_score_to_display_score`：z → 1～100 分（五款遊戲與週報共用） |
 | `dashboard/tests_weekly_report.py`、`ai_service/tests.py` | 測試（AI 以 mock 取代，不會真的呼叫 OpenAI） |
 
 ---
@@ -226,10 +227,10 @@
 | 項目 | 說明 |
 |---|---|
 | 舊資料沒有 z | 各遊戲加入 `z_score` 前玩的場次不會出現在能力分數裡 |
-| 常模是暫定值 | 整理菜籃、冰箱檢查、市場買菜、聲影日記的常模皆為暫定起始值，需要用真實資料校正 |
+| 常模待建立 | 目前一律跟自己的歷史比（冷啟動借全體）；等測試資料累積夠了，再用真實資料決定常模 |
+| 冷啟動 | 全系統某款遊戲（或日記）不滿 3 場（篇）時，新使用者的前幾場算不出 z，該週沒有分數 |
 | 聲影日記權重 | 沿用 `diary/analysis.py` 的 `communication_score` 權重，來源待確認 |
 | 市場買菜速度分 | 前端需送 `reaction_time_ms`，否則速度分為 0、能力分只看正確率 |
 | 整理菜籃遊玩時間 | 用反應時間加總，比實際遊玩時間短；更新前的場次為 0 |
 | 對話時長 | 「最後回答 − 建立時間」的近似值 |
 | AI 費用與速度 | 每次打開都呼叫一次 OpenAI（約 2～3 秒），之後可考慮快取 |
-| 兩種「50 分」 | 跟自己歷史比（菜市場找路、煮菜過程）與跟常模比（其他）的 50 分意思不同，放在同一張圖時報告需說明 |
