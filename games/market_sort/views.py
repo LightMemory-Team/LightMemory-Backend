@@ -15,6 +15,20 @@ from .services import (
 GAME_TYPE = "market_sort"
 
 
+def _previous_raw_metrics(session_id):
+    """這場之前已結束場次的原始指標（自己的、全體的），給 z-score 當比較基準。"""
+    return tuple(
+        [
+            result["raw_metrics"]
+            for result in session_service.list_previous_results(
+                GAME_TYPE, session_id, same_user=same_user
+            )
+            if "raw_metrics" in result
+        ]
+        for same_user in (True, False)
+    )
+
+
 class MarketSortSubmitView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -58,7 +72,9 @@ class MarketSortSubmitView(APIView):
             )
 
         try:
-            result = calculate_cognitive_flexibility_score(questions)
+            result = calculate_cognitive_flexibility_score(
+                questions, *_previous_raw_metrics(session_id)
+            )
         except InsufficientDataError as e:
             return Response(
                 {
@@ -97,14 +113,23 @@ class MarketSortSubmitView(APIView):
         ]
         history.sort(key=lambda s: s["result"]["generated_at"], reverse=True)
 
+        # 資料不足的場次分數是 None，最高分、近期分數都不算它
         current_score = session["result"]["cognitive_flexibility_score"]
         highest_score = max(
-            [h["result"]["cognitive_flexibility_score"] for h in history],
+            (
+                h["result"]["cognitive_flexibility_score"]
+                for h in history
+                if h["result"]["cognitive_flexibility_score"] is not None
+            ),
             default=current_score,
         )
 
         others = [h for h in history if h["session_id"] != session["session_id"]]
-        recent_scores = [h["result"]["cognitive_flexibility_score"] for h in others[:4]]
+        recent_scores = [
+            h["result"]["cognitive_flexibility_score"]
+            for h in others
+            if h["result"]["cognitive_flexibility_score"] is not None
+        ][:4]
         recent_scores.reverse()
 
         tier = determine_encouragement_tier(current_score, highest_score)
