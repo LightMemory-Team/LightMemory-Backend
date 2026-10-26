@@ -58,11 +58,28 @@ class SeedDemoDataTests(TestCase):
         )
 
     def test_three_diaries_per_batch(self):
+        # 暖身、前週、上週、這週各 3 篇
         user = seed()
-        self.assertEqual(Diary.objects.filter(user=user, status="done").count(), 9)
+        self.assertEqual(Diary.objects.filter(user=user, status="done").count(), 12)
         self.assertEqual(
-            DiaryAnalysis.objects.filter(diary__user=user, is_valid=True).count(), 9
+            DiaryAnalysis.objects.filter(diary__user=user, is_valid=True).count(), 12
         )
+
+    def test_scores_are_fifty_plus_twenty_five_z(self):
+        user = seed()
+        score_fields = {
+            "market_sort": "cognitive_flexibility_score",
+            "fridge_check": "standard_score",
+            "market_shopping": "standard_score",
+            "memory_recall": "total_score",
+        }
+        for code, field in score_fields.items():
+            for result in GameSession.objects.filter(
+                user=user, game__code=code
+            ).values_list("result", flat=True):
+                self.assertEqual(
+                    result[field], round(50 + 25 * result["z_score"]), code
+                )
 
     def test_no_high_risk_diary(self):
         user = seed()
@@ -74,7 +91,7 @@ class SeedDemoDataTests(TestCase):
         seed()
         user = seed()
         self.assertEqual(GameSession.objects.filter(user=user).count(), 45)
-        self.assertEqual(Diary.objects.filter(user=user).count(), 9)
+        self.assertEqual(Diary.objects.filter(user=user).count(), 12)
 
     def test_rerun_keeps_real_records(self):
         user = seed()
