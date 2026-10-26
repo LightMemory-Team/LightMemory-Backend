@@ -4,6 +4,8 @@
 規則詳見規格書「四、計分邏輯」。
 """
 
+from games.zscore import MAX_DISPLAY_SCORE, MIN_DISPLAY_SCORE
+
 BASE_SCORE_BY_ATTEMPT = {
     1: 10,
     2: 6,
@@ -22,10 +24,6 @@ SPEED_BONUS_RATIO = 0.5
 # 單場理論最高分：每場固定從 basic 開始，最快連續 3 題快速答對就升階
 # basic 3 題 x 12 + intermediate 3 題 x 15 + advanced 14 題 x 18 = 333
 MAX_TOTAL_SCORE = 333
-
-# 結束畫面給長者看的分數範圍，最低 1 分（不出現 0 分）
-MIN_DISPLAY_SCORE = 1
-MAX_DISPLAY_SCORE = 100
 
 
 def calculate_base_score(attempt_number, is_correct, is_timeout):

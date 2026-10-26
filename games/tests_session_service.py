@@ -1,4 +1,4 @@
-"""session_service.list_previous_step_records 的測試。"""
+"""session_service.list_previous_step_records、list_previous_results 的測試。"""
 
 from datetime import timedelta
 
@@ -90,5 +90,74 @@ class ListPreviousStepRecordsTests(TestCase):
     def test_unknown_session_raises(self):
         with self.assertRaises(session_service.SessionNotFound):
             session_service.list_previous_step_records(
+                GAME_TYPE, "00000000-0000-0000-0000-000000000000"
+            )
+
+
+class ListPreviousResultsTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="tester", password="pw123456")
+        self.other_user = User.objects.create_user(
+            username="other", password="pw123456"
+        )
+        self.base_time = timezone.now()
+
+    def _play(self, user, minutes_ago, *, raw_score=None, finished=True):
+        """建一場遊戲；finished 時存結算結果並設定結束時間。"""
+        session = session_service.create_session(GAME_TYPE, user=user)
+        session_id = session["session_id"]
+        if finished:
+            GameSession.objects.filter(pk=session_id).update(
+                status="finished",
+                result={"raw_score": raw_score},
+                finished_at=self.base_time - timedelta(minutes=minutes_ago),
+            )
+        return session_id
+
+    def test_returns_previous_results_in_finish_order(self):
+        self._play(self.user, minutes_ago=20, raw_score=70)
+        self._play(self.user, minutes_ago=30, raw_score=60)
+        current = self._play(self.user, minutes_ago=10, raw_score=80)
+
+        history = session_service.list_previous_results(GAME_TYPE, current)
+
+        self.assertEqual([r["raw_score"] for r in history], [60, 70])
+
+    def test_excludes_this_and_later_sessions(self):
+        self._play(self.user, minutes_ago=30, raw_score=60)
+        current = self._play(self.user, minutes_ago=20, raw_score=70)
+        self._play(self.user, minutes_ago=10, raw_score=80)  # 比這場晚結束
+
+        history = session_service.list_previous_results(GAME_TYPE, current)
+
+        self.assertEqual([r["raw_score"] for r in history], [60])
+
+    def test_in_progress_session_uses_all_finished_sessions(self):
+        # 結算當下這場還沒標成已結束，要拿到「全部已結束」的場次
+        self._play(self.user, minutes_ago=30, raw_score=60)
+        self._play(self.user, minutes_ago=20, raw_score=70)
+        self._play(self.user, minutes_ago=10, finished=False)
+        current = self._play(self.user, minutes_ago=0, finished=False)
+
+        history = session_service.list_previous_results(GAME_TYPE, current)
+
+        self.assertEqual(len(history), 2)
+
+    def test_same_user_false_includes_other_users(self):
+        self._play(self.user, minutes_ago=30, raw_score=60)
+        self._play(self.other_user, minutes_ago=20, raw_score=90)
+        current = self._play(self.user, minutes_ago=0, finished=False)
+
+        personal = session_service.list_previous_results(GAME_TYPE, current)
+        population = session_service.list_previous_results(
+            GAME_TYPE, current, same_user=False
+        )
+
+        self.assertEqual([r["raw_score"] for r in personal], [60])
+        self.assertEqual([r["raw_score"] for r in population], [60, 90])
+
+    def test_unknown_session_raises(self):
+        with self.assertRaises(session_service.SessionNotFound):
+            session_service.list_previous_results(
                 GAME_TYPE, "00000000-0000-0000-0000-000000000000"
             )

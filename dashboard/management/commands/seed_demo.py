@@ -24,8 +24,8 @@ from django.utils import timezone
 from dashboard.services import DIMENSIONS, GAME_SOURCES, GAME_TITLES
 from diary.analysis import get_risk_result
 from diary.models import Diary, DiaryAnalysis, DiaryReply
-from games.memory_recall.score import z_score_to_total_score
 from games.models import Game, GameCategory, GameSession
+from games.zscore import z_score_to_display_score
 from users.models import User
 
 SEED_PREFIX = "seed"
@@ -132,7 +132,7 @@ def _memory_recall_result(z, finished_at):
         "avg_response_time_ms": round(2500 - 300 * z),
         "final_stage": "intermediate",
         "total_bonus_seconds": 15,
-        "total_score": z_score_to_total_score(z),
+        "total_score": z_score_to_display_score(z),
         "z_score": round(z, 3),
     }
 
