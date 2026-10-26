@@ -8,10 +8,11 @@ from rest_framework.response import Response
 from games import session_service
 from games.dda import DDAConfig, apply_answer
 from games.utils import get_current_user
+from games.zscore import z_score_to_display_score
 
 from .item_bank import load_advanced_groups, load_item_pools, load_items
 from .memory_zscore import calculate_working_memory_z_score
-from .score import calculate_step_score, z_score_to_total_score
+from .score import calculate_step_score
 
 GAME_TYPE = "memory_recall"
 
@@ -476,7 +477,7 @@ def _build_result(session):
         "avg_response_time_ms": avg_response_time_ms,
         "final_stage": state["current_stage"],
         "total_bonus_seconds": total_bonus_seconds,
-        "total_score": z_score_to_total_score(z_score),
+        "total_score": z_score_to_display_score(z_score),
         "z_score": z_score,
     }
 

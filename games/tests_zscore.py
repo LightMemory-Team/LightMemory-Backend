@@ -6,8 +6,11 @@ from .zscore import (
     calculate_dimension_z_score,
     choose_baseline,
     compute_baseline,
+    metric_z_scores,
     to_z_score,
     weighted_average,
+    weighted_metric_z_score,
+    z_score_to_display_score,
 )
 
 # 平均 0.6、樣本標準差 0.1
@@ -149,3 +152,93 @@ class CalculateDimensionZScoreTests(SimpleTestCase):
 
     def test_no_current_metrics_is_none(self):
         self.assertIsNone(calculate_dimension_z_score({}, BASIC_HISTORY, [], RULES))
+
+
+# 單一指標、沒有分階段的遊戲（冰箱檢查、市場買菜）用的規則
+SCORE_RULES = {"raw_score": (1.0, False)}
+
+
+def _history(*values):
+    return [{"raw_score": v} for v in values]
+
+
+class MetricZScoresTests(SimpleTestCase):
+    """冷啟動三種情況：自己 ≥ 3 場、自己不滿 3 場借全體、全體也不夠。"""
+
+    def test_uses_personal_history_when_enough(self):
+        # 自己：平均 70、標準差 10 → (80 - 70) / 10 = 1；全體的資料不會用到
+        z = metric_z_scores(
+            {"raw_score": 80},
+            _history(60, 70, 80),
+            _history(10, 20, 30),
+            SCORE_RULES,
+        )
+        self.assertAlmostEqual(z["raw_score"], 1.0)
+
+    def test_falls_back_to_population_when_personal_not_enough(self):
+        # 自己只有 2 場 → 改用全體：平均 50、標準差 10 → (60 - 50) / 10 = 1
+        z = metric_z_scores(
+            {"raw_score": 60},
+            _history(90, 95),
+            _history(40, 50, 60),
+            SCORE_RULES,
+        )
+        self.assertAlmostEqual(z["raw_score"], 1.0)
+
+    def test_no_data_when_population_also_not_enough(self):
+        z = metric_z_scores({"raw_score": 60}, _history(90), _history(50), SCORE_RULES)
+        self.assertIsNone(z["raw_score"])
+
+    def test_lower_is_better_is_reversed(self):
+        z = metric_z_scores(
+            {"rt": 900},
+            [{"rt": 700}, {"rt": 800}, {"rt": 900}],
+            [],
+            {"rt": (1.0, True)},
+        )
+        self.assertAlmostEqual(z["rt"], -1.0)
+
+    def test_old_history_without_metric_is_ignored(self):
+        # 舊場次沒有這個欄位（例如改版前），當作無資料略過
+        z = metric_z_scores(
+            {"raw_score": 80},
+            [{}, *_history(60, 70, 80)],
+            [],
+            SCORE_RULES,
+        )
+        self.assertAlmostEqual(z["raw_score"], 1.0)
+
+
+class WeightedMetricZScoreTests(SimpleTestCase):
+    RULES = {"a": (0.6, False), "b": (0.4, False)}
+
+    def test_weighted_by_rules(self):
+        score = weighted_metric_z_score({"a": 1.0, "b": -1.0}, self.RULES)
+        self.assertAlmostEqual(score, 0.2)
+
+    def test_missing_metric_reweights(self):
+        self.assertAlmostEqual(
+            weighted_metric_z_score({"a": 1.0, "b": None}, self.RULES), 1.0
+        )
+
+    def test_all_missing_is_none(self):
+        self.assertIsNone(weighted_metric_z_score({"a": None, "b": None}, self.RULES))
+
+
+class ZScoreToDisplayScoreTests(SimpleTestCase):
+    def test_minus_two_becomes_minimum_one(self):
+        # 50 + 25 * -2 = 0 → 最低 1 分
+        self.assertEqual(z_score_to_display_score(-2), 1)
+
+    def test_zero_becomes_fifty(self):
+        self.assertEqual(z_score_to_display_score(0), 50)
+
+    def test_plus_two_becomes_hundred(self):
+        self.assertEqual(z_score_to_display_score(2), 100)
+
+    def test_one_becomes_seventy_five(self):
+        self.assertEqual(z_score_to_display_score(1), 75)
+
+    def test_none_stays_none(self):
+        # 資料不足時沒有 z，分數回傳 null
+        self.assertIsNone(z_score_to_display_score(None))

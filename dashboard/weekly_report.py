@@ -18,8 +18,8 @@ from django.utils import timezone
 
 from ai_service.weekly_summary import build_positive_facts, generate_weekly_summary
 from diary.models import Diary
-from games.memory_recall.score import z_score_to_total_score
 from games.models import GameSession
+from games.zscore import z_score_to_display_score
 
 from .services import (
     DIARY_SOURCE,
@@ -218,7 +218,7 @@ def get_weekly_scores_history(user, until_week_start):
 
     return {
         week_start: {
-            code: z_score_to_total_score(statistics.mean(z_scores))
+            code: z_score_to_display_score(statistics.mean(z_scores))
             for code, z_scores in by_game.items()
         }
         for week_start, by_game in z_by_week.items()

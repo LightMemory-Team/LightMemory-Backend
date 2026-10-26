@@ -214,13 +214,11 @@ def finish_session(game_type, session_id, result, avg_response_time_ms=None):
     return _to_dict(session)
 
 
-def list_previous_step_records(game_type, session_id, *, same_user=True):
-    """列出「這場之前」已結束場次的作答紀錄，給 z-score 當歷史比較基準用。
+def _previous_finished_sessions(game_type, session_id, same_user):
+    """「這場之前」已結束的場次（不含這場）。
 
-    回傳 list，每個元素是一場的 step_records（格式同 _to_dict 的
-    step_records）。只取比這場更早結束的場次（這場還沒結束就取全部已結束
-    場次），所以不管 dashboard 什麼時候來算，同一場的結果都一樣。
-
+    只取比這場更早結束的場次（這場還沒結束就取全部已結束場次），所以不管
+    dashboard 什麼時候來算，同一場的結果都一樣。
     same_user=True 只取同一位使用者；False 取全體使用者（冷啟動用）。
     找不到 session 會拋出 SessionNotFound。
     """
@@ -237,6 +235,31 @@ def list_previous_step_records(game_type, session_id, *, same_user=True):
         )
     if same_user:
         previous_sessions = previous_sessions.filter(user_id=session.user_id)
+    return previous_sessions
+
+
+def list_previous_results(game_type, session_id, *, same_user=True):
+    """列出「這場之前」已結束場次的結算結果（result），給 z-score 當歷史比較基準用。
+
+    給沒有逐題作答紀錄、或直接用結算指標算 z 的遊戲（整理菜籃、冰箱檢查、
+    市場買菜）。回傳 list，每個元素是一場的 result dict，依結束時間排序。
+    篩選規則同 list_previous_step_records。
+    """
+    results = (
+        _previous_finished_sessions(game_type, session_id, same_user)
+        .order_by("finished_at")
+        .values_list("result", flat=True)
+    )
+    return [result for result in results if result]
+
+
+def list_previous_step_records(game_type, session_id, *, same_user=True):
+    """列出「這場之前」已結束場次的作答紀錄，給 z-score 當歷史比較基準用。
+
+    回傳 list，每個元素是一場的 step_records（格式同 _to_dict 的
+    step_records）。篩選規則見 _previous_finished_sessions。
+    """
+    previous_sessions = _previous_finished_sessions(game_type, session_id, same_user)
 
     # 一次查出所有作答紀錄，再依場次分組，避免每場各查一次資料庫
     records_by_session = {}
