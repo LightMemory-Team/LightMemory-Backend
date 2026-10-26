@@ -1,4 +1,4 @@
-"""建立 demo 帳號的展示資料：五款遊戲各 9 場、聲影日記 9 篇。
+"""建立 demo 帳號的展示資料：五款遊戲各 9 場、聲影日記 12 篇。
 
     python manage.py seed_demo
     python manage.py seed_demo --username demo --password demo1234
@@ -7,8 +7,11 @@
 - 前週：週報「跟上週比」的比較基準（2 天有活動）
 - 上週：週報的報告週，分數比前週高（3 天有活動 →「比上週多 1 天」）
 - 這週：現在往前 1～3 小時，儀表板雷達圖（近 7 天）用
+日記另外多一批「暖身」（3 週前 3 篇）：語言 z 跟更早的日記比，前週的日記
+才有 3 篇歷史可比。
 
-每場都有 z_score，所以儀表板「五款遊戲各滿 3 場」的解鎖條件一定會達成。
+遊戲的 z_score 直接寫進結算結果，所以儀表板「五款遊戲各滿 3 場」的解鎖條件
+一定會達成；raw_score 等原始指標也有高低變化，之後真的去玩時有合理的歷史可比。
 result 欄位照各遊戲結束時真正存的格式，各遊戲的歷史紀錄 API 才不會出錯。
 
 重跑會先刪掉這個帳號之前 seed 的資料再重建：遊戲場次看 client_session_id、
@@ -31,9 +34,11 @@ from users.models import User
 SEED_PREFIX = "seed"
 
 # 每批的 z 基準：前週低一點、上週進步，週報的趨勢才會顯示「進步」
-BATCH_Z = {"previous": -0.3, "report": 0.3, "recent": 0.5}
+BATCH_Z = {"warmup": -0.3, "previous": -0.3, "report": 0.3, "recent": 0.5}
 # 同一批 3 筆在基準上下變化一點，看起來比較像真的
 Z_SPREAD = [-0.1, 0.1, 0.0]
+# 日記的語言 z 是跟更早的日記比：同一批差太少的話標準差太小，z 都會卡在 ±2
+DIARY_SPREAD = [-0.5, 0.5, 0.0]
 
 DIARY_THEMES = [
     {
@@ -104,6 +109,13 @@ def batch_times(now):
     }
 
 
+def warmup_times(now):
+    """暖身日記：3 週前的週二～週四，只當前週日記的歷史，不在週報範圍內。"""
+    today = timezone.localdate(now)
+    warmup = today - timedelta(days=today.weekday() + 21)
+    return [_at(warmup + timedelta(days=d), 10) for d in (1, 2, 3)]
+
+
 # ---------- 各遊戲結束時的 result（格式照各遊戲 services／views） ----------
 
 
@@ -142,7 +154,8 @@ def _market_sort_result(z, finished_at):
         "raw_metrics": {
             "overall_accuracy": round(0.8 + 0.05 * z, 3),
             "switch_accuracy": round(0.7 + 0.05 * z, 3),
-            "switch_cost_rt": round(400 - 50 * z, 1),
+            # 秒（switch 題平均 RT − repeat 題平均 RT），跟遊戲存的單位一樣
+            "switch_cost_rt": round(0.8 - 0.1 * z, 2),
             "switch_cost_accuracy": round(0.1 - 0.02 * z, 3),
             "rt_cv": round(0.3 - 0.03 * z, 3),
             "learning_speed": round(1 + 0.2 * z, 2),
@@ -154,28 +167,27 @@ def _market_sort_result(z, finished_at):
             "learning_speed_z": round(z, 3),
         },
         "z_score": round(z, 3),
-        "cognitive_flexibility_score": round(50 + 20 * z),
+        "cognitive_flexibility_score": z_score_to_display_score(round(z, 3)),
         "play_seconds": 240,
         "generated_at": finished_at.isoformat(),
     }
 
 
 def _ten_question_scores(z):
-    """冰箱檢查、市場買菜共用：答對題數、正確率、速度分、原始分數、z。
+    """冰箱檢查、市場買菜共用：答對題數、正確率、速度分、原始分數。
 
-    z 照遊戲本身的公式由原始分數算回來：(原始分數 - 70) / 10，限制在 ±2；
-    答對題數用 7.4 + z，算回來的 z 才會接近傳進來的 z。
+    z 越高原始分數越高；z 本身直接寫進結算結果（遊戲是跟自己的歷史比，
+    seed 沒有真的去玩，不從原始分數反推）。
     """
     correct = _clamp(round(7.4 + z), 0, 10)
     accuracy = correct * 10.0
     speed_score = round(60 + 10 * z, 1)
     raw_score = round(accuracy * 0.7 + speed_score * 0.3, 1)
-    real_z = round(_clamp((raw_score - 70) / 10, -2, 2), 3)
-    return correct, accuracy, speed_score, raw_score, real_z
+    return correct, accuracy, speed_score, raw_score
 
 
 def _fridge_check_result(z, finished_at):
-    correct, accuracy, speed_score, raw_score, real_z = _ten_question_scores(z)
+    correct, accuracy, speed_score, raw_score = _ten_question_scores(z)
     medium_correct, hard_correct = 2, 1
     difficulty_bonus = medium_correct * 0.5 + hard_correct * 1.0
     return {
@@ -190,8 +202,8 @@ def _fridge_check_result(z, finished_at):
         "skipped_question_count": 0,
         "error_penalty": 0,
         "final_score": round(raw_score + difficulty_bonus, 1),
-        "z_score": real_z,
-        "standard_score": round(50 + 20 * real_z),
+        "z_score": round(z, 3),
+        "standard_score": z_score_to_display_score(round(z, 3)),
         "final_difficulty": "medium",
         "average_reaction_time_ms": round(3000 - 300 * z),
         "completed_at": finished_at.isoformat(),
@@ -199,7 +211,7 @@ def _fridge_check_result(z, finished_at):
 
 
 def _market_shopping_result(z, finished_at):
-    correct, accuracy, speed_score, raw_score, real_z = _ten_question_scores(z)
+    correct, accuracy, speed_score, raw_score = _ten_question_scores(z)
     return {
         "total_correct": correct,
         "first_try_correct_count": correct,
@@ -207,8 +219,8 @@ def _market_shopping_result(z, finished_at):
         "accuracy": accuracy,
         "speed_score": speed_score,
         "raw_score": raw_score,
-        "z_score": real_z,
-        "standard_score": round(50 + 20 * real_z),
+        "z_score": round(z, 3),
+        "standard_score": z_score_to_display_score(round(z, 3)),
         "average_reaction_time_ms": round(4000 - 400 * z),
         "difficulty": "medium",
         "completed_at": finished_at.isoformat(),
@@ -305,17 +317,17 @@ def create_diaries(user, times):
                     created_at=created_at + timedelta(minutes=2 * round_index)
                 )
 
-            create_diary_analysis(diary, BATCH_Z[batch] + Z_SPREAD[i])
+            create_diary_analysis(diary, BATCH_Z[batch] + DIARY_SPREAD[i])
 
 
 def create_diary_analysis(diary, z):
-    """小分數設在 3 + z 附近（每項 0～4 分）。
+    """小分數設在 3.2 + z 附近（每項 0～4 分），z 越高小分數越高。
 
-    不用量表中點 2：5 項加總會在 10 分左右，被 get_risk_result 判成 high，
-    展示資料不該出現「建議諮詢」的回饋。
+    不能太低：5 項加總低於 11 分會被 get_risk_result 判成 high，
+    展示資料不該出現「建議諮詢」的回饋（最低一篇加總約 12 分）。
     """
     scores = {
-        name: round(_clamp(3 + z + offset, 0, 4), 2)
+        name: round(_clamp(3.2 + z + offset, 0, 4), 2)
         for name, offset in DIARY_SCORE_OFFSETS.items()
     }
     total_score = round(sum(scores.values()), 2)
@@ -340,7 +352,7 @@ def create_diary_analysis(diary, z):
 
 
 class Command(BaseCommand):
-    help = "建立 demo 帳號的展示資料（五款遊戲各 9 場、聲影日記 9 篇）"
+    help = "建立 demo 帳號的展示資料（五款遊戲各 9 場、聲影日記 12 篇）"
 
     def add_arguments(self, parser):
         parser.add_argument("--username", default="demo")
@@ -355,14 +367,15 @@ class Command(BaseCommand):
 
         games = ensure_games()
         clear_seed_data(user)
-        times = batch_times(timezone.now())
+        now = timezone.now()
+        times = batch_times(now)
         create_game_sessions(user, games, times)
-        create_diaries(user, times)
+        create_diaries(user, {"warmup": warmup_times(now), **times})
 
         account = "新建立" if created else "已存在"
         self.stdout.write(
             self.style.SUCCESS(
                 f"完成！帳號 {user.username}（{account}）："
-                f"五款遊戲各 9 場、聲影日記 9 篇"
+                f"五款遊戲各 9 場、聲影日記 12 篇"
             )
         )
