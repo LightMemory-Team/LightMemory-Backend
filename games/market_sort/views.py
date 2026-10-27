@@ -15,7 +15,7 @@ from .services import (
 GAME_TYPE = "market_sort"
 
 
-def _previous_raw_metrics(session_id):
+def previous_raw_metrics(session_id):
     """這場之前已結束場次的原始指標，給 z-score 當比較基準。
 
     回傳 (自己的清單, {其他使用者 id: 清單})，全體依使用者分組。
@@ -81,7 +81,7 @@ class MarketSortSubmitView(APIView):
 
         # 熟悉場不算分，給空歷史讓 z、分數都是 None
         histories = (
-            ([], {}) if session["is_pretest"] else _previous_raw_metrics(session_id)
+            ([], {}) if session["is_pretest"] else previous_raw_metrics(session_id)
         )
         try:
             result = calculate_cognitive_flexibility_score(questions, *histories)
