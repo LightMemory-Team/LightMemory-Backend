@@ -21,6 +21,10 @@ STAGE_ORDER = ["basic", "intermediate", "advanced"]
 
 MIN_HISTORY_SESSIONS = 3
 
+# 收縮估計的強度 k：相當於「先借幾場全體資料」，個人場次越多越偏向個人
+# 目前依保守設定為 3，等長者資料累積後，再用 個人內變異 ÷ 個人間變異 估計
+PRIOR_STRENGTH = 3
+
 # 每個指標的 z 限制在 ±2，避免單一極端值（例如某題反應特別慢）把整體分數拉爆；
 # 每個指標都在 ±2 內，加權平均後的維度分數自然也在 ±2 內
 Z_SCORE_CLAMP = 2
@@ -126,6 +130,86 @@ def z_score_to_display_score(z_score):
         return None
     score = round(50 + 25 * z_score)
     return max(MIN_DISPLAY_SCORE, min(MAX_DISPLAY_SCORE, score))
+
+
+def pooled_population_baseline(histories_by_user):
+    """全體基準：平均用所有場次，變異數用「個人內」波動的合併值。
+
+    個人參照的 z 需要的是「同一個人每次之間的波動」（個人內），不是「人跟人
+    之間的差異」（個人間），後者通常大很多，會把冷啟動期間的 z 壓扁。
+
+    histories_by_user: {user_id: [該使用者各場的值]}
+    回傳 (平均, 個人內變異數)；個人內自由度（Σ(場次 − 1)）不足
+    MIN_HISTORY_SESSIONS 時回傳 None。
+    """
+    all_values, sum_sq, dof = [], 0.0, 0
+    for values in histories_by_user.values():
+        values = [v for v in values if v is not None]
+        all_values.extend(values)
+        if len(values) >= 2:
+            sum_sq += statistics.variance(values) * (len(values) - 1)
+            dof += len(values) - 1
+    if dof < MIN_HISTORY_SESSIONS or not all_values:
+        return None
+    return statistics.mean(all_values), sum_sq / dof
+
+
+def shrunk_baseline(personal_values, population_baseline, k=PRIOR_STRENGTH):
+    """收縮基準：個人資料少時偏向全體，越多越偏向個人。回傳 (平均, 標準差)。
+
+    population_baseline 是 pooled_population_baseline 的結果；為 None（全體也
+    不夠）時退回 compute_baseline（個人不滿 3 場就是 None）。
+    n = 0 時完全用全體；n 越大越接近純個人的平均與標準差。
+    """
+    if population_baseline is None:
+        return compute_baseline(personal_values)
+    pop_mean, pop_within_var = population_baseline
+    values = [v for v in personal_values if v is not None]
+    n = len(values)
+    mean = (n * statistics.mean(values) + k * pop_mean) / (n + k) if n else pop_mean
+    personal_ss = statistics.variance(values) * (n - 1) if n >= 2 else 0.0
+    var = (personal_ss + k * pop_within_var) / (max(n - 1, 0) + k)
+    return (mean, var**0.5) if var > 0 else None
+
+
+def effective_weights(z_by_metric, metric_rules, stage_weight=1.0):
+    """這場實際有資料的指標，其有效權重（未正規化）。"""
+    return [
+        stage_weight * metric_rules[name][0]
+        for name, z in z_by_metric.items()
+        if z is not None
+    ]
+
+
+def prior_composite_variance(weights):
+    """指標互不相關時，合成分數的理論變異數 = Σ(正規化權重²)。
+
+    不需要任何資料就能算，而且是最保守的情況；沒有任何權重時回傳 None。
+    """
+    total = sum(weights)
+    if not total:
+        return None
+    return sum((w / total) ** 2 for w in weights)
+
+
+def restandardize(composite, reference_composites, prior_var, k=PRIOR_STRENGTH):
+    """第二階段標準化：合成分數 ÷ 收縮後的合成分數標準差，再限制在 ±2。
+
+    指標越多，加權平均後的波動越小；除以合成分數本身的標準差，讓每個維度
+    最終的波動都回到 1，與指標數量無關。
+
+    composite: 這一場的合成分數（第一階段已經減過平均，約為 0）
+    reference_composites: 參考場次的合成分數，必須用「這一場同一組基準」算出來
+    prior_var: prior_composite_variance 的結果
+    """
+    if composite is None or not prior_var:
+        return None
+    values = [c for c in reference_composites if c is not None]
+    n = len(values)
+    personal_ss = statistics.variance(values) * (n - 1) if n >= 2 else 0.0
+    var = (personal_ss + k * prior_var) / (max(n - 1, 0) + k)
+    z = composite / var**0.5
+    return max(-Z_SCORE_CLAMP, min(Z_SCORE_CLAMP, z))
 
 
 def calculate_dimension_z_score(
