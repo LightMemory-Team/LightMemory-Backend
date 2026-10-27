@@ -214,28 +214,80 @@ def finish_session(game_type, session_id, result, avg_response_time_ms=None):
     return _to_dict(session)
 
 
-def _previous_finished_sessions(game_type, session_id, same_user):
-    """「這場之前」已結束的場次（不含這場）。
+# demo 帳號的種子場次（dashboard 的 seed_demo 指令建立）的 client_session_id 前綴；
+# 這些場次不是真人玩的，不能拿來當全體基準
+SEED_CLIENT_SESSION_PREFIX = "seed-"
 
-    只取比這場更早結束的場次（這場還沒結束就取全部已結束場次），所以不管
-    dashboard 什麼時候來算，同一場的結果都一樣。
-    same_user=True 只取同一位使用者；False 取全體使用者（冷啟動用）。
-    找不到 session 會拋出 SessionNotFound。
-    """
+
+def _get_session_or_raise(game_type, session_id):
     session = _lookup(game_type, session_id)
     if session is None:
         raise SessionNotFound(session_id)
+    return session
 
+
+def _finished_sessions_before(session):
+    """比 session 更早結束的已結束場次（不含這場本身、不含熟悉場）。
+
+    熟悉場（is_pretest=True，每位使用者每款遊戲的第一場，還不熟所以分數偏低）
+    不進任何歷史。只取比這場更早結束的場次（這場還沒結束就取全部已結束場次），
+    所以不管 dashboard 什麼時候來算，同一場的結果都一樣。
+    """
     previous_sessions = GameSession.objects.filter(
-        game=session.game, status="finished"
+        game=session.game, status="finished", is_pretest=False
     ).exclude(pk=session.pk)
     if session.finished_at is not None:
         previous_sessions = previous_sessions.filter(
             finished_at__lt=session.finished_at
         )
+    return previous_sessions
+
+
+def _previous_finished_sessions(game_type, session_id, same_user):
+    """「這場之前」已結束的場次（不含這場）。
+
+    same_user=True 只取同一位使用者；False 取全體使用者（含本人）。
+    篩選規則見 _finished_sessions_before。找不到 session 會拋出 SessionNotFound。
+    """
+    session = _get_session_or_raise(game_type, session_id)
+    previous_sessions = _finished_sessions_before(session)
     if same_user:
         previous_sessions = previous_sessions.filter(user_id=session.user_id)
     return previous_sessions
+
+
+def _other_users_previous_sessions(game_type, session_id):
+    """全體基準用：「這場之前」其他使用者的已結束場次。
+
+    在 _finished_sessions_before 之外，再排除：
+    - 本人（本人的場次是個人歷史，不重複算進全體）
+    - is_staff 使用者（測試帳號）
+    - demo 種子場次（client_session_id 以 SEED_CLIENT_SESSION_PREFIX 開頭）
+    """
+    session = _get_session_or_raise(game_type, session_id)
+    return (
+        _finished_sessions_before(session)
+        .exclude(user_id=session.user_id)
+        .filter(user__is_staff=False)
+        .exclude(client_session_id__startswith=SEED_CLIENT_SESSION_PREFIX)
+    )
+
+
+def _step_records_by_session(sessions):
+    """一次查出 sessions 所有的作答紀錄，依場次分組：{session_id: [紀錄, ...]}。
+
+    一次查完再分組，避免每場各查一次資料庫。沒有作答紀錄的場次不會出現。
+    """
+    records_by_session = {}
+    step_logs = (
+        GameStepLog.objects.filter(session__in=sessions)
+        .order_by("session_id", "step_number")
+        .values("session_id", "step_number", "is_correct", "response_time_ms", "detail")
+    )
+    for log in step_logs:
+        session_key = log.pop("session_id")
+        records_by_session.setdefault(session_key, []).append(log)
+    return records_by_session
 
 
 def list_previous_results(game_type, session_id, *, same_user=True):
@@ -260,15 +312,37 @@ def list_previous_step_records(game_type, session_id, *, same_user=True):
     step_records）。篩選規則見 _previous_finished_sessions。
     """
     previous_sessions = _previous_finished_sessions(game_type, session_id, same_user)
+    return list(_step_records_by_session(previous_sessions).values())
 
-    # 一次查出所有作答紀錄，再依場次分組，避免每場各查一次資料庫
-    records_by_session = {}
-    step_logs = (
-        GameStepLog.objects.filter(session__in=previous_sessions)
-        .order_by("session_id", "step_number")
-        .values("session_id", "step_number", "is_correct", "response_time_ms", "detail")
+
+def list_previous_results_by_user(game_type, session_id):
+    """全體基準用：其他使用者「這場之前」的結算結果，依使用者分組。
+
+    回傳 {user_id: [result, ...]}（每人的 result 依結束時間排序），給
+    games/zscore.py 的 pooled_population_baseline 算「個人內變異」用。
+    篩選規則見 _other_users_previous_sessions。
+    """
+    rows = (
+        _other_users_previous_sessions(game_type, session_id)
+        .order_by("finished_at")
+        .values_list("user_id", "result")
     )
-    for log in step_logs:
-        session_key = log.pop("session_id")
-        records_by_session.setdefault(session_key, []).append(log)
-    return list(records_by_session.values())
+    results_by_user = {}
+    for user_id, result in rows:
+        if result:
+            results_by_user.setdefault(user_id, []).append(result)
+    return results_by_user
+
+
+def list_previous_step_records_by_user(game_type, session_id):
+    """全體基準用：其他使用者「這場之前」的作答紀錄，依使用者分組。
+
+    回傳 {user_id: [step_records, ...]}，每個 step_records 是一場的作答紀錄
+    （格式同 list_previous_step_records）。篩選規則同 list_previous_results_by_user。
+    """
+    sessions = _other_users_previous_sessions(game_type, session_id)
+    owners = dict(sessions.values_list("pk", "user_id"))
+    records_by_user = {}
+    for session_pk, records in _step_records_by_session(sessions).items():
+        records_by_user.setdefault(owners[session_pk], []).append(records)
+    return records_by_user
