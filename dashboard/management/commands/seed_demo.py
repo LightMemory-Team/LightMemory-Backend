@@ -7,6 +7,7 @@
 - 前週：週報「跟上週比」的比較基準（2 天有活動）
 - 上週：週報的報告週，分數比前週高（3 天有活動 →「比上週多 1 天」）
 - 這週：現在往前 1～3 小時，儀表板雷達圖（近 7 天）用
+日記有照片（Firebase Storage 的公開網址，見 SEED_IMAGE_BASE），週報的日記才有圖。
 日記另外多一批「暖身」（3 週前 3 篇）：語言 z 跟更早的日記比，前週的日記
 才有 3 篇歷史可比。
 
@@ -40,9 +41,14 @@ Z_SPREAD = [-0.1, 0.1, 0.0]
 # 日記的語言 z 是跟更早的日記比：同一批差太少的話標準差太小，z 都會卡在 ±2
 DIARY_SPREAD = [-0.5, 0.5, 0.0]
 
+# 展示日記的照片：已上傳到 Firebase Storage 的 voice-diary/seed/（公開網址），
+# 週報、日記月曆的 photo_url 才有圖。seed 時不需要 Firebase 金鑰，直接填網址。
+SEED_IMAGE_BASE = "https://storage.googleapis.com/lightmemory-sqlf.firebasestorage.app/voice-diary/seed"
+
 DIARY_THEMES = [
     {
         "title": "🍜 跟孫子吃牛肉麵",
+        "image_url": f"{SEED_IMAGE_BASE}/beef-noodles.png",
         "first_question": "照片裡的牛肉麵是在哪裡吃的呢？",
         "transcription": "今天中午帶孫子去巷口吃牛肉麵，他吃得好開心，湯都喝光了。",
         "ai_response": "跟孫子一起吃飯真溫馨，他一定很喜歡跟您出門！",
@@ -53,6 +59,7 @@ DIARY_THEMES = [
     },
     {
         "title": "🌳 公園散步",
+        "image_url": f"{SEED_IMAGE_BASE}/park-walk.png",
         "first_question": "這是哪一座公園呢？",
         "transcription": "早上跟老朋友去公園散步，看到很多人在跳舞，空氣很好。",
         "ai_response": "早上散步好舒服，跟老朋友聊天一定很愉快！",
@@ -63,6 +70,7 @@ DIARY_THEMES = [
     },
     {
         "title": "📚 書法課",
+        "image_url": f"{SEED_IMAGE_BASE}/calligraphy.png",
         "first_question": "今天寫了什麼字呢？",
         "transcription": "下午去社區大學上書法課，老師教我們寫春字，我寫了好幾張。",
         "ai_response": "寫書法要很專心，您寫了好幾張真認真！",
@@ -294,6 +302,7 @@ def create_diaries(user, times):
             diary = Diary.objects.create(
                 user=user,
                 audio_path=f"{SEED_PREFIX}/{batch}-{i}.m4a",
+                image_path=theme["image_url"],
                 transcription=theme["transcription"],
                 diary_text=theme["transcription"],
                 title=theme["title"],

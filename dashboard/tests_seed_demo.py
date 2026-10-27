@@ -19,6 +19,7 @@ from games.models import Game, GameSession
 from games.session_service import SEED_CLIENT_SESSION_PREFIX
 from users.models import User
 
+from .management.commands.seed_demo import DIARY_THEMES, SEED_IMAGE_BASE
 from .services import (
     GAME_SOURCES,
     SEED_DIARY_AUDIO_PREFIX,
@@ -66,6 +67,21 @@ class SeedDemoDataTests(TestCase):
         self.assertEqual(
             DiaryAnalysis.objects.filter(diary__user=user, is_valid=True).count(), 12
         )
+
+    def test_every_diary_has_a_photo(self):
+        user = seed()
+        diaries = Diary.objects.filter(user=user, status="done")
+        for diary in diaries:
+            self.assertTrue(diary.image_path.startswith(SEED_IMAGE_BASE), diary.title)
+
+    def test_each_theme_has_its_own_photo(self):
+        # 三個主題各用不同的圖，週報才不會三篇都同一張
+        urls = [theme["image_url"] for theme in DIARY_THEMES]
+        self.assertEqual(len(urls), len(set(urls)))
+        user = seed()
+        for theme in DIARY_THEMES:
+            diary = Diary.objects.filter(user=user, title=theme["title"]).first()
+            self.assertEqual(diary.image_path, theme["image_url"])
 
     def test_scores_are_fifty_plus_twenty_five_z(self):
         user = seed()
@@ -164,6 +180,16 @@ class SeedDemoWeeklyReportTests(TestCase):
         self.assertEqual(len(report["diary"]["entries"]), 3)
         self.assertGreater(report["play_time"]["total_seconds"], 0)
         self.assertGreater(report["diary"]["talk_seconds"], 0)
+
+    def test_weekly_report_diary_entries_have_photo_url(self, mock_summary):
+        report = build_weekly_report(self.user, self.today)
+
+        entries = report["diary"]["entries"]
+        self.assertEqual(len(entries), 3)
+        for entry in entries:
+            self.assertTrue(entry["photo_url"].startswith(SEED_IMAGE_BASE), entry)
+        # 三篇是三個不同主題，三張圖都不同
+        self.assertEqual(len({e["photo_url"] for e in entries}), 3)
 
     def test_one_more_day_than_previous_week(self, mock_summary):
         build_weekly_report(self.user, self.today)
