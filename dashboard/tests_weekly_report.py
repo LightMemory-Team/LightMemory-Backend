@@ -36,6 +36,9 @@ from .weekly_report import (
 
 WEEKLY_REPORT_URL = "/api/dashboard/weekly-report/"
 
+# 測試「整體表現」等跟解鎖無關的計算時，把所有維度都當作已解鎖
+ALL_SOURCES = {*GAME_SOURCES, "diary"}
+
 TODAY = date(2026, 10, 15)
 WEEK_START = date(2026, 10, 5)
 
@@ -394,6 +397,7 @@ class AbilitiesTests(TestCase):
                 "dimension": "attention",
                 "label": "注意力",
                 "played": True,
+                "unlocked": True,
                 "this_week": 65,
                 "last_week": 50,
                 # 報告週之後那週的 100 分不算
@@ -432,6 +436,7 @@ class AbilitiesTests(TestCase):
                 "dimension": "language",
                 "label": "語言",
                 "played": True,
+                "unlocked": True,
                 "this_week": 67,
                 "last_week": 40,
                 "best": 92,
@@ -450,7 +455,8 @@ class AbilitiesTests(TestCase):
         self.assertIsNone(language["this_week"])
         self.assertIsNone(language["trend"])
 
-    def test_overall_includes_language(self):
+    @patch("dashboard.weekly_report.unlocked_sources", return_value=ALL_SOURCES)
+    def test_overall_includes_language(self, _unlocked):
         finished_on(self.user, "market_route", date(2026, 10, 6), 0.6)  # 65
         diary_baseline(self.user)
         # 小分數 2 + √0.52：跟 1、2、3 比，標準化後 z 剛好 +1 → 75
@@ -469,7 +475,8 @@ class AbilitiesTests(TestCase):
             [d["dimension"] for d in DIMENSIONS],
         )
 
-    def test_overall_is_average_of_scored_games(self):
+    @patch("dashboard.weekly_report.unlocked_sources", return_value=ALL_SOURCES)
+    def test_overall_is_average_of_scored_games(self, _unlocked):
         finished_on(self.user, "market_route", date(2026, 9, 21), 1.2)  # 80
         finished_on(self.user, "market_route", date(2026, 9, 30), 0.0)  # 50
         finished_on(self.user, "market_route", date(2026, 10, 6), 0.6)  # 65
@@ -481,6 +488,104 @@ class AbilitiesTests(TestCase):
         self.assertEqual(
             overall, {"this_week": 53, "last_week": 50, "best": 80, "trend": "up"}
         )
+
+
+class AbilityUnlockTests(TestCase):
+    """週報只列已解鎖的能力：到報告週結束為止，累計有 z 的場次（篇）滿 3 筆。
+
+    報告週 10/5～10/11；報告週結束 = 10/12 00:00。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="tester", password="pw123456")
+
+    def _ability(self, abilities, dimension):
+        return next(d for d in abilities["dimensions"] if d["dimension"] == dimension)
+
+    def test_dimension_with_three_valid_sessions_is_unlocked(self):
+        for day in (6, 7, 8):
+            finished_on(self.user, "market_route", date(2026, 10, day), 0.4)
+
+        abilities = build_abilities(self.user, WEEK_START, {"market_route"})
+
+        attention = self._ability(abilities, "attention")
+        self.assertTrue(attention["unlocked"])
+        self.assertEqual(attention["this_week"], 60)
+
+    def test_dimension_with_two_valid_sessions_is_locked(self):
+        for day in (6, 7):
+            finished_on(self.user, "market_route", date(2026, 10, day), 0.4)
+
+        abilities = build_abilities(self.user, WEEK_START, {"market_route"})
+
+        # 沒解鎖：分數、趨勢、個人最佳都是 null；played 照常標示這週有玩
+        self.assertEqual(
+            self._ability(abilities, "attention"),
+            {
+                "dimension": "attention",
+                "label": "注意力",
+                "played": True,
+                "unlocked": False,
+                "this_week": None,
+                "last_week": None,
+                "best": None,
+                "trend": None,
+            },
+        )
+        self.assertIsNone(abilities["overall"]["this_week"])
+
+    def test_sessions_without_z_do_not_unlock(self):
+        for day in (6, 7):
+            finished_on(self.user, "market_route", date(2026, 10, day), 0.4)
+        finished_on(self.user, "market_route", date(2026, 10, 8), None)  # 熟悉場
+
+        abilities = build_abilities(self.user, WEEK_START, {"market_route"})
+
+        self.assertFalse(self._ability(abilities, "attention")["unlocked"])
+
+    def test_sessions_after_report_week_do_not_unlock_earlier_report(self):
+        # 報告週之前只有 2 場，第 3 場是報告週之後才玩的：那週的報告仍然沒解鎖
+        for day in (6, 7):
+            finished_on(self.user, "market_route", date(2026, 10, day), 0.4)
+        finished_on(self.user, "market_route", date(2026, 10, 13), 0.4)
+
+        abilities = build_abilities(self.user, WEEK_START, {"market_route"})
+
+        self.assertFalse(self._ability(abilities, "attention")["unlocked"])
+
+    def test_sessions_before_report_week_count_toward_unlock(self):
+        finished_on(self.user, "market_route", date(2026, 9, 21), 0.0)
+        finished_on(self.user, "market_route", date(2026, 9, 30), 0.0)
+        finished_on(self.user, "market_route", date(2026, 10, 6), 0.4)
+
+        abilities = build_abilities(self.user, WEEK_START, {"market_route"})
+
+        attention = self._ability(abilities, "attention")
+        self.assertTrue(attention["unlocked"])
+        self.assertEqual(attention["this_week"], 60)
+        self.assertEqual(attention["last_week"], 50)
+
+    def test_overall_only_uses_unlocked_dimensions(self):
+        for day in (6, 7, 8):
+            finished_on(self.user, "market_route", date(2026, 10, day), 0.4)  # 60
+        # 煮菜過程只有 1 場（沒解鎖）：81 分的高分不能混進整體表現
+        finished_on(self.user, "memory_recall", date(2026, 10, 9), 1.24)
+
+        abilities = build_abilities(self.user, WEEK_START, set())
+
+        self.assertEqual(abilities["overall"]["this_week"], 60)
+        memory = self._ability(abilities, "working_memory")
+        self.assertFalse(memory["unlocked"])
+        self.assertIsNone(memory["this_week"])
+
+    def test_all_six_dimensions_always_listed(self):
+        abilities = build_abilities(self.user, WEEK_START, set())
+
+        self.assertEqual(
+            [d["dimension"] for d in abilities["dimensions"]],
+            [d["dimension"] for d in DIMENSIONS],
+        )
+        self.assertTrue(all(not d["unlocked"] for d in abilities["dimensions"]))
 
 
 class WeeklyReportAiSummaryTests(TestCase):

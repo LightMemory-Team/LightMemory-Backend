@@ -28,7 +28,9 @@ from .services import (
     GAME_TITLES,
     diary_z_scores,
     get_trend,
+    get_unlock_progress,
     overall_score,
+    unlocked_sources,
 )
 
 WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"]
@@ -233,9 +235,24 @@ def _ability(this_week, last_week, best):
     }
 
 
+def _only(scores, sources):
+    """只留下 sources 裡的能力分數。"""
+    return {source: score for source, score in scores.items() if source in sources}
+
+
 def build_abilities(user, week_start, played_sources):
-    """「本週 vs 上週」：整體表現＋6 個能力的分數、個人最佳、趨勢。"""
-    history = get_weekly_scores_history(user, week_start)
+    """「本週 vs 上週」：整體表現＋6 個能力的分數、個人最佳、趨勢。
+
+    只列已解鎖的能力：到報告週結束為止，該能力累計有 z 的場次（篇）滿
+    REQUIRED_SESSIONS。沒解鎖的能力 unlocked 是 False，分數和趨勢都是 None，
+    整體表現也不算它；played 照常標示這週有沒有碰過。
+    """
+    _, week_end = _week_bounds(week_start)
+    unlocked = unlocked_sources(get_unlock_progress(user, end=week_end))
+    history = {
+        week: _only(scores, unlocked)
+        for week, scores in get_weekly_scores_history(user, week_start).items()
+    }
     this_scores = history.get(week_start, {})
     last_scores = history.get(week_start - timedelta(days=7), {})
 
@@ -246,6 +263,7 @@ def build_abilities(user, week_start, played_sources):
             "dimension": item["dimension"],
             "label": item["label"],
             "played": source in played_sources,
+            "unlocked": source in unlocked,
         }
         best = max(
             (scores[source] for scores in history.values() if source in scores),
@@ -259,7 +277,12 @@ def build_abilities(user, week_start, played_sources):
         )
 
     overall_best = max(
-        (overall_score(scores) for scores in history.values()), default=None
+        (
+            score
+            for score in (overall_score(scores) for scores in history.values())
+            if score is not None
+        ),
+        default=None,
     )
     return {
         "overall": _ability(

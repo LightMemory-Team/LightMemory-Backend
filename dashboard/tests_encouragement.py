@@ -186,8 +186,8 @@ class GetEncouragementTests(APITestCase):
 
         response = self.client.get(DASHBOARD_URL)
 
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
-        self.assertNotIn("encouragement", response.data["data"])
+        self.assertTrue(response.data["success"])
+        self.assertIsNone(response.data["data"]["encouragement"])
 
 
 class SeedDemoEncouragementTests(TestCase):

@@ -17,6 +17,7 @@ from django.utils import timezone
 from diary.models import DiaryAnalysis
 from games.catalog import GAMES
 from games.models import GameSession
+from games.zscore import PRIOR_STRENGTH, z_score_to_display_score
 
 from .diary_zscore import METRIC_RULES as LANGUAGE_METRIC_RULES
 from .diary_zscore import calculate_language_z_score
@@ -141,15 +142,15 @@ def average_diary_z_score(user, start=None, end=None):
     return round(statistics.mean(z_scores), 3), len(z_scores)
 
 
-def get_unlock_progress(user):
-    """各遊戲、聲影日記累計（不限期間）有 z_score 的場次（篇）數。
+def get_unlock_progress(user, end=None):
+    """各遊戲、聲影日記累計有 z_score 的場次（篇）數，給各維度的解鎖判斷用。
 
-    給「資料尚不足分析」時顯示進度。
+    end 有給就只算那個時間點以前的（週報看「到報告週結束為止」）。
 
     日記要算得出語言 z 才算：更早的日記不滿 3 篇（自己的和全體的都不夠）時，
     那篇沒有 z，不算進去。
     """
-    z_scores = _z_scores_by_game(user)
+    z_scores = _z_scores_by_game(user, end=end)
     progress = [
         {
             "source": source,
@@ -162,28 +163,88 @@ def get_unlock_progress(user):
         {
             "source": DIARY_SOURCE,
             "label": DIARY_LABEL,
-            "session_count": len(diary_z_scores(user)),
+            "session_count": len(diary_z_scores(user, end=end)),
         }
     )
     return progress
 
 
+def unlocked_sources(progress):
+    """已解鎖的維度來源：該來源至少累積 REQUIRED_SESSIONS 場（篇）有 z 的紀錄。"""
+    return {
+        item["source"]
+        for item in progress
+        if item["session_count"] >= REQUIRED_SESSIONS
+    }
+
+
 def is_unlocked(progress):
-    """5 款遊戲和聲影日記都至少累積 REQUIRED_SESSIONS 場（篇）才解鎖。"""
-    return all(item["session_count"] >= REQUIRED_SESSIONS for item in progress)
+    """5 款遊戲和聲影日記都解鎖了（機器人卡片的條件）。"""
+    return len(unlocked_sources(progress)) == len(progress)
+
+
+def get_personal_session_counts(user):
+    """各來源「個人有效場次」數 {source: n}：這位使用者自己用來當基準的歷史。
+
+    遊戲：已結束、不是熟悉場的場次；日記：有效日記篇數（日記沒有熟悉場）。
+    收縮估計的基準裡，個人資料佔 n ÷ (n + k)，見 personal_weight。
+    """
+    counts = {source: 0 for source in GAME_SOURCES}
+    sessions = GameSession.objects.filter(
+        user=user, status="finished", is_pretest=False, game__code__in=GAME_SOURCES
+    )
+    for code in sessions.values_list("game__code", flat=True):
+        counts[code] += 1
+    counts[DIARY_SOURCE] = DiaryAnalysis.objects.filter(
+        diary__user=user, is_valid=True
+    ).count()
+    return counts
 
 
 def get_dashboard_dimensions(user, days=PERIOD_DAYS):
-    """雷達圖每個軸的近 days 天 z 平均；期間內沒玩過、沒寫日記就是 None。"""
+    """雷達圖每個軸（固定 6 個）：近 days 天的 z 平均、分數與解鎖狀態。
+
+    各維度分開解鎖：valid_count（累計有 z 的場次／篇數）滿 REQUIRED_SESSIONS 才
+    解鎖；沒解鎖的維度 z_score、score 都是 None，前端畫灰色軸。解鎖後期間內
+    沒玩過、沒寫日記，z_score、score 也是 None。
+
+    - session_count：近 days 天有 z 的場次（篇）數
+    - valid_count：累計有 z 的場次（篇）數
+    - sessions_to_unlock：還差幾次解鎖
+    - personal_weight：個人資料佔基準的比例 n ÷ (n + k)；小於 0.5（個人場次
+      不滿 k）表示還在「參考期」，基準偏向其他使用者的表現
+    """
     start = timezone.now() - timedelta(days=days)
     averages = average_z_scores(user, start=start)
     # 語言軸：近 days 天有效日記的語言 z 平均；session_count 是日記篇數
     averages[DIARY_SOURCE] = average_diary_z_score(user, start=start)
+    progress = {
+        item["source"]: item["session_count"] for item in get_unlock_progress(user)
+    }
+    personal_counts = get_personal_session_counts(user)
 
     dimensions = []
     for item in DIMENSIONS:
-        z_score, session_count = averages[item["source"]]
-        dimensions.append({**item, "z_score": z_score, "session_count": session_count})
+        source = item["source"]
+        recent_z, session_count = averages[source]
+        valid_count = progress[source]
+        unlocked = valid_count >= REQUIRED_SESSIONS
+        z_score = recent_z if unlocked else None
+        personal_count = personal_counts[source]
+        dimensions.append(
+            {
+                **item,
+                "z_score": z_score,
+                "score": z_score_to_display_score(z_score),
+                "session_count": session_count,
+                "valid_count": valid_count,
+                "unlocked": unlocked,
+                "sessions_to_unlock": max(0, REQUIRED_SESSIONS - valid_count),
+                "personal_weight": round(
+                    personal_count / (personal_count + PRIOR_STRENGTH), 3
+                ),
+            }
+        )
     return dimensions
 
 
