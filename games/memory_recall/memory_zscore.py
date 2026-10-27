@@ -46,16 +46,16 @@ def calculate_stage_metrics(step_records):
 
 
 def calculate_working_memory_z_score(session_id):
-    """算出某一場的工作記憶 z-score，前測或歷史資料不足時回傳 None。
+    """算出某一場的工作記憶 z-score，前測（熟悉場）或歷史資料不足時回傳 None。
 
-    前測不計分，所以前測那一場本身沒有 z-score；但前測仍會被當成之後
-    場次的歷史基準。只跟「這場之前」結束的場次比。
+    前測不計分，所以前測那一場本身沒有 z-score，也不會進之後場次的歷史。
+    只跟「這場之前」結束的場次比。
     找不到 session 會拋出 session_service.SessionNotFound。
     """
     session = session_service.get_session(GAME_TYPE, session_id)
     if session is None:
         raise session_service.SessionNotFound(session_id)
-    if session["state"].get("is_pretest"):
+    if session["is_pretest"] or session["state"].get("is_pretest"):
         return None
 
     personal_history = [

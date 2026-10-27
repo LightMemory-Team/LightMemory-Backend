@@ -29,6 +29,11 @@ class FridgeCheckApiTests(TestCase):
         self.assertIn("session_id", response.data["data"])
         self.assertIn("question", response.data["data"])
 
+    def test_first_session_is_familiarization(self):
+        """第一次玩這款遊戲，建立場次的回應標示為熟悉場（不算分）"""
+        response = self.client.post("/api/games/fridge-check/sessions/")
+        self.assertTrue(response.data["data"]["is_pretest"])
+
     def test_create_session_alias_endpoint(self):
         """測試單數別名 POST /api/games/fridge-check/session/"""
         response = self.client.post("/api/games/fridge-check/session/")

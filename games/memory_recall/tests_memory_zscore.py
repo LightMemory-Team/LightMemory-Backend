@@ -72,7 +72,10 @@ class CalculateWorkingMemoryZScoreTests(TestCase):
 
     def _play(self, user, minutes_ago, steps, *, is_pretest=False):
         session_id = session_service.create_session(
-            GAME_TYPE, initial_state={"is_pretest": is_pretest}, user=user
+            GAME_TYPE,
+            initial_state={"is_pretest": is_pretest},
+            user=user,
+            is_pretest=is_pretest,
         )["session_id"]
         for step in steps:
             session_service.save_step(GAME_TYPE, session_id, step)
@@ -100,17 +103,26 @@ class CalculateWorkingMemoryZScoreTests(TestCase):
         # 0.5 * 1 + 0.5 * 2 = 1.5
         self.assertAlmostEqual(calculate_working_memory_z_score(current), 1.5)
 
-    def test_pretest_counts_as_history(self):
+    def test_pretest_is_not_history(self):
+        # 前測是熟悉場，不進歷史：結果跟沒有它一樣
         self._play(
             self.user,
-            40,
-            [_step(1, correct=False, rt=900), _step(2, correct=False, rt=900)],
+            50,
+            [_step(1, correct=False, rt=3000), _step(2, correct=False, rt=3000)],
             is_pretest=True,
         )
-        self._play(self.user, 30, [_step(1, rt=1000), _step(2, correct=False, rt=1000)])
-        self._play(self.user, 20, [_step(1, rt=1100), _step(2, rt=1100)])
+        self._play_history(self.user)
         current = self._play(self.user, 10, [_step(1, rt=800), _step(2, rt=800)])
         self.assertAlmostEqual(calculate_working_memory_z_score(current), 1.5)
+
+    def test_pretest_column_alone_is_none(self):
+        # 只有 GameSession.is_pretest 欄位、state 沒有旗標，也算前測
+        self._play_history(self.user)
+        session_id = session_service.create_session(
+            GAME_TYPE, user=self.user, is_pretest=True
+        )["session_id"]
+        session_service.save_step(GAME_TYPE, session_id, _step(1))
+        self.assertIsNone(calculate_working_memory_z_score(session_id))
 
     def test_pretest_session_itself_is_none(self):
         self._play_history(self.user)

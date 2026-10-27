@@ -199,6 +199,7 @@ def create_game_session(user):
         GAME_TYPE,
         user=user,
         initial_state=initial_state,
+        is_pretest=session_service.is_first_session(GAME_TYPE, user),
     )
     session = session_service.update_session(
         GAME_TYPE,
@@ -459,8 +460,10 @@ def calculate_final_result(session, personal_history=None, population_history=No
         else None
     )
 
-    # 原始能力分跟自己的歷史比
-    if personal_history is None or population_history is None:
+    # 原始能力分跟自己的歷史比；熟悉場不算分，給空歷史讓 z、標準分數都是 None
+    if session.get("is_pretest"):
+        personal_history, population_history = [], []
+    elif personal_history is None or population_history is None:
         personal_history, population_history = _previous_results(session)
     z_result = calculate_math_z_score(raw_score, personal_history, population_history)
     z_score = z_result["z_score"]

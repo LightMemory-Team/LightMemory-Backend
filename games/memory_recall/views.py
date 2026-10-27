@@ -61,19 +61,6 @@ def _get_session_or_error(session_id, user_id):
     return session, None
 
 
-def _has_finished_before(user_id):
-    """判斷這位使用者是否已經玩過（有 finished 過）這款遊戲，不分前測或正式賽。
-
-    只要玩完過一次（前測也算），之後每一場都是正式賽；前測只在「這款遊戲
-    第一次玩」時觸發一次。
-    """
-    sessions = session_service.list_sessions(GAME_TYPE)
-    return any(
-        s["status"] == "finished" and s["state"].get("user_id") == user_id
-        for s in sessions
-    )
-
-
 # 1. 取得本場遊戲設定
 @api_view(["GET"])
 def config(request):
@@ -105,7 +92,8 @@ def start(request):
             status=404,
         )
 
-    is_pretest = not _has_finished_before(user.id)
+    # 前測就是熟悉場：這款遊戲第一次玩完之前，每場都是前測
+    is_pretest = session_service.is_first_session(GAME_TYPE, user)
 
     expires_at = None
     if not is_pretest:
@@ -115,7 +103,7 @@ def start(request):
 
     seed_item = _pick_seed("basic")
     initial_state = {
-        # FORBIDDEN 檢查與 _has_finished_before 靠 state 的 user_id 判斷是誰的 session
+        # FORBIDDEN 檢查靠 state 的 user_id 判斷是誰的 session
         "user_id": user.id,
         "is_pretest": is_pretest,
         "current_stage": "basic",
@@ -124,7 +112,7 @@ def start(request):
         "expires_at": expires_at,
     }
     session = session_service.create_session(
-        GAME_TYPE, initial_state=initial_state, user=user
+        GAME_TYPE, initial_state=initial_state, user=user, is_pretest=is_pretest
     )
 
     data = {

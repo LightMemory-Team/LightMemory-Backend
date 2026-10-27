@@ -155,6 +155,19 @@ def get_or_create_session(
         return _to_dict(session), True
 
 
+def is_first_session(game_type, user):
+    """這位使用者是不是還沒玩完過這款遊戲：是的話，這一場就是「熟悉場」。
+
+    熟悉場（GameSession.is_pretest=True）：第一次玩還不熟，分數偏低，所以不算分，
+    也不進任何歷史（見 _finished_sessions_before）。玩到一半放棄的不算玩過。
+    各遊戲建立場次時用這個函式決定 create_session 的 is_pretest。
+    """
+    game = _get_game(game_type)
+    return not GameSession.objects.filter(
+        game=game, user=user, status="finished"
+    ).exists()
+
+
 def list_sessions(game_type):
     """列出某個遊戲類型底下所有 session 的完整內容（未排序、未過濾）。"""
     game = _get_game(game_type)
