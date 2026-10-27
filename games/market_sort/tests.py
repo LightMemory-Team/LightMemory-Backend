@@ -102,6 +102,29 @@ class MarketSortSubmitEndpointTests(APITestCase):
         }
         return self.client.post(SUBMIT_URL, payload, format="json")
 
+    def test_first_submission_is_familiarization(self):
+        first = self._submit("fam_1", build_questions())
+        second = self._submit("fam_2", build_questions())
+
+        self.assertTrue(first.data["data"]["is_pretest"])
+        self.assertFalse(second.data["data"]["is_pretest"])
+        self.assertTrue(GameSession.objects.get(client_session_id="fam_1").is_pretest)
+        self.assertFalse(GameSession.objects.get(client_session_id="fam_2").is_pretest)
+
+    def test_familiarization_has_no_score_even_with_population_history(self):
+        other = User.objects.create_user(username="other", password="Str0ng!Pass2026")
+        for i, correct_count in enumerate((14, 18, 22, 16)):
+            self.client.force_authenticate(user=other)
+            self._submit(f"other_{i}", build_game_with_accuracy(correct_count, seed=i))
+        self.client.force_authenticate(user=self.user)
+
+        response = self._submit("fam_with_population", build_questions())
+
+        self.assertTrue(response.data["data"]["is_pretest"])
+        self.assertIsNone(response.data["data"]["current_score"])
+        session = GameSession.objects.get(client_session_id="fam_with_population")
+        self.assertIsNone(session.result["z_score"])
+
     def test_first_play_has_no_score_yet(self):
         """系統裡還沒有任何歷史：資料不足，分數和鼓勵等級都是 null，不會出錯。"""
         response = self._submit("test_first", build_questions())
@@ -115,7 +138,8 @@ class MarketSortSubmitEndpointTests(APITestCase):
         self.assertIsNone(session.result["z_score"])
 
     def test_submit_saves_z_score_for_dashboard(self):
-        """玩滿 3 場之後，第 4 場跟自己的歷史比，算得出 ±2 內的 z。"""
+        """熟悉場之後再玩滿 3 場，下一場跟自己的歷史比，算得出 ±2 內的 z。"""
+        self._submit("warmup", build_game_with_accuracy(10, seed=9))  # 熟悉場
         for i, correct_count in enumerate((14, 18, 22)):
             questions = build_game_with_accuracy(correct_count, seed=i)
             self._submit(f"history_{i}", questions)
@@ -132,6 +156,7 @@ class MarketSortSubmitEndpointTests(APITestCase):
 
     def test_highest_and_recent_scores_skip_null(self):
         """前幾場資料不足（null）不算進最高分和近期分數。"""
+        self._submit("warmup", build_game_with_accuracy(10, seed=9))  # 熟悉場
         for i, correct_count in enumerate((14, 18, 22)):
             questions = build_game_with_accuracy(correct_count, seed=i)
             self._submit(f"history_{i}", questions)

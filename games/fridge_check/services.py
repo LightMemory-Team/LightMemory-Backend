@@ -139,6 +139,7 @@ def create_game_session(user):
         GAME_TYPE,
         initial_state=initial_state,
         user=user,
+        is_pretest=session_service.is_first_session(GAME_TYPE, user),
     )
 
     session = session_service.update_session(
@@ -464,8 +465,11 @@ def calculate_final_result(session, personal_history=None, population_history=No
         2,
     )
 
-    # 7. Z-score 與跨遊戲標準分數：由原始能力指標 raw_score 跟自己的歷史比
-    if personal_history is None or population_history is None:
+    # 7. Z-score 與跨遊戲標準分數：由原始能力指標 raw_score 跟自己的歷史比；
+    #    熟悉場不算分，給空歷史讓 z、標準分數都是 None
+    if session.get("is_pretest"):
+        personal_history, population_history = [], []
+    elif personal_history is None or population_history is None:
         personal_history, population_history = _previous_results(session)
     z_result = calculate_visual_spatial_z_score(
         raw_score, personal_history, population_history

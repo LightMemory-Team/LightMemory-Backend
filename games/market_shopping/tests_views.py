@@ -90,6 +90,14 @@ class CreateSessionApiTests(MarketShoppingTestCase):
         self.assertEqual(data["total_questions"], TOTAL_QUESTIONS)
         self.assertTrue(data["shopping_list"])
 
+    def test_first_session_is_familiarization(self):
+        data = self.client.post(SESSIONS_URL).data["data"]
+
+        self.assertTrue(data["is_pretest"])
+        self.assertTrue(
+            session_service.get_session(GAME_TYPE, data["session_id"])["is_pretest"]
+        )
+
 
 class ItemAnswerApiTests(MarketShoppingTestCase):
     """POST /api/games/market-shopping/sessions/<session_id>/item-answers/"""

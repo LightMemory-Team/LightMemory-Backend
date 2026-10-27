@@ -180,6 +180,7 @@ class CompleteSessionUsesHistoryTests(TestCase):
         session = create_game_session(user)
         GameSession.objects.filter(pk=session["session_id"]).update(
             status="finished",
+            is_pretest=False,  # 模擬「已經玩過的正式場次」
             result={"raw_score": raw_score},
             finished_at=timezone.now() - timedelta(minutes=minutes_ago),
         )
@@ -205,9 +206,31 @@ class CompleteSessionUsesHistoryTests(TestCase):
         self.assertEqual(result["z_score"], 1.15)
         self.assertEqual(result["standard_score"], 79)
 
-    def test_new_user_borrows_population_history(self):
+    def test_new_user_borrows_population_history_after_familiarization(self):
         for minutes_ago, raw_score in [(30, 60.0), (20, 70.0), (10, 80.0)]:
             self._finished(self.other, raw_score, minutes_ago)
+        self._play(self.user)  # 第一場是熟悉場
+
+        result = self._play(self.user)
+
+        self.assertEqual(result["z_score"], 1.15)
+
+    def test_first_session_is_familiarization_even_with_population_history(self):
+        for minutes_ago, raw_score in [(30, 60.0), (20, 70.0), (10, 80.0)]:
+            self._finished(self.other, raw_score, minutes_ago)
+
+        session = create_game_session(self.user)
+        session["state"].update(total_correct=8, speed_score=76, answer_count=10)
+        result = complete_session(session)["result"]
+
+        self.assertTrue(session["is_pretest"])
+        self.assertIsNone(result["z_score"])
+        self.assertIsNone(result["standard_score"])
+
+    def test_familiarization_session_is_not_history(self):
+        self._play(self.user)  # 熟悉場
+        for minutes_ago, raw_score in [(30, 60.0), (20, 70.0), (10, 80.0)]:
+            self._finished(self.user, raw_score, minutes_ago)
 
         result = self._play(self.user)
 

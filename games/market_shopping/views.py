@@ -61,6 +61,7 @@ def create_session(request):
         session["current_question"], current_difficulty, session["question_number"]
     )
     payload["session_id"] = session["session_id"]
+    payload["is_pretest"] = session["is_pretest"]
 
     return Response(
         {"success": True, "data": payload, "error": None},

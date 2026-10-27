@@ -55,7 +55,7 @@ def calculate_stage_metrics(step_records):
 
 
 def calculate_attention_z_score(session_id):
-    """算出某一場的注意力 z-score，歷史資料不足時回傳 None。
+    """算出某一場的注意力 z-score，熟悉場或歷史資料不足時回傳 None。
 
     只跟「這場之前」結束的場次比，所以同一場不管什麼時候算結果都一樣。
     找不到 session 會拋出 session_service.SessionNotFound。
@@ -63,6 +63,8 @@ def calculate_attention_z_score(session_id):
     session = session_service.get_session(GAME_TYPE, session_id)
     if session is None:
         raise session_service.SessionNotFound(session_id)
+    if session["is_pretest"]:
+        return None
 
     personal_history = [
         calculate_stage_metrics(records)

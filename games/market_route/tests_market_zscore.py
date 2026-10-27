@@ -104,8 +104,10 @@ class CalculateAttentionZScoreTests(TestCase):
         self.user = User.objects.create_user(username="tester", password="pw123456")
         self.now = timezone.now()
 
-    def _play(self, user, minutes_ago, steps):
-        session_id = session_service.create_session(GAME_TYPE, user=user)["session_id"]
+    def _play(self, user, minutes_ago, steps, *, is_pretest=False):
+        session_id = session_service.create_session(
+            GAME_TYPE, user=user, is_pretest=is_pretest
+        )["session_id"]
         for step in steps:
             session_service.save_step(GAME_TYPE, session_id, step)
         GameSession.objects.filter(pk=session_id).update(
@@ -143,6 +145,27 @@ class CalculateAttentionZScoreTests(TestCase):
         # z_反應時間 = -(700 - 800) / 100 = 1
         # z_曝光時間 = -(1600 - 1800) / 100 = 2
         # 0.4 * 1 + 0.3 * 1 + 0.3 * 2 = 1.3
+        self.assertAlmostEqual(calculate_attention_z_score(current), 1.3)
+
+    def test_familiarization_session_itself_is_none(self):
+        self._play_history(self.user)
+        current = self._play(self.user, 10, [_step(1)], is_pretest=True)
+
+        self.assertIsNone(calculate_attention_z_score(current))
+
+    def test_familiarization_session_is_not_history(self):
+        # 第一場（熟悉場）表現很差，但不進歷史：結果跟沒有它一樣
+        self._play(
+            self.user,
+            50,
+            [_step(1, correct=False, rt=3000), _step(2, correct=False, rt=3000)],
+            is_pretest=True,
+        )
+        self._play_history(self.user)
+        current = self._play(
+            self.user, 10, [_step(1, rt=700), _step(2, rt=700, exposure=1600)]
+        )
+
         self.assertAlmostEqual(calculate_attention_z_score(current), 1.3)
 
     def test_cold_start_uses_other_users_history(self):

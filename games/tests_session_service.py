@@ -392,3 +392,33 @@ class ListPreviousStepRecordsByUserTests(HistoryTestCase):
             session_service.list_previous_step_records_by_user(
                 GAME_TYPE, "00000000-0000-0000-0000-000000000000"
             )
+
+
+class IsFirstSessionTests(HistoryTestCase):
+    def test_user_without_any_session_is_first(self):
+        self.assertTrue(session_service.is_first_session(GAME_TYPE, self.user))
+
+    def test_unfinished_session_does_not_count_as_played(self):
+        self._play(self.user, minutes_ago=10, finished=False)
+
+        self.assertTrue(session_service.is_first_session(GAME_TYPE, self.user))
+
+    def test_finished_session_means_not_first(self):
+        self._play(self.user, minutes_ago=10, is_pretest=True)  # 熟悉場玩完也算玩過
+
+        self.assertFalse(session_service.is_first_session(GAME_TYPE, self.user))
+
+    def test_other_users_sessions_do_not_count(self):
+        self._play(self.other_user, minutes_ago=10)
+
+        self.assertTrue(session_service.is_first_session(GAME_TYPE, self.user))
+
+    def test_other_games_do_not_count(self):
+        other_game_session = session_service.create_session(
+            "memory_recall", user=self.user
+        )
+        session_service.finish_session(
+            "memory_recall", other_game_session["session_id"], {}
+        )
+
+        self.assertTrue(session_service.is_first_session(GAME_TYPE, self.user))

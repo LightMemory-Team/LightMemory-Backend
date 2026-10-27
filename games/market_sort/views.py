@@ -57,6 +57,7 @@ class MarketSortSubmitView(APIView):
             session_id,
             initial_state={"user_id": request.user.id},
             user=request.user,
+            is_pretest=session_service.is_first_session(GAME_TYPE, request.user),
         )
 
         # 冪等性處理：同一個 session_id 已經算過分，直接回傳既有結果，不重算不重寫。
@@ -71,10 +72,12 @@ class MarketSortSubmitView(APIView):
                 status=status.HTTP_201_CREATED,
             )
 
+        # 熟悉場不算分，給空歷史讓 z、分數都是 None
+        histories = (
+            ([], []) if session["is_pretest"] else _previous_raw_metrics(session_id)
+        )
         try:
-            result = calculate_cognitive_flexibility_score(
-                questions, *_previous_raw_metrics(session_id)
-            )
+            result = calculate_cognitive_flexibility_score(questions, *histories)
         except InsufficientDataError as e:
             return Response(
                 {
@@ -138,6 +141,7 @@ class MarketSortSubmitView(APIView):
             {
                 "success": True,
                 "data": {
+                    "is_pretest": session["is_pretest"],
                     "current_score": current_score,
                     "highest_score": highest_score,
                     "recent_scores": recent_scores,

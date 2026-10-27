@@ -140,6 +140,8 @@ class StartApiTests(MemoryRecallTestCase):
         data = self._start()
 
         self.assertTrue(data["is_pretest"])
+        # 也寫進 GameSession.is_pretest 欄位（歷史查詢靠它排除熟悉場）
+        self.assertTrue(GameSession.objects.get(pk=data["session_id"]).is_pretest)
         self.assertEqual(data["current_stage"], "basic")
         self.assertIsNone(data["expires_at"])
 
@@ -453,9 +455,10 @@ class OfficialGameFlowTests(MemoryRecallTestCase):
         ).data["data"]
 
     def test_total_score_converted_from_z_score(self):
-        # 歷史 3 場 basic 反應時間：前測 1000、正式賽 800、1200
+        # 歷史 3 場 basic 反應時間：正式賽 1000、800、1200
         #   → 平均 1000、標準差 200；正確率都是 1，標準差 0 不計入
-        self._start_official_session()  # 前測，每題反應時間 1000
+        self._start_official_session()  # 前測（熟悉場），不進歷史
+        self._play_official_one_round(1000)
         self._play_official_one_round(800)
         self._play_official_one_round(1200)
 

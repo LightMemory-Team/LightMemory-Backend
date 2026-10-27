@@ -159,10 +159,14 @@ def start(request):
         "exposure_time_ms": loose_exposure,
     }
     session = session_service.create_session(
-        GAME_TYPE, initial_state=initial_state, user=user
+        GAME_TYPE,
+        initial_state=initial_state,
+        user=user,
+        is_pretest=session_service.is_first_session(GAME_TYPE, user),
     )
     data = {
         "session_id": session["session_id"],
+        "is_pretest": session["is_pretest"],
         "current_stage": session["state"]["current_stage"],
     }
     return Response({"success": True, "data": data, "error": None})
