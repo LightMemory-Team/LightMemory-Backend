@@ -32,6 +32,10 @@ DIMENSIONS = [
 ]
 
 DIARY_SOURCE = "diary"
+
+# demo 帳號的種子日記（seed_demo 指令建立）的錄音路徑前綴；
+# 這些日記不是真人寫的，不能拿來當全體基準
+SEED_DIARY_AUDIO_PREFIX = "seed/"
 GAME_SOURCES = [d["source"] for d in DIMENSIONS if d["source"] != DIARY_SOURCE]
 GAME_TITLES = {game["id"]: game["title"] for game in GAMES}
 
@@ -77,25 +81,36 @@ def average_z_scores(user, start=None, end=None):
     }
 
 
+def _counts_for_population(row):
+    """這篇日記能不能當「全體基準」：排除測試帳號、demo 帳號的種子日記。"""
+    is_seed = (row["diary__audio_path"] or "").startswith(SEED_DIARY_AUDIO_PREFIX)
+    return not row["diary__user__is_staff"] and not is_seed
+
+
 def diary_z_scores(user, start=None, end=None):
     """期間內這位使用者每篇有效日記的 (建立時間, 語言 z)。
 
     以日記建立時間（Diary.created_at）判斷是否在期間內；
     無效日記（錄音太短、疑似辨識錯誤）沒有小分數，不算。
 
-    每篇跟「更早建立」的有效日記比：自己的不滿 3 篇就借全體使用者的，
-    所以期間以前的日記、別人的日記也要拿來當歷史。一次查出 end 以前全部的
-    有效日記、依建立時間掃過去，避免每篇各查一次資料庫。歷史不足、算不出 z
-    的日記不列入。
+    每篇跟「更早建立」的有效日記比：自己的當個人歷史，其他使用者的依使用者
+    分組當全體基準（排除測試帳號、demo 日記），基準資料少時偏向全體、越多
+    越偏向自己（見 games/zscore.py）。所以期間以前的日記、別人的日記也要
+    拿來當歷史。一次查出 end 以前全部的有效日記、依建立時間掃過去，避免每篇
+    各查一次資料庫。歷史不足、算不出 z 的日記不列入。
     """
     analyses = DiaryAnalysis.objects.filter(is_valid=True)
     if end is not None:
         analyses = analyses.filter(diary__created_at__lt=end)
     rows = analyses.order_by("diary__created_at").values(
-        "diary__user_id", "diary__created_at", *LANGUAGE_METRIC_RULES
+        "diary__user_id",
+        "diary__created_at",
+        "diary__user__is_staff",
+        "diary__audio_path",
+        *LANGUAGE_METRIC_RULES,
     )
 
-    personal_history, population_history = [], []
+    personal_history, population_by_user = [], {}
     results = []
     for created_at, same_time_rows in groupby(
         rows, key=itemgetter("diary__created_at")
@@ -105,15 +120,16 @@ def diary_z_scores(user, start=None, end=None):
         for row in same_time_rows:
             if in_period and row["diary__user_id"] == user.id:
                 z_score = calculate_language_z_score(
-                    row, personal_history, population_history
+                    row, personal_history, population_by_user
                 )
                 if z_score is not None:
                     results.append((created_at, z_score))
         # 算完同一時間的日記才放進歷史：同時建立的日記不互相比
         for row in same_time_rows:
-            population_history.append(row)
             if row["diary__user_id"] == user.id:
                 personal_history.append(row)
+            elif _counts_for_population(row):
+                population_by_user.setdefault(row["diary__user_id"], []).append(row)
     return results
 
 

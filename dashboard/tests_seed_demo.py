@@ -21,6 +21,7 @@ from users.models import User
 
 from .services import (
     GAME_SOURCES,
+    SEED_DIARY_AUDIO_PREFIX,
     get_dashboard_dimensions,
     get_unlock_progress,
     is_unlocked,
@@ -121,6 +122,15 @@ class SeedDemoExcludedFromPopulationTests(TestCase):
         self.assertTrue(sessions.exists())
         for client_session_id in sessions.values_list("client_session_id", flat=True):
             self.assertTrue(client_session_id.startswith(SEED_CLIENT_SESSION_PREFIX))
+
+    def test_seed_diaries_match_the_prefix_excluded_from_population(self):
+        # services 靠這個前綴把 demo 日記排除在全體基準之外，兩邊要一致
+        user = seed()
+        diaries = Diary.objects.filter(user=user)
+
+        self.assertTrue(diaries.exists())
+        for audio_path in diaries.values_list("audio_path", flat=True):
+            self.assertTrue(audio_path.startswith(SEED_DIARY_AUDIO_PREFIX))
 
 
 class SeedDemoDashboardTests(TestCase):
