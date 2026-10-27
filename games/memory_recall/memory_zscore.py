@@ -14,10 +14,11 @@ from games.zscore import calculate_dimension_z_score
 
 GAME_TYPE = "memory_recall"
 
-# 指標名稱: (階段內權重, 是否越低越好)；權重為初始建議值，長者測試後再調整
+# 指標名稱: (階段內權重, 是否越低越好)；一律等權重（Dawes, 1979：資料不足以估計
+# 權重時，等權重通常不輸精算權重），等長者資料夠了再依因素分析調整
 METRIC_RULES = {
-    "accuracy": (0.5, False),
-    "avg_response_time_ms": (0.5, True),
+    "accuracy": (1.0, False),
+    "avg_response_time_ms": (1.0, True),
 }
 
 
@@ -62,12 +63,15 @@ def calculate_working_memory_z_score(session_id):
         calculate_stage_metrics(records)
         for records in session_service.list_previous_step_records(GAME_TYPE, session_id)
     ]
-    population_history = [
-        calculate_stage_metrics(records)
-        for records in session_service.list_previous_step_records(
-            GAME_TYPE, session_id, same_user=False
+    # 其他使用者的歷史依使用者分組（排除本人、熟悉場、測試帳號、demo 資料）
+    population_history = {
+        user_id: [calculate_stage_metrics(records) for records in sessions]
+        for user_id, sessions in (
+            session_service.list_previous_step_records_by_user(
+                GAME_TYPE, session_id
+            ).items()
         )
-    ]
+    }
     return calculate_dimension_z_score(
         calculate_stage_metrics(session["step_records"]),
         personal_history,

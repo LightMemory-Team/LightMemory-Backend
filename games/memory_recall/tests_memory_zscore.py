@@ -87,21 +87,31 @@ class CalculateWorkingMemoryZScoreTests(TestCase):
     def _play_history(self, user):
         """3 場 basic 歷史：
         正確率 0 / 0.5 / 1          → 平均 0.5、標準差 0.5
-        反應時間 900 / 1000 / 1100  → 平均 1000、標準差 100
+        反應時間 1000 / 1100 / 900  → 平均 1000、標準差 100（越低越好）
+
+        各場兩個指標的 z 是 (-1, 0)、(0, -1)、(+1, +1)，等權重合成 -0.5、-0.5、+1，
+        變異數和 1.5。
         """
         self._play(
-            user, 40, [_step(1, correct=False, rt=900), _step(2, correct=False, rt=900)]
+            user,
+            40,
+            [_step(1, correct=False, rt=1000), _step(2, correct=False, rt=1000)],
         )
-        self._play(user, 30, [_step(1, rt=1000), _step(2, correct=False, rt=1000)])
-        self._play(user, 20, [_step(1, rt=1100), _step(2, rt=1100)])
+        self._play(user, 30, [_step(1, rt=1100), _step(2, correct=False, rt=1100)])
+        self._play(user, 20, [_step(1, rt=900), _step(2, rt=900)])
+
+    # 這一場：正確率 0.5（z = 0）、平均反應時間 950（z = +0.5）→ 合成 0.25
+    CURRENT_STEPS = [_step(1, rt=950), _step(2, correct=False, rt=950)]
+    CURRENT_COMPOSITE = 0.25
 
     def test_compares_with_personal_history(self):
         self._play_history(self.user)
-        current = self._play(self.user, 10, [_step(1, rt=800), _step(2, rt=800)])
-        # z_正確率 = (1 - 0.5) / 0.5 = 1
-        # z_反應時間 = -(800 - 1000) / 100 = 2
-        # 0.5 * 1 + 0.5 * 2 = 1.5
-        self.assertAlmostEqual(calculate_working_memory_z_score(current), 1.5)
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+        # 兩指標等權重的理論變異數 0.5；收縮後 (1.5 + 3 × 0.5) ÷ (2 + 3) = 0.6
+        self.assertAlmostEqual(
+            calculate_working_memory_z_score(current),
+            self.CURRENT_COMPOSITE / 0.6**0.5,
+        )
 
     def test_pretest_is_not_history(self):
         # 前測是熟悉場，不進歷史：結果跟沒有它一樣
@@ -112,8 +122,11 @@ class CalculateWorkingMemoryZScoreTests(TestCase):
             is_pretest=True,
         )
         self._play_history(self.user)
-        current = self._play(self.user, 10, [_step(1, rt=800), _step(2, rt=800)])
-        self.assertAlmostEqual(calculate_working_memory_z_score(current), 1.5)
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+        self.assertAlmostEqual(
+            calculate_working_memory_z_score(current),
+            self.CURRENT_COMPOSITE / 0.6**0.5,
+        )
 
     def test_pretest_column_alone_is_none(self):
         # 只有 GameSession.is_pretest 欄位、state 沒有旗標，也算前測
@@ -129,11 +142,23 @@ class CalculateWorkingMemoryZScoreTests(TestCase):
         pretest = self._play(self.user, 10, [_step(1)], is_pretest=True)
         self.assertIsNone(calculate_working_memory_z_score(pretest))
 
-    def test_cold_start_uses_other_users_history(self):
-        other_user = User.objects.create_user(username="other", password="pw123456")
-        self._play_history(other_user)
-        current = self._play(self.user, 10, [_step(1, rt=800), _step(2, rt=800)])
-        self.assertAlmostEqual(calculate_working_memory_z_score(current), 1.5)
+    def test_cold_start_borrows_other_users_history(self):
+        # 兩位其他使用者各 3 場（個人內自由度 4）；自己沒有參考場次，
+        # 合成分數的變異數完全用理論值 0.5
+        for name in ("other1", "other2"):
+            other = User.objects.create_user(username=name, password="pw123456")
+            self._play_history(other)
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+        self.assertAlmostEqual(
+            calculate_working_memory_z_score(current),
+            self.CURRENT_COMPOSITE / 0.5**0.5,
+        )
+
+    def test_one_other_user_is_not_enough_population(self):
+        other = User.objects.create_user(username="other", password="pw123456")
+        self._play_history(other)
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+        self.assertIsNone(calculate_working_memory_z_score(current))
 
     def test_no_history_is_none(self):
         current = self._play(self.user, 10, [_step(1)])

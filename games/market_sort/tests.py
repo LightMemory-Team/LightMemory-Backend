@@ -428,19 +428,38 @@ class MarketSortWeightedZScoreTests(SimpleTestCase):
         self.assertIsNone(result["cognitive_flexibility_score"])
         self.assertIn("overall_accuracy", result["raw_metrics"])
 
-    def test_personal_history_preferred_over_population(self):
-        """自己已滿 3 場時跟自己比，全體使用者的歷史不影響結果。"""
+    def test_population_identical_to_personal_changes_nothing(self):
+        """全體的分布跟自己一樣時，收縮後的基準等於自己的基準，結果不變。
+
+        平均 (n·x̄ + k·x̄) ÷ (n + k) = x̄；變異數 ((n-1)s² + k·s²) ÷ (n-1+k) = s²。
+        """
         questions = build_game_with_accuracy(20, seed=10)
         personal_only = calculate_cognitive_flexibility_score(questions, HISTORY)
         with_population = calculate_cognitive_flexibility_score(
-            questions, HISTORY, history_of(1, 2, 3)
+            questions, HISTORY, {"u1": HISTORY, "u2": HISTORY}
         )
-        self.assertEqual(personal_only["z_score"], with_population["z_score"])
+        self.assertAlmostEqual(
+            personal_only["z_score"], with_population["z_score"], places=3
+        )
 
     def test_new_player_borrows_population_history(self):
+        """自己沒有歷史時，借其他使用者的基準（兩位各 4 場）。"""
         questions = build_game_with_accuracy(20, seed=10)
-        result = calculate_cognitive_flexibility_score(questions, [], HISTORY)
-        self.assertEqual(result["z_score"], score_with_history(questions)["z_score"])
+        result = calculate_cognitive_flexibility_score(
+            questions, [], {"u1": HISTORY, "u2": HISTORY}
+        )
+        self.assertIsNotNone(result["z_score"])
+        self.assertTrue(-2 <= result["z_score"] <= 2)
+        self.assertIsNotNone(result["cognitive_flexibility_score"])
+
+    def test_one_other_player_with_three_sessions_is_not_enough(self):
+        """只有一位其他使用者 3 場（個人內自由度 2，不到 3）：資料不足。"""
+        questions = build_game_with_accuracy(20, seed=10)
+        result = calculate_cognitive_flexibility_score(
+            questions, [], {"u1": HISTORY[:3]}
+        )
+        self.assertIsNone(result["z_score"])
+        self.assertIsNone(result["cognitive_flexibility_score"])
 
 
 class DetermineEncouragementTierTests(SimpleTestCase):

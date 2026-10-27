@@ -41,11 +41,7 @@ error 真的判得出來，待團隊會議決定，不在這次範圍內）：
 
 import statistics
 
-from games.zscore import (
-    metric_z_scores,
-    weighted_metric_z_score,
-    z_score_to_display_score,
-)
+from games.zscore import composite_z_details, z_score_to_display_score
 
 # ---- 自訂例外：讓 View 層可以分別接住不同的錯誤情況 ----
 
@@ -64,10 +60,10 @@ class InsufficientDataError(Exception):
 
 # {指標: (權重, 是否越低越好)}；每個指標跟自己的歷史比，z 限制在 ±2
 METRIC_RULES = {
-    "overall_accuracy": (0.40, False),
-    "switch_accuracy": (0.25, False),
-    "switch_cost_rt": (0.20, True),
-    "learning_speed": (0.15, True),
+    "overall_accuracy": (1.0, False),
+    "switch_accuracy": (1.0, False),
+    "switch_cost_rt": (1.0, True),
+    "learning_speed": (1.0, True),
 }
 
 # switch_cost_rt 至少要 repeat、switch 各答對這麼多題才計算，不夠就跳過
@@ -199,19 +195,21 @@ def calculate_learning_speed(questions: list[dict]) -> float:
 
 
 def calculate_executive_function_z_score(
-    raw_metrics: dict, personal_history: list[dict], population_history: list[dict]
+    raw_metrics: dict, personal_history: list[dict], population_history: dict
 ) -> tuple:
     """
-    執行功能（認知彈性）z：4 個指標各自跟歷史比、限制在 ±2，再依 METRIC_RULES 加權。
+    執行功能（認知彈性）z：4 個指標各自跟歷史比、限制在 ±2，依 METRIC_RULES
+    加權後，再做二階段標準化（games/zscore.py）。
 
-    personal_history / population_history: 過去場次的 raw_metrics 清單（不含這場）。
+    personal_history: 自己過去場次的 raw_metrics 清單（不含這場）。
+    population_history: 其他使用者過去場次的 raw_metrics，依使用者分組
+    {user_id: [raw_metrics, ...]}。
     沒有資料的指標（切換成本 RT 答對題數不夠、或歷史不足）跳過，權重自動分給
-    其他項目。回傳 (加權 z 或 None, {指標: z 或 None})。
+    其他項目。回傳 (最終 z 或 None, {指標: z 或 None})。
     """
-    z_by_metric = metric_z_scores(
+    return composite_z_details(
         raw_metrics, personal_history, population_history, METRIC_RULES
     )
-    return weighted_metric_z_score(z_by_metric, METRIC_RULES), z_by_metric
 
 
 def _round_or_none(value):
@@ -221,7 +219,7 @@ def _round_or_none(value):
 def calculate_cognitive_flexibility_score(
     questions: list[dict],
     personal_history: list[dict] = (),
-    population_history: list[dict] = (),
+    population_history: dict | None = None,
 ) -> dict:
     """
     整合入口：輸入完整 questions[] 與歷史原始指標，跑完 Step2~5，回傳完整結果。
@@ -235,7 +233,7 @@ def calculate_cognitive_flexibility_score(
     raw_metrics["learning_speed"] = round(learning_speed, 2)
 
     weighted_z, z_by_metric = calculate_executive_function_z_score(
-        raw_metrics, list(personal_history), list(population_history)
+        raw_metrics, list(personal_history), population_history or {}
     )
     z_score = _round_or_none(weighted_z)
 
