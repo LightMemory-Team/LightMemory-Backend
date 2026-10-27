@@ -36,6 +36,7 @@ class DashboardApiTests(APITestCase):
             result={"z_score": z_score},
             finished_at=timezone.now() - timedelta(days=days_ago),
         )
+        return session_id
 
     def _diary(self, sub_score, *, user=None, days_ago=1, is_valid=True):
         """建立一篇 days_ago 天前的日記，5 個小分數都是 sub_score。
@@ -99,51 +100,68 @@ class DashboardApiTests(APITestCase):
         self.assertFalse(response.data["success"])
         self.assertEqual(response.data["error"]["code"], "NOT_AUTHENTICATED")
 
-    def test_no_data_is_insufficient(self):
+    def test_no_data_has_every_dimension_locked(self):
         response = self.client.get(DASHBOARD_URL)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(response.data["success"])
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
+        self.assertTrue(response.data["success"])
         data = response.data["data"]
         self.assertEqual(data["required_sessions"], 3)
-        # 五款遊戲＋聲影日記
+        # 固定回傳 6 個維度（五款遊戲＋聲影日記），全部沒解鎖
         self.assertEqual(
-            [p["source"] for p in data["progress"]], [*GAME_SOURCES, "diary"]
+            [d["source"] for d in data["dimensions"]], [*GAME_SOURCES, "diary"]
         )
-        self.assertTrue(all(p["session_count"] == 0 for p in data["progress"]))
+        for dimension in data["dimensions"]:
+            self.assertFalse(dimension["unlocked"])
+            self.assertEqual(dimension["valid_count"], 0)
+            self.assertEqual(dimension["sessions_to_unlock"], 3)
+            self.assertIsNone(dimension["z_score"])
+            self.assertIsNone(dimension["score"])
+            self.assertEqual(dimension["personal_weight"], 0.0)
+        self.assertIsNone(data["encouragement"])
 
-    def test_one_game_with_two_sessions_is_insufficient(self):
+    def test_one_game_with_two_sessions_is_locked_while_others_unlock(self):
         self._unlock_all_games()
         # 煮菜過程刪到只剩 2 場
         GameSession.objects.filter(game__code="memory_recall").first().delete()
 
         response = self.client.get(DASHBOARD_URL)
 
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
-        progress = {p["source"]: p for p in response.data["data"]["progress"]}
-        self.assertEqual(progress["memory_recall"]["session_count"], 2)
-        self.assertEqual(progress["memory_recall"]["label"], "煮菜過程")
-        self.assertEqual(progress["market_route"]["session_count"], 3)
+        # 各維度分開解鎖：煮菜過程還差 1 場，其他維度照常亮起
+        memory = self._dimension(response, "working_memory")
+        self.assertFalse(memory["unlocked"])
+        self.assertEqual(memory["valid_count"], 2)
+        self.assertEqual(memory["sessions_to_unlock"], 1)
+        self.assertIsNone(memory["z_score"])
+        attention = self._dimension(response, "attention")
+        self.assertTrue(attention["unlocked"])
+        self.assertEqual(attention["valid_count"], 3)
+        self.assertEqual(attention["sessions_to_unlock"], 0)
+        self.assertEqual(attention["z_score"], 0.0)
+        self.assertEqual(attention["score"], 50)
+        # 機器人卡片要 6 個維度都解鎖才給
+        self.assertIsNone(response.data["data"]["encouragement"])
 
     def test_sessions_without_z_score_do_not_count(self):
         self._unlock_all_games()
         GameSession.objects.filter(game__code="memory_recall").first().delete()
-        # 前測、歷史不足的場次 z_score 是 None，不算進解鎖的 3 場
+        # 熟悉場、歷史不足的場次 z_score 是 None，不算進解鎖的 3 場
         self._finished_session("memory_recall", None)
 
-        response = self.client.get(DASHBOARD_URL)
+        memory = self._dimension(self.client.get(DASHBOARD_URL), "working_memory")
 
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
+        self.assertFalse(memory["unlocked"])
+        self.assertEqual(memory["valid_count"], 2)
 
     def test_in_progress_sessions_do_not_count(self):
         self._unlock_all_games()
         GameSession.objects.filter(game__code="memory_recall").first().delete()
         session_service.create_session("memory_recall", user=self.user)
 
-        response = self.client.get(DASHBOARD_URL)
+        memory = self._dimension(self.client.get(DASHBOARD_URL), "working_memory")
 
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
+        self.assertFalse(memory["unlocked"])
+        self.assertEqual(memory["valid_count"], 2)
 
     def test_other_users_sessions_do_not_count(self):
         other = User.objects.create_user(username="other", password="pw123456")
@@ -153,7 +171,9 @@ class DashboardApiTests(APITestCase):
 
         response = self.client.get(DASHBOARD_URL)
 
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
+        for dimension in response.data["data"]["dimensions"]:
+            self.assertFalse(dimension["unlocked"])
+            self.assertEqual(dimension["valid_count"], 0)
 
     # ---- 解鎖後的資料 ----
 
@@ -171,6 +191,32 @@ class DashboardApiTests(APITestCase):
             [d["dimension"] for d in data["dimensions"]],
             [d["dimension"] for d in DIMENSIONS],
         )
+        self.assertTrue(all(d["unlocked"] for d in data["dimensions"]))
+
+    def test_locked_dimension_hides_recent_scores(self):
+        # 近 7 天玩了 2 場（還沒滿 3 場）：雖然有資料，沒解鎖就不顯示分數
+        for _ in range(2):
+            self._finished_session("market_route", 1.0)
+
+        attention = self._dimension(self.client.get(DASHBOARD_URL), "attention")
+
+        self.assertFalse(attention["unlocked"])
+        self.assertIsNone(attention["z_score"])
+        self.assertIsNone(attention["score"])
+        self.assertEqual(attention["session_count"], 2)
+        self.assertEqual(attention["sessions_to_unlock"], 1)
+
+    def test_personal_weight_counts_only_non_familiarization_sessions(self):
+        for _ in range(3):
+            self._finished_session("market_route", 0.5)
+        # 熟悉場不算個人有效場次
+        familiarization = self._finished_session("market_route", None)
+        GameSession.objects.filter(pk=familiarization).update(is_pretest=True)
+
+        attention = self._dimension(self.client.get(DASHBOARD_URL), "attention")
+
+        # n = 3 → 3 ÷ (3 + k)，k = 3 → 0.5
+        self.assertEqual(attention["personal_weight"], 0.5)
 
     def test_average_of_recent_sessions(self):
         self._unlock_all_games(z_score=0.0)
@@ -179,9 +225,11 @@ class DashboardApiTests(APITestCase):
         response = self.client.get(DASHBOARD_URL)
 
         attention = self._dimension(response, "attention")
-        # (0 + 0 + 0 + 1.5) / 4 = 0.375
+        # (0 + 0 + 0 + 1.5) / 4 = 0.375 → round(50 + 25 x 0.375) = 59
         self.assertEqual(attention["z_score"], 0.375)
+        self.assertEqual(attention["score"], 59)
         self.assertEqual(attention["session_count"], 4)
+        self.assertEqual(attention["valid_count"], 4)
         self.assertEqual(attention["source"], "market_route")
         self.assertEqual(attention["label"], "注意力")
 
@@ -195,29 +243,32 @@ class DashboardApiTests(APITestCase):
         self.assertEqual(attention["session_count"], 3)
 
     def test_unlocked_but_not_played_recently_is_null(self):
-        # 10 天前就解鎖了，但近 7 天都沒玩：照樣顯示儀表板，各軸 z 是 null
+        # 10 天前就解鎖了，但近 7 天都沒玩：各軸 z、分數是 null，但維持解鎖
         self._unlock_all_games(days_ago=10)
 
         response = self.client.get(DASHBOARD_URL)
 
         self.assertTrue(response.data["success"])
         math = self._dimension(response, "math")
+        self.assertTrue(math["unlocked"])
         self.assertIsNone(math["z_score"])
+        self.assertIsNone(math["score"])
         self.assertEqual(math["session_count"], 0)
 
     # ---- 語言軸（聲影日記）----
 
-    def test_diary_required_to_unlock(self):
-        # 遊戲都玩滿了，但沒寫日記 → 還是資料不足
+    def test_diary_required_to_unlock_language(self):
+        # 遊戲都玩滿了，但沒寫日記 → 只有語言維度沒解鎖
         self._unlock_all_games(diaries=False)
 
         response = self.client.get(DASHBOARD_URL)
 
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
-        progress = {p["source"]: p for p in response.data["data"]["progress"]}
-        self.assertEqual(progress["diary"]["label"], "聲影日記")
-        self.assertEqual(progress["diary"]["session_count"], 0)
-        self.assertEqual(progress["market_route"]["session_count"], 3)
+        language = self._dimension(response, "language")
+        self.assertFalse(language["unlocked"])
+        self.assertEqual(language["valid_count"], 0)
+        self.assertEqual(language["sessions_to_unlock"], 3)
+        self.assertEqual(self._dimension(response, "attention")["valid_count"], 3)
+        self.assertTrue(self._dimension(response, "attention")["unlocked"])
 
     def test_diaries_without_z_score_do_not_count(self):
         # 只寫了 3 篇，沒有更早的日記可比，算不出語言 z → 不算
@@ -225,11 +276,10 @@ class DashboardApiTests(APITestCase):
         for value in (1, 2, 3):
             self._diary(value, days_ago=10)
 
-        response = self.client.get(DASHBOARD_URL)
+        language = self._dimension(self.client.get(DASHBOARD_URL), "language")
 
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
-        progress = {p["source"]: p for p in response.data["data"]["progress"]}
-        self.assertEqual(progress["diary"]["session_count"], 0)
+        self.assertFalse(language["unlocked"])
+        self.assertEqual(language["valid_count"], 0)
 
     def test_language_null_without_recent_diary(self):
         # 解鎖用的日記都超過 7 天，近 7 天沒寫 → 語言軸是 null
@@ -267,11 +317,14 @@ class DashboardApiTests(APITestCase):
         self.assertAlmostEqual(language["z_score"], 1 / 0.7**0.5, delta=0.001)
         self.assertEqual(language["session_count"], 1)
 
-    def test_diaries_do_not_unlock_dashboard(self):
-        # 日記寫再多，遊戲沒玩滿還是資料不足
+    def test_diaries_only_unlock_language(self):
+        # 日記寫再多，遊戲維度沒玩滿還是沒解鎖
+        self._unlock_diaries()
         for _ in range(5):
             self._diary(3)
 
         response = self.client.get(DASHBOARD_URL)
 
-        self.assertEqual(response.data["error"]["code"], "INSUFFICIENT_DATA")
+        self.assertTrue(self._dimension(response, "language")["unlocked"])
+        for game in ("attention", "math", "visual_spatial"):
+            self.assertFalse(self._dimension(response, game)["unlocked"])
