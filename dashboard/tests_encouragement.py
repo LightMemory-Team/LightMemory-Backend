@@ -49,6 +49,10 @@ class WeightedOverallScoreTests(SimpleTestCase):
         self.assertIsNone(weighted_overall_score({}, self.WEEK_3))
 
 
+# 3 篇歷史（z 為 -1、0、+1）、5 個等權重指標：收縮後的合成分數標準差 √0.52
+LANGUAGE_Z_SCALE = 0.52**0.5
+
+
 class GetEncouragementTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="grandma", password="pw123456")
@@ -88,14 +92,16 @@ class GetEncouragementTests(APITestCase):
         """6 個能力都在 weeks_ago 那週玩滿 3 次，每個能力的 z 都是 z_score。
 
         日記：很久以前先寫 3 篇（小分數 1、2、3 → 平均 2、標準差 1，自己沒有 z），
-        再在那週同一時間寫 diaries 篇小分數 2 + z 的日記（同時建立不互相比，
-        語言 z 都剛好是 z）。
+        再在那週同一時間寫 diaries 篇的日記（同時建立不互相比）。語言 z 要做
+        二階段標準化：3 篇歷史的合成分數變異數和 2，5 個指標等權重的理論變異數 0.2，
+        收縮後 (2 + 3 × 0.2) ÷ (2 + 3) = 0.52；所以小分數設成 2 + z × √0.52，
+        語言 z 就剛好是 z。
         """
         self._week_of_games(z_score, weeks_ago, times=REQUIRED_SESSIONS)
         for sub_score in (1, 2, 3):
             self._diary(sub_score, weeks_ago=52)
         for _ in range(diaries):
-            self._diary(2 + z_score, weeks_ago)
+            self._diary(2 + z_score * LANGUAGE_Z_SCALE, weeks_ago)
 
     def test_diaries_not_enough_is_none(self):
         # 5 款遊戲都滿 3 場，但有分數的日記只有 2 篇
@@ -154,15 +160,16 @@ class GetEncouragementTests(APITestCase):
 
     def test_language_counts_in_weekly_score(self):
         self._unlock(0.4, weeks_ago=1)  # 60
-        # 這週只寫一篇日記，沒玩遊戲：
-        # 更早的日記 1、2、3、2.4、2.4、2.4 → 平均 2.2、標準差 0.669
-        # z = (2.4 − 2.2) / 0.669 ≈ 0.299 → 57 分
+        # 這週只寫一篇日記，沒玩遊戲：更早有 6 篇日記
+        # （1、2、3，加上 3 篇 2.288）→ 平均 2.144、標準差 0.585
+        # 這篇 2.4 的 z_單項 = 0.438，6 篇歷史的變異數和 5 → 收縮後變異數 0.7
+        # → z = 0.438 ÷ √0.7 ≈ 0.469 → 62 分
         self._diary(2.4, weeks_ago=0)
-        # (60 x 0.8 + 57) / 1.8 ≈ 58.3 → 58
+        # (60 x 0.8 + 62) / 1.8 ≈ 61.1 → 61
 
         encouragement = get_encouragement(self.user)
 
-        self.assertEqual(encouragement["overall_score"], 58)
+        self.assertEqual(encouragement["overall_score"], 61)
         self.assertEqual(encouragement["previous_overall_score"], 60)
 
     def test_dashboard_api_includes_encouragement(self):

@@ -8,13 +8,11 @@ from django.test import SimpleTestCase
 from .zscore import (
     PRIOR_STRENGTH,
     calculate_dimension_z_score,
-    choose_baseline,
     composite_z_details,
     composite_z_score,
     compute_baseline,
     effective_weights,
     metric_baselines,
-    metric_z_scores,
     pooled_population_baseline,
     prior_composite_variance,
     restandardize,
@@ -44,19 +42,6 @@ class ComputeBaselineTests(SimpleTestCase):
     def test_zero_std_is_none(self):
         # 每場都一樣，標準差 0 無法相除
         self.assertIsNone(compute_baseline([0.8, 0.8, 0.8]))
-
-
-class ChooseBaselineTests(SimpleTestCase):
-    def test_uses_personal_when_enough_sessions(self):
-        baseline = choose_baseline(HISTORY_VALUES, [10, 20, 30])
-        self.assertAlmostEqual(baseline[0], 0.6)
-
-    def test_cold_start_falls_back_to_population(self):
-        baseline = choose_baseline([0.5], [10, 20, 30])
-        self.assertAlmostEqual(baseline[0], 20)
-
-    def test_both_insufficient_is_none(self):
-        self.assertIsNone(choose_baseline([0.5], [10, 20]))
 
 
 class ToZScoreTests(SimpleTestCase):
@@ -283,61 +268,6 @@ class CompositeZScoreTests(SimpleTestCase):
             {"accuracy": 5, "rt": 0}, BASIC_HISTORY_FLAT, {}, FLAT_RULES
         )
         self.assertEqual(z, 2)
-
-
-# 單一指標、沒有分階段的遊戲（冰箱檢查、市場買菜）用的規則
-SCORE_RULES = {"raw_score": (1.0, False)}
-
-
-def _history(*values):
-    return [{"raw_score": v} for v in values]
-
-
-class MetricZScoresTests(SimpleTestCase):
-    """冷啟動三種情況：自己 ≥ 3 場、自己不滿 3 場借全體、全體也不夠。"""
-
-    def test_uses_personal_history_when_enough(self):
-        # 自己：平均 70、標準差 10 → (80 - 70) / 10 = 1；全體的資料不會用到
-        z = metric_z_scores(
-            {"raw_score": 80},
-            _history(60, 70, 80),
-            _history(10, 20, 30),
-            SCORE_RULES,
-        )
-        self.assertAlmostEqual(z["raw_score"], 1.0)
-
-    def test_falls_back_to_population_when_personal_not_enough(self):
-        # 自己只有 2 場 → 改用全體：平均 50、標準差 10 → (60 - 50) / 10 = 1
-        z = metric_z_scores(
-            {"raw_score": 60},
-            _history(90, 95),
-            _history(40, 50, 60),
-            SCORE_RULES,
-        )
-        self.assertAlmostEqual(z["raw_score"], 1.0)
-
-    def test_no_data_when_population_also_not_enough(self):
-        z = metric_z_scores({"raw_score": 60}, _history(90), _history(50), SCORE_RULES)
-        self.assertIsNone(z["raw_score"])
-
-    def test_lower_is_better_is_reversed(self):
-        z = metric_z_scores(
-            {"rt": 900},
-            [{"rt": 700}, {"rt": 800}, {"rt": 900}],
-            [],
-            {"rt": (1.0, True)},
-        )
-        self.assertAlmostEqual(z["rt"], -1.0)
-
-    def test_old_history_without_metric_is_ignored(self):
-        # 舊場次沒有這個欄位（例如改版前），當作無資料略過
-        z = metric_z_scores(
-            {"raw_score": 80},
-            [{}, *_history(60, 70, 80)],
-            [],
-            SCORE_RULES,
-        )
-        self.assertAlmostEqual(z["raw_score"], 1.0)
 
 
 class WeightedMetricZScoreTests(SimpleTestCase):

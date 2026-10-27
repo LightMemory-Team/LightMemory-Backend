@@ -1,18 +1,22 @@
 """跨遊戲共用的 z-score 計算工具（五款遊戲與聲影日記都用）。
 
 純函式：輸入「這一場」與「歷史場次」的指標，回傳 z-score，不碰資料庫。
-規則詳見 Google 文件〈菜市場找路 Z-score 設計〉：
+每個維度都照同一套流程，讓雷達圖每一軸的意思與波動幅度一致：
 
 1. 每個（階段的）原始指標由各遊戲自己定義，寫成 METRIC_RULES：
-   {指標: (權重, 是否越低越好)}，例如正確率、反應時間
-2. 每個指標跟自己的歷史分布比，算 z-score；越低越好的指標要反向
-3. 加權平均 → 分數（metric_z_scores + weighted_metric_z_score）
-4. 有分階段的遊戲（菜市場找路、煮菜過程）再依這場最高到達的階段，
-   跨階段加權 → 維度分數（calculate_dimension_z_score）
+   {指標: (權重, 是否越低越好)}，一律等權重
+2. 每個指標跟自己的基準比，算 z-score（限制 ±2）；越低越好的指標要反向。
+   基準用收縮估計（shrunk_baseline）：資料少時偏向全體使用者的「個人內」變異，
+   自己的場次越多越偏向自己，不在第 3 場硬切換
+3. 加權平均成合成分數（weighted_metric_z_score）
+4. 二階段標準化（restandardize）：合成分數 ÷ 合成分數本身的標準差，讓各維度
+   的波動回到 1，不受指標數量影響
+5. 有分階段的遊戲（菜市場找路、煮菜過程）每個階段先各自合成，再依這場最高到達
+   的階段跨階段加權（calculate_dimension_z_score）
 
-冷啟動：個人歷史不滿 MIN_HISTORY_SESSIONS 場時，先借用全體使用者的
-歷史當比較基準；全體也不夠時回傳 None（前端顯示「資料不足」，不給假分數）。
-不使用寫死的常模：等測試資料累積夠了，再依真實資料決定。
+各遊戲的第一場是「熟悉場」，不算分也不進任何歷史；全體使用者的資料也不夠
+（個人內自由度不滿 MIN_HISTORY_SESSIONS）時回傳 None（前端顯示「資料不足」，
+不給假分數）。不使用寫死的常模：等測試資料累積夠了，再依真實資料決定。
 """
 
 import statistics
@@ -56,11 +60,6 @@ def compute_baseline(values):
     return statistics.mean(values), std
 
 
-def choose_baseline(personal_values, population_values):
-    """冷啟動：個人歷史算得出基準就用個人的，否則改用全體使用者的。"""
-    return compute_baseline(personal_values) or compute_baseline(population_values)
-
-
 def to_z_score(value, baseline, *, lower_is_better=False):
     """z = (這次的值 - 歷史平均) / 歷史標準差。
 
@@ -90,32 +89,8 @@ def weighted_average(scores_and_weights):
     return sum(score * weight for score, weight in pairs) / total_weight
 
 
-def metric_z_scores(
-    current_metrics, personal_history, population_history, metric_rules
-):
-    """每個指標各自跟歷史比，回傳 {指標: z 或 None}。
-
-    current_metrics: 這一場的指標，例如 {"accuracy": 0.9, "avg_response_time_ms": 800}
-    personal_history / population_history: 歷史場次清單，每場格式同
-        current_metrics（不含這一場）
-    metric_rules: 各指標的 (權重, 是否越低越好)，例如
-        {"accuracy": (0.4, False), "avg_response_time_ms": (0.3, True)}
-    """
-    return {
-        name: to_z_score(
-            current_metrics.get(name),
-            choose_baseline(
-                [h.get(name) for h in personal_history],
-                [h.get(name) for h in population_history],
-            ),
-            lower_is_better=lower_is_better,
-        )
-        for name, (_, lower_is_better) in metric_rules.items()
-    }
-
-
 def weighted_metric_z_score(z_by_metric, metric_rules):
-    """把 metric_z_scores 的結果依 metric_rules 的權重加權；全部無資料回傳 None。"""
+    """把各指標的 z 依 metric_rules 的權重加權；全部無資料回傳 None。"""
     return weighted_average(
         [(z_by_metric[name], weight) for name, (weight, _) in metric_rules.items()]
     )

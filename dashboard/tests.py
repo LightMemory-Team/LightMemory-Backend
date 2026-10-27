@@ -40,8 +40,9 @@ class DashboardApiTests(APITestCase):
     def _diary(self, sub_score, *, user=None, days_ago=1, is_valid=True):
         """建立一篇 days_ago 天前的日記，5 個小分數都是 sub_score。
 
-        _unlock_all_games 會先建好歷史（平均 2、標準差 1），
-        這篇的語言 z 就是 sub_score − 2。
+        _unlock_all_games 會先建好 6 篇歷史（平均 2、標準差 1），
+        這篇的語言 z 是 (sub_score − 2) ÷ √0.7：6 篇歷史的 z 變異數和 5，
+        5 個指標等權重的理論變異數 0.2，收縮後 (5 + 3 × 0.2) ÷ (5 + 3) = 0.7。
         """
         diary = Diary.objects.create(user=user or self.user, status="done")
         Diary.objects.filter(pk=diary.pk).update(
@@ -245,25 +246,25 @@ class DashboardApiTests(APITestCase):
     def test_language_is_average_of_recent_diaries(self):
         self._unlock_all_games()
         # 兩篇同一時間建立，都只跟歷史比
-        self._diary(3)  # 語言 z = +1
-        self._diary(2.5)  # 語言 z = +0.5
+        self._diary(3)  # 語言 z = 1 ÷ √0.7 ≈ 1.195
+        self._diary(2.5)  # 語言 z = 0.5 ÷ √0.7 ≈ 0.598
 
         language = self._dimension(self.client.get(DASHBOARD_URL), "language")
 
-        # (1 + 0.5) / 2 = 0.75
-        self.assertEqual(language["z_score"], 0.75)
+        # (1 + 0.5) / 2 ÷ √0.7 ≈ 0.896
+        self.assertAlmostEqual(language["z_score"], 0.75 / 0.7**0.5, delta=0.002)
         self.assertEqual(language["session_count"], 2)
 
     def test_language_excludes_invalid_old_and_other_users_diaries(self):
         self._unlock_all_games()  # 8 天前那 3 篇有 z，但超過 7 天不算平均
-        self._diary(3)  # 語言 z = +1，唯一算進去的
+        self._diary(3)  # 語言 z = 1 ÷ √0.7 ≈ 1.195，唯一算進去的
         self._diary(4, is_valid=False)  # 無效日記（錄音太短等）
         other = User.objects.create_user(username="other", password="pw123456")
         self._diary(0, user=other)
 
         language = self._dimension(self.client.get(DASHBOARD_URL), "language")
 
-        self.assertEqual(language["z_score"], 1.0)
+        self.assertAlmostEqual(language["z_score"], 1 / 0.7**0.5, delta=0.001)
         self.assertEqual(language["session_count"], 1)
 
     def test_diaries_do_not_unlock_dashboard(self):

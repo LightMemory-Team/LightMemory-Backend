@@ -414,26 +414,27 @@ class AbilitiesTests(TestCase):
     def test_language_score_from_diaries(self):
         # 每篇跟「更早的有效日記」比，寫完就變成下一篇的歷史
         diary_baseline(self.user)  # 1、2、3
-        diary_on(self.user, date(2026, 9, 21), 3.2)  # 跟 1、2、3 比：z +1.2 → 80
-        diary_on(self.user, date(2026, 9, 30), 2)  # 跟 1、2、3、3.2 比：z −0.296
-        diary_on(self.user, date(2026, 10, 6), 3)  # 本週 z +0.856
-        diary_on(self.user, date(2026, 10, 8), 2.6)  # 本週 z +0.274
+        # 語言 z = 合成分數 ÷ 收縮後的標準差（二階段標準化，隨歷史篇數而變）
+        diary_on(self.user, date(2026, 9, 21), 3.2)  # 跟 1、2、3 比：z +1.664 → 92
+        diary_on(self.user, date(2026, 9, 30), 2)  # 跟 1、2、3、3.2 比：z −0.382
+        diary_on(self.user, date(2026, 10, 6), 3)  # 本週 z +1.056
+        diary_on(self.user, date(2026, 10, 8), 2.6)  # 本週 z +0.327
         diary_on(self.user, date(2026, 10, 9), 0, is_valid=False)  # 無效，不算
         diary_on(self.user, date(2026, 10, 13), 4)  # 報告週之後，不算
 
         abilities = build_abilities(self.user, WEEK_START, {"diary"})
 
         language = self._ability(abilities, "language")
-        # 上週 50 + 25 x −0.296 = 43；本週平均 z 0.565 → 64；最佳是 9/21 那週的 80
+        # 上週 50 + 25 x −0.382 = 40；本週平均 z 0.692 → 67；最佳是 9/21 那週的 92
         self.assertEqual(
             language,
             {
                 "dimension": "language",
                 "label": "語言",
                 "played": True,
-                "this_week": 64,
-                "last_week": 43,
-                "best": 80,
+                "this_week": 67,
+                "last_week": 40,
+                "best": 92,
                 "trend": "up",
             },
         )
@@ -452,7 +453,8 @@ class AbilitiesTests(TestCase):
     def test_overall_includes_language(self):
         finished_on(self.user, "market_route", date(2026, 10, 6), 0.6)  # 65
         diary_baseline(self.user)
-        diary_on(self.user, date(2026, 10, 7), 3)  # 跟 1、2、3 比：z +1 → 75
+        # 小分數 2 + √0.52：跟 1、2、3 比，標準化後 z 剛好 +1 → 75
+        diary_on(self.user, date(2026, 10, 7), 2 + 0.52**0.5)
 
         overall = build_abilities(self.user, WEEK_START, set())["overall"]
 
