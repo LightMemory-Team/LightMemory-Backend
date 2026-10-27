@@ -16,6 +16,7 @@ from diary.models import Diary, DiaryAnalysis
 from games.fridge_check.services import get_history as fridge_check_history
 from games.market_shopping.services import get_history as market_shopping_history
 from games.models import Game, GameSession
+from games.session_service import SEED_CLIENT_SESSION_PREFIX
 from users.models import User
 
 from .services import (
@@ -109,6 +110,17 @@ class SeedDemoDataTests(TestCase):
         user = seed(username="grandma", password="pw123456")
         self.assertTrue(user.check_password("pw123456"))
         self.assertEqual(GameSession.objects.filter(user=user).count(), 45)
+
+
+class SeedDemoExcludedFromPopulationTests(TestCase):
+    def test_seed_sessions_match_the_prefix_excluded_from_population(self):
+        # session_service 靠這個前綴把 demo 場次排除在全體基準之外，兩邊要一致
+        user = seed()
+        sessions = GameSession.objects.filter(user=user)
+
+        self.assertTrue(sessions.exists())
+        for client_session_id in sessions.values_list("client_session_id", flat=True):
+            self.assertTrue(client_session_id.startswith(SEED_CLIENT_SESSION_PREFIX))
 
 
 class SeedDemoDashboardTests(TestCase):
