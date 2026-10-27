@@ -2,11 +2,7 @@ from django.utils import timezone
 
 from games import session_service
 from games.dda import DDAConfig, NoOpStrategy, apply_answer
-from games.zscore import (
-    metric_z_scores,
-    weighted_metric_z_score,
-    z_score_to_display_score,
-)
+from games.zscore import composite_z_score, z_score_to_display_score
 
 from .constants import (
     DIFFICULTY_EASY,
@@ -35,24 +31,47 @@ ERROR_PENALTY_PER_SKIPPED_QUESTION = 2
 MEDIUM_CORRECT_BONUS = 0.5
 HARD_CORRECT_BONUS = 1.0
 
-# Z-score 設定：只用原始能力分 raw_score 一個指標，越高越好
-METRIC_RULES = {"raw_score": (1.0, False)}
+# Z-score 設定：正確率、速度分兩個指標各自跟歷史比，再等權重加權（越高越好）
+METRIC_RULES = {"accuracy": (1.0, False), "speed_score": (1.0, False)}
 
 
-def calculate_visual_spatial_z_score(raw_score, personal_history, population_history):
+def _result_metrics(result):
+    """把一場的結算結果轉成 z 用的指標。
+
+    沒有反應時間資料（average_reaction_time_ms 是 None）的場次，速度分是 0 只代表
+    「沒有資料」，不是真的很慢，所以速度分不列入（None）。
+    """
+    has_speed_data = result.get("average_reaction_time_ms") is not None
+    return {
+        "accuracy": result.get("accuracy"),
+        "speed_score": result.get("speed_score") if has_speed_data else None,
+    }
+
+
+def calculate_visual_spatial_z_score(
+    accuracy, speed_score, personal_history, population_history
+):
     """
     視覺空間 Z-score 與跨遊戲標準分數 (standard_score)。
 
-    raw_score 跟自己過去場次的 raw_score 比（games/zscore.py）：
-    自己不滿 3 場借全體使用者的歷史，全體也不夠就是 None（資料不足）。
+    正確率、速度分各自跟過去場次比，等權重加權後再做二階段標準化
+    （games/zscore.py）。
+    基準資料少時偏向全體使用者、越多越偏向自己；全體也不夠就是 None（資料不足）。
     Z-score 限制在 ±2，standard_score = 50 + 25 * z_score（1～100）。
 
-    personal_history / population_history: 過去場次的 result 清單（不含這場）
+    speed_score 是 None 代表這場沒有反應時間資料，只用正確率。
+    personal_history: 自己過去場次的 result 清單（不含這場）
+    population_history: 其他使用者的 result，依使用者分組 {user_id: [result, ...]}
     """
-    z_by_metric = metric_z_scores(
-        {"raw_score": raw_score}, personal_history, population_history, METRIC_RULES
+    z_score = composite_z_score(
+        {"accuracy": accuracy, "speed_score": speed_score},
+        [_result_metrics(result) for result in personal_history],
+        {
+            user_id: [_result_metrics(result) for result in results]
+            for user_id, results in population_history.items()
+        },
+        METRIC_RULES,
     )
-    z_score = weighted_metric_z_score(z_by_metric, METRIC_RULES)
     if z_score is not None:
         z_score = round(z_score, 3)
 
@@ -63,11 +82,11 @@ def calculate_visual_spatial_z_score(raw_score, personal_history, population_his
 
 
 def _previous_results(session):
-    """這場之前已結束場次的 result（自己的、全體的），給 z-score 當比較基準。"""
+    """這場之前已結束場次的 result：(自己的清單, {其他使用者 id: 清單})。"""
     session_id = session["session_id"]
     return (
         session_service.list_previous_results(GAME_TYPE, session_id),
-        session_service.list_previous_results(GAME_TYPE, session_id, same_user=False),
+        session_service.list_previous_results_by_user(GAME_TYPE, session_id),
     )
 
 
@@ -468,11 +487,14 @@ def calculate_final_result(session, personal_history=None, population_history=No
     # 7. Z-score 與跨遊戲標準分數：由原始能力指標 raw_score 跟自己的歷史比；
     #    熟悉場不算分，給空歷史讓 z、標準分數都是 None
     if session.get("is_pretest"):
-        personal_history, population_history = [], []
+        personal_history, population_history = [], {}
     elif personal_history is None or population_history is None:
         personal_history, population_history = _previous_results(session)
     z_result = calculate_visual_spatial_z_score(
-        raw_score, personal_history, population_history
+        accuracy,
+        speed_score if state["answer_count"] > 0 else None,
+        personal_history,
+        population_history,
     )
     z_score = z_result["z_score"]
     standard_score = z_result["standard_score"]

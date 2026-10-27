@@ -16,17 +16,24 @@ GAME_TYPE = "market_sort"
 
 
 def _previous_raw_metrics(session_id):
-    """這場之前已結束場次的原始指標（自己的、全體的），給 z-score 當比較基準。"""
-    return tuple(
-        [
-            result["raw_metrics"]
-            for result in session_service.list_previous_results(
-                GAME_TYPE, session_id, same_user=same_user
-            )
-            if "raw_metrics" in result
-        ]
-        for same_user in (True, False)
+    """這場之前已結束場次的原始指標，給 z-score 當比較基準。
+
+    回傳 (自己的清單, {其他使用者 id: 清單})，全體依使用者分組。
+    """
+
+    def raw_metrics_of(results):
+        return [r["raw_metrics"] for r in results if "raw_metrics" in r]
+
+    personal = raw_metrics_of(
+        session_service.list_previous_results(GAME_TYPE, session_id)
     )
+    population = {
+        user_id: raw_metrics_of(results)
+        for user_id, results in session_service.list_previous_results_by_user(
+            GAME_TYPE, session_id
+        ).items()
+    }
+    return personal, population
 
 
 class MarketSortSubmitView(APIView):
@@ -74,7 +81,7 @@ class MarketSortSubmitView(APIView):
 
         # 熟悉場不算分，給空歷史讓 z、分數都是 None
         histories = (
-            ([], []) if session["is_pretest"] else _previous_raw_metrics(session_id)
+            ([], {}) if session["is_pretest"] else _previous_raw_metrics(session_id)
         )
         try:
             result = calculate_cognitive_flexibility_score(questions, *histories)

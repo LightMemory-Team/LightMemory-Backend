@@ -212,35 +212,141 @@ def restandardize(composite, reference_composites, prior_var, k=PRIOR_STRENGTH):
     return max(-Z_SCORE_CLAMP, min(Z_SCORE_CLAMP, z))
 
 
+def metric_baselines(personal_history, population_by_user, metric_rules):
+    """每個指標各自的收縮基準：{指標: (平均, 標準差) 或 None}。
+
+    personal_history: 自己過去場次的指標清單，每場格式 {指標: 值}（不含這一場）
+    population_by_user: 其他使用者過去場次，依使用者分組 {user_id: [{指標: 值}]}
+    基準只算一次，這一場和參考場次都用同一組，尺度才會一致。
+    """
+    baselines = {}
+    for name in metric_rules:
+        population = pooled_population_baseline(
+            {
+                user_id: [session.get(name) for session in sessions]
+                for user_id, sessions in population_by_user.items()
+            }
+        )
+        baselines[name] = shrunk_baseline(
+            [session.get(name) for session in personal_history], population
+        )
+    return baselines
+
+
+def z_scores_from_baselines(metrics, baselines, metric_rules):
+    """用算好的基準，把一場的各指標轉成 z：{指標: z 或 None}（限制 ±2）。"""
+    return {
+        name: to_z_score(
+            metrics.get(name), baselines[name], lower_is_better=lower_is_better
+        )
+        for name, (_, lower_is_better) in metric_rules.items()
+    }
+
+
+def composite_z_details(
+    current_metrics, personal_history, population_by_user, metric_rules
+):
+    """沒分階段的維度 z：每個指標轉 z → 加權合成 → 二階段標準化。
+
+    回傳 (最終 z 或 None, {指標: z 或 None})；後者是第一階段各指標的 z，
+    給想存下每個指標 z 的遊戲（整理菜籃）用。
+    參考場次是自己過去的場次，用同一組基準算出各場的合成分數，
+    再用來估計合成分數的波動（見 restandardize）。
+    """
+    baselines = metric_baselines(personal_history, population_by_user, metric_rules)
+    z_by_metric = z_scores_from_baselines(current_metrics, baselines, metric_rules)
+    # 參考場次只用「這一場算得出 z 的指標」合成，兩邊的合成形狀才一致，
+    # 否則這一場少了某個指標時，參考場次的波動會對不上
+    active_rules = {
+        name: rule
+        for name, rule in metric_rules.items()
+        if z_by_metric[name] is not None
+    }
+    if not active_rules:
+        return None, z_by_metric
+    composite = weighted_metric_z_score(z_by_metric, active_rules)
+    references = [
+        weighted_metric_z_score(
+            z_scores_from_baselines(session, baselines, active_rules), active_rules
+        )
+        for session in personal_history
+    ]
+    prior_var = prior_composite_variance(effective_weights(z_by_metric, active_rules))
+    return restandardize(composite, references, prior_var), z_by_metric
+
+
+def composite_z_score(
+    current_metrics, personal_history, population_by_user, metric_rules
+):
+    """composite_z_details 的最終 z（只要結果、不要各指標 z 的呼叫端用）。"""
+    return composite_z_details(
+        current_metrics, personal_history, population_by_user, metric_rules
+    )[0]
+
+
+def _staged_composite(session_metrics, stage_baselines, metric_rules):
+    """一場（分階段）的合成分數，以及各指標的有效權重（給理論變異數用）。
+
+    依這場最高到達的階段決定階段權重，階段內再依指標權重加權。
+    回傳 (合成分數 或 None, [有效權重, ...])，有效權重的總和是階段權重的總和。
+    """
+    highest_stage = max(session_metrics, key=STAGE_ORDER.index)
+    stage_weights = STAGE_WEIGHTS_BY_HIGHEST_STAGE[highest_stage]
+    stage_scores, weights = [], []
+    for stage, metrics in session_metrics.items():
+        z_by_metric = z_scores_from_baselines(
+            metrics, stage_baselines[stage], metric_rules
+        )
+        stage_score = weighted_metric_z_score(z_by_metric, metric_rules)
+        stage_scores.append((stage_score, stage_weights[stage]))
+        if stage_score is not None:
+            # 階段內先正規化，再乘階段權重：每個階段有資料的指標權重加起來 = 階段權重
+            metric_total = sum(effective_weights(z_by_metric, metric_rules))
+            weights += effective_weights(
+                z_by_metric, metric_rules, stage_weights[stage] / metric_total
+            )
+    return weighted_average(stage_scores), weights
+
+
 def calculate_dimension_z_score(
     current_metrics, personal_history, population_history, metric_rules
 ):
-    """算出一場遊戲的維度 z-score。
+    """分階段遊戲（菜市場找路、煮菜過程）的維度 z。
 
     current_metrics: 這一場的各階段指標，只放有玩到的階段，例如
         {"basic": {"accuracy": 0.9, "avg_response_time_ms": 800}}
-    personal_history / population_history: 歷史場次清單，每場格式同
-        current_metrics（不含這一場）
+    personal_history: 自己過去場次，每場格式同 current_metrics（不含這一場）
+    population_history: 其他使用者過去場次，依使用者分組 {user_id: [每場格式同上]}
     metric_rules: 各指標的 (權重, 是否越低越好)，例如
         {"accuracy": (0.4, False), "avg_response_time_ms": (0.3, True)}
+
+    每個階段只跟歷史上「同一階段」比；階段內加權、再依這場最高到達的階段跨階段
+    加權，最後做二階段標準化。沒有任何指標算得出 z 時回傳 None。
     """
     if not current_metrics:
         return None
+    personal_history = [session for session in personal_history if session]
 
-    highest_stage = max(current_metrics, key=STAGE_ORDER.index)
-    stage_weights = STAGE_WEIGHTS_BY_HIGHEST_STAGE[highest_stage]
-
-    stage_scores = []
-    for stage, metrics in current_metrics.items():
-        # 每個階段只跟歷史上「同一階段」比
-        z_by_metric = metric_z_scores(
-            metrics,
-            [h[stage] for h in personal_history if stage in h],
-            [h[stage] for h in population_history if stage in h],
+    stages = {
+        stage for session in [current_metrics, *personal_history] for stage in session
+    }
+    stage_baselines = {
+        stage: metric_baselines(
+            [session[stage] for session in personal_history if stage in session],
+            {
+                user_id: [session[stage] for session in sessions if stage in session]
+                for user_id, sessions in population_history.items()
+            },
             metric_rules,
         )
-        stage_scores.append(
-            (weighted_metric_z_score(z_by_metric, metric_rules), stage_weights[stage])
-        )
+        for stage in stages
+    }
 
-    return weighted_average(stage_scores)
+    composite, weights = _staged_composite(
+        current_metrics, stage_baselines, metric_rules
+    )
+    references = [
+        _staged_composite(session, stage_baselines, metric_rules)[0]
+        for session in personal_history
+    ]
+    return restandardize(composite, references, prior_composite_variance(weights))

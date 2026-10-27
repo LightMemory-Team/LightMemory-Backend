@@ -9,8 +9,11 @@ from .zscore import (
     PRIOR_STRENGTH,
     calculate_dimension_z_score,
     choose_baseline,
+    composite_z_details,
+    composite_z_score,
     compute_baseline,
     effective_weights,
+    metric_baselines,
     metric_z_scores,
     pooled_population_baseline,
     prior_composite_variance,
@@ -110,57 +113,176 @@ def _session(**stages):
 
 
 # basic：正確率平均 0.6／標準差 0.1，反應時間平均 800／標準差 100
+# 反應時間的排列刻意跟正確率不同步，三場的合成分數是 -0.5、-0.5、+1（變異數和 1.5）：
+#   第 1 場 正確率 z = -1、反應時間 800 → z = 0     → 合成 -0.5
+#   第 2 場 正確率 z =  0、反應時間 900 → z = -1    → 合成 -0.5
+#   第 3 場 正確率 z = +1、反應時間 700 → z = +1    → 合成 +1
 BASIC_HISTORY = [
-    _session(basic=(0.5, 700)),
-    _session(basic=(0.6, 800)),
-    _session(basic=(0.7, 900)),
+    _session(basic=(0.5, 800)),
+    _session(basic=(0.6, 900)),
+    _session(basic=(0.7, 700)),
 ]
+
+# 兩個指標等權重、互不相關時的理論變異數 = 0.5² + 0.5² = 0.5；
+# 收縮後的合成分數變異數 = (參考場次的變異數和 1.5 + k(3) × 0.5) ÷ (2 + 3) = 0.6
+BASIC_COMPOSITE_VAR = (1.5 + 3 * 0.5) / (2 + 3)
 
 
 class CalculateDimensionZScoreTests(SimpleTestCase):
     def test_only_basic_uses_basic_weight_one(self):
         current = _session(basic=(0.8, 700))
-        # z_正確率 = +2、z_反應時間 = +1 → 0.5 * 2 + 0.5 * 1 = 1.5
-        score = calculate_dimension_z_score(current, BASIC_HISTORY, [], RULES)
-        self.assertAlmostEqual(score, 1.5)
+        # z_正確率 = +2、z_反應時間 = +1 → 合成 0.5 * 2 + 0.5 * 1 = 1.5
+        # 二階段標準化：1.5 ÷ √0.6
+        score = calculate_dimension_z_score(current, BASIC_HISTORY, {}, RULES)
+        self.assertAlmostEqual(score, 1.5 / BASIC_COMPOSITE_VAR**0.5)
 
     def test_cross_stage_weights_by_highest_stage(self):
-        # intermediate 歷史跟 basic 一樣的分布
+        # intermediate 歷史跟 basic 一樣的分布，每場兩個階段的合成分數相同
         history = [
-            _session(basic=(0.5, 700), intermediate=(0.5, 700)),
-            _session(basic=(0.6, 800), intermediate=(0.6, 800)),
-            _session(basic=(0.7, 900), intermediate=(0.7, 900)),
+            _session(basic=(0.5, 800), intermediate=(0.5, 800)),
+            _session(basic=(0.6, 900), intermediate=(0.6, 900)),
+            _session(basic=(0.7, 700), intermediate=(0.7, 700)),
         ]
-        # basic 階段分數 1.5；intermediate 剛好等於平均 → 0
-        current = _session(basic=(0.8, 700), intermediate=(0.6, 800))
+        # basic 合成 1.5；intermediate 剛好等於平均 → 0；最高到 intermediate：
         # 0.3 * 1.5 + 0.7 * 0 = 0.45
-        score = calculate_dimension_z_score(current, history, [], RULES)
-        self.assertAlmostEqual(score, 0.45)
+        current = _session(basic=(0.8, 700), intermediate=(0.6, 800))
+        # 參考場次每場 0.3 * c + 0.7 * c = c，所以變異數和仍是 1.5
+        # 理論變異數：有效權重 [0.15, 0.15, 0.35, 0.35] → Σw² = 0.29
+        var = (1.5 + 3 * 0.29) / (2 + 3)
+        score = calculate_dimension_z_score(current, history, {}, RULES)
+        self.assertAlmostEqual(score, 0.45 / var**0.5)
 
-    def test_cold_start_uses_population_history(self):
-        current = _session(basic=(0.8, 700))
-        personal = BASIC_HISTORY[:1]  # 個人只有 1 場
-        score = calculate_dimension_z_score(current, personal, BASIC_HISTORY, RULES)
-        self.assertAlmostEqual(score, 1.5)
+    def test_cold_start_borrows_population_history(self):
+        # 個人只有 1 場（正確率 0.5、反應時間 800），全體是兩位使用者各 3 場
+        personal = BASIC_HISTORY[:1]
+        population = {"u1": BASIC_HISTORY, "u2": BASIC_HISTORY}
+        current = _session(basic=(0.65, 750))
+        # 正確率基準：平均 (1 * 0.5 + 3 * 0.6) ÷ 4 = 0.575、標準差 = 全體個人內 0.1
+        #   → z = (0.65 - 0.575) ÷ 0.1 = 0.75
+        # 反應時間基準：平均 (800 + 3 * 800) ÷ 4 = 800、標準差 100 → z = +0.5
+        # 合成 0.625；個人只有 1 場，合成分數的變異數完全用理論值 0.5
+        score = calculate_dimension_z_score(current, personal, population, RULES)
+        self.assertAlmostEqual(score, 0.625 / 0.5**0.5)
+
+    def test_population_only_uses_same_stage(self):
+        # 全體只有 basic 的資料；intermediate 沒有基準 → 跳過，結果同只有 basic
+        population = {"u1": BASIC_HISTORY, "u2": BASIC_HISTORY}
+        current = _session(basic=(0.65, 750), intermediate=(0.9, 500))
+        only_basic = _session(basic=(0.65, 750))
+        self.assertAlmostEqual(
+            calculate_dimension_z_score(current, BASIC_HISTORY[:1], population, RULES),
+            # 最高階段不同，basic 的權重會被重新正規化，但只剩 basic 時結果相同
+            calculate_dimension_z_score(
+                only_basic, BASIC_HISTORY[:1], population, RULES
+            ),
+        )
 
     def test_stage_without_history_is_skipped(self):
-        # 第一次玩到 intermediate，沒有任何歷史 → 只算 basic
+        # 第一次玩到 intermediate，沒有任何歷史 → 只算 basic，結果同 test_only_basic
         current = _session(basic=(0.8, 700), intermediate=(0.9, 500))
-        score = calculate_dimension_z_score(current, BASIC_HISTORY, [], RULES)
-        self.assertAlmostEqual(score, 1.5)
+        score = calculate_dimension_z_score(current, BASIC_HISTORY, {}, RULES)
+        self.assertAlmostEqual(score, 1.5 / BASIC_COMPOSITE_VAR**0.5)
 
     def test_dimension_score_stays_within_two(self):
-        # z_正確率 = (1.0 - 0.6) / 0.1 = 4 → 2；z_反應時間 = -(300 - 800) / 100 = 5 → 2
+        # z_正確率 = 4 → 2；z_反應時間 = 5 → 2；合成 2，標準化後超過 2 → 限制在 2
         current = _session(basic=(1.0, 300))
-        score = calculate_dimension_z_score(current, BASIC_HISTORY, [], RULES)
+        score = calculate_dimension_z_score(current, BASIC_HISTORY, {}, RULES)
         self.assertAlmostEqual(score, 2.0)
 
     def test_no_history_at_all_is_none(self):
         current = _session(basic=(0.8, 700))
-        self.assertIsNone(calculate_dimension_z_score(current, [], [], RULES))
+        self.assertIsNone(calculate_dimension_z_score(current, [], {}, RULES))
 
     def test_no_current_metrics_is_none(self):
-        self.assertIsNone(calculate_dimension_z_score({}, BASIC_HISTORY, [], RULES))
+        self.assertIsNone(calculate_dimension_z_score({}, BASIC_HISTORY, {}, RULES))
+
+    def test_empty_history_session_is_ignored(self):
+        # 歷史裡有一場什麼指標都算不出來（空 dict），不影響結果也不會出錯
+        current = _session(basic=(0.8, 700))
+        with_empty = [{}, *BASIC_HISTORY]
+        self.assertAlmostEqual(
+            calculate_dimension_z_score(current, with_empty, {}, RULES),
+            calculate_dimension_z_score(current, BASIC_HISTORY, {}, RULES),
+        )
+
+
+class MetricBaselinesTests(SimpleTestCase):
+    def test_enough_personal_history_without_population_is_pure_personal(self):
+        baselines = metric_baselines(BASIC_HISTORY_FLAT, {}, FLAT_RULES)
+        mean, std = baselines["accuracy"]
+        self.assertAlmostEqual(mean, 0.6)
+        self.assertAlmostEqual(std, 0.1)
+
+    def test_no_data_at_all_is_none(self):
+        baselines = metric_baselines([], {}, FLAT_RULES)
+        self.assertEqual(baselines, {"accuracy": None, "rt": None})
+
+    def test_borrows_population_when_personal_is_empty(self):
+        population = {"u1": BASIC_HISTORY_FLAT, "u2": BASIC_HISTORY_FLAT}
+        mean, std = metric_baselines([], population, FLAT_RULES)["accuracy"]
+        self.assertAlmostEqual(mean, 0.6)
+        self.assertAlmostEqual(std, 0.1)
+
+    def test_one_user_is_not_enough_population(self):
+        # 只有一位使用者 3 場：個人內自由度 2，不到 3，不能當全體基準
+        baselines = metric_baselines([], {"u1": BASIC_HISTORY_FLAT}, FLAT_RULES)
+        self.assertIsNone(baselines["accuracy"])
+
+
+# 不分階段的歷史：同 BASIC_HISTORY 的數值，但沒有 stage 這一層
+FLAT_RULES = {"accuracy": (1.0, False), "rt": (1.0, True)}
+BASIC_HISTORY_FLAT = [
+    {"accuracy": 0.5, "rt": 800},
+    {"accuracy": 0.6, "rt": 900},
+    {"accuracy": 0.7, "rt": 700},
+]
+
+
+class CompositeZScoreTests(SimpleTestCase):
+    def test_single_metric_equals_plain_z(self):
+        # 只有一個指標、基準是純個人時，歷史 z 的變異數剛好是 1，標準化不改變結果
+        rules = {"accuracy": (1.0, False)}
+        z = composite_z_score({"accuracy": 0.7}, BASIC_HISTORY_FLAT, {}, rules)
+        self.assertAlmostEqual(z, 1.0)
+
+    def test_two_correlated_metrics_are_amplified(self):
+        # 正確率與反應時間完全同步（z 都是 -1、0、+1）：合成 -1、0、+1，變異數和 2
+        history = [
+            {"accuracy": 0.5, "rt": 900},
+            {"accuracy": 0.6, "rt": 800},
+            {"accuracy": 0.7, "rt": 700},
+        ]
+        current = {"accuracy": 0.65, "rt": 750}  # 兩個 z 都是 +0.5 → 合成 0.5
+        var = (2 + 3 * 0.5) / (2 + 3)
+        z = composite_z_score(current, history, {}, FLAT_RULES)
+        self.assertAlmostEqual(z, 0.5 / var**0.5)
+
+    def test_details_return_first_stage_z_per_metric(self):
+        current = {"accuracy": 0.8, "rt": 700}
+        z, z_by_metric = composite_z_details(
+            current, BASIC_HISTORY_FLAT, {}, FLAT_RULES
+        )
+        self.assertAlmostEqual(z_by_metric["accuracy"], 2.0)
+        self.assertAlmostEqual(z_by_metric["rt"], 1.0)
+        self.assertAlmostEqual(z, 1.5 / BASIC_COMPOSITE_VAR**0.5)
+
+    def test_missing_metric_is_skipped_and_weights_renormalized(self):
+        # 只有正確率有值：變成單一指標，結果同 test_single_metric_equals_plain_z
+        z = composite_z_score(
+            {"accuracy": 0.7, "rt": None}, BASIC_HISTORY_FLAT, {}, FLAT_RULES
+        )
+        self.assertAlmostEqual(z, 1.0)
+
+    def test_no_history_is_none(self):
+        self.assertIsNone(
+            composite_z_score({"accuracy": 0.7, "rt": 700}, [], {}, FLAT_RULES)
+        )
+
+    def test_result_stays_within_two(self):
+        z = composite_z_score(
+            {"accuracy": 5, "rt": 0}, BASIC_HISTORY_FLAT, {}, FLAT_RULES
+        )
+        self.assertEqual(z, 2)
 
 
 # 單一指標、沒有分階段的遊戲（冰箱檢查、市場買菜）用的規則
