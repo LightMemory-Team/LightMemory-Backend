@@ -10,7 +10,7 @@
 
 - **看哪一週**：上一個完整的週（週一～週日），比較對象是再前一週
   - 例：今天 10/20（二）→ 報告週 10/12（一）～10/18（日），比較週 10/5～10/11
-- **不設解鎖門檻**：沒玩也有內容（數字是 0、句子仍然正向）
+- **活動、日記、遊玩時間不設門檻**：沒玩也有內容（數字是 0、句子仍然正向）；**能力分數只列已解鎖的維度**（見第三節 2.）
 - **只讀資料**：不寫入任何資料表，每次請求當下計算
 - **時區**：日期一律依台灣時間（`settings.TIME_ZONE = "Asia/Taipei"`）切分，晚上 11 點玩的算當天
 
@@ -21,16 +21,17 @@
 | 順序 | 維度 `dimension` | 顯示名稱 | 資料來源 `source` | 每場／每篇的 z 從哪來 |
 |---|---|---|---|---|
 | 1 | `attention` | 注意力 | 菜市場找路 `market_route` | 結算時存入 `GameSession.result.z_score` |
-| 2 | `working_memory` | 工作記憶 | 煮菜過程 `memory_recall` | 同上（前測不計分，為 `null`） |
+| 2 | `working_memory` | 工作記憶 | 煮菜過程 `memory_recall` | 同上（第一場是熟悉場，不計分，為 `null`） |
 | 3 | `executive_function` | 執行功能 | 整理菜籃 `market_sort` | 同上 |
 | 4 | `visual_spatial` | 視覺空間 | 冰箱檢查 `fridge_check` | 同上 |
 | 5 | `math` | 數學 | 市場買菜 `market_shopping` | 同上 |
 | 6 | `language` | 語言 | 聲影日記 `diary` | 從 `DiaryAnalysis` 的 5 個小分數現算（跟更早的有效日記比），只算有效日記 |
 
 - 陣列順序同儀表板雷達圖（`dashboard/services.py` 的 `DIMENSIONS`）
-- 每款遊戲 z 的算法見 [`game_scoring_algorithms.md`](game_scoring_algorithms.md) 第 3～7 節，聲影日記見第 11-4 節
-- 所有 z 都是**跟自己的歷史比**：自己不滿 3 場（篇）先借全體使用者的歷史，全體也不夠就算不出來；不使用寫死的常模
-- 所有 z 都已限制在 **−2 ～ +2**；算不出來的場次（前測、歷史不足、無效日記）不算
+- 每款遊戲 z 的算法見 [`game_scoring_algorithms.md`](game_scoring_algorithms.md) 第 3～7 節，聲影日記見第 11-4 節；**每款遊戲的第一場是熟悉場，不算分也不進歷史**
+- 所有 z 都以**自己的歷史表現為基準**：資料少時偏向其他使用者「個人內」的變異，自己的場次越多越偏向自己（收縮基準），全體也不夠就算不出來；不使用寫死的常模
+- 各指標一律等權重合成，合成後再做二階段標準化，六個維度的波動幅度一致（見 [`game_scoring_algorithms.md`](game_scoring_algorithms.md) 第 8 節）
+- 所有 z 都已限制在 **−2 ～ +2**；算不出來的場次（熟悉場、歷史不足、無效日記）不算
 
 ---
 
@@ -58,6 +59,10 @@
 | 週分數 | 1 | 25 | 50 | 75 | 100 |
 
 - **哪一週**：遊戲依結束時間 `finished_at`、日記依建立時間 `created_at`
+- **解鎖 `unlocked`**：到**報告週結束為止**，該能力累計至少 3 筆「有 z」的場次（篇）才算解鎖（熟悉場、歷史不足沒有 z 的不算）。報告週之後才玩的不會讓舊的報告提前解鎖
+  - 沒解鎖的能力：`unlocked: false`，`this_week`、`last_week`、`best`、`trend` 都是 `null`；`played` 照常標示這週有沒有碰過
+  - 前端建議：沒解鎖的能力顯示「還在認識你，再玩幾次就能看到」，不放 0 分、不用紅色
+  - 解鎖條件跟儀表板每個維度的 `unlocked` 一致（儀表板看「到現在為止」）
 - **個人最佳 `best`**：從第一次有分數到報告週為止，每週分數的最高值（報告週之後的不算）
 - **趨勢 `trend`**：
 
@@ -68,7 +73,7 @@
   | ≤ −3 | `practice` | 多練習（不用「退步」） |
   | 任一週沒分數 | `null` | 不顯示標籤 |
 
-- **整體表現 `overall`**：那週有分數的能力（含語言）取平均；`best` 是每週整體分數的最高值
+- **整體表現 `overall`**：那週**已解鎖且有分數**的能力（含語言）取平均；`best` 是每週整體分數的最高值
 - **`played`**：報告週有沒有碰過這個能力（遊戲有開始玩、或有寫日記）；有玩但沒有分數時（例：只寫了無效日記），`played: true`、分數為 `null`
 
 ### 3. 遊玩時間 `play_time`
@@ -134,12 +139,12 @@
     "abilities": {
       "overall": { "this_week": 60, "last_week": 55, "best": 63, "trend": "up" },
       "dimensions": [
-        { "dimension": "attention",          "label": "注意力",   "played": true, "this_week": 65, "last_week": 50, "best": 65, "trend": "up" },
-        { "dimension": "working_memory",     "label": "工作記憶", "played": true, "this_week": 66, "last_week": 65, "best": 80, "trend": "steady" },
-        { "dimension": "executive_function", "label": "執行功能", "played": true, "this_week": 58, "last_week": 40, "best": 58, "trend": "up" },
-        { "dimension": "visual_spatial",     "label": "視覺空間", "played": true, "this_week": 56, "last_week": 58, "best": 58, "trend": "steady" },
-        { "dimension": "math",               "label": "數學",     "played": true, "this_week": 45, "last_week": 65, "best": 65, "trend": "practice" },
-        { "dimension": "language",           "label": "語言",     "played": true, "this_week": 70, "last_week": 55, "best": 70, "trend": "up" }
+        { "dimension": "attention",          "label": "注意力",   "played": true, "unlocked": true, "this_week": 65, "last_week": 50, "best": 65, "trend": "up" },
+        { "dimension": "working_memory",     "label": "工作記憶", "played": true, "unlocked": true, "this_week": 66, "last_week": 65, "best": 80, "trend": "steady" },
+        { "dimension": "executive_function", "label": "執行功能", "played": true, "unlocked": true, "this_week": 58, "last_week": 40, "best": 58, "trend": "up" },
+        { "dimension": "visual_spatial",     "label": "視覺空間", "played": true, "unlocked": true, "this_week": 56, "last_week": 58, "best": 58, "trend": "steady" },
+        { "dimension": "math",               "label": "數學",     "played": true, "unlocked": true, "this_week": 45, "last_week": 65, "best": 65, "trend": "practice" },
+        { "dimension": "language",           "label": "語言",     "played": true, "unlocked": true, "this_week": 70, "last_week": 55, "best": 70, "trend": "up" }
       ]
     },
     "play_time": {
@@ -184,8 +189,9 @@
 | `highlights.streak_days` | 整數 | 報告週內最長連續天數 |
 | `daily_activity` | 陣列（固定 7 筆） | 本週打卡：`date`、`weekday`（一～日）、`is_active` |
 | `abilities.overall` | 物件 | 整體表現：`this_week`、`last_week`、`best`、`trend` |
-| `abilities.dimensions` | 陣列（固定 6 筆） | 六大能力，欄位同上，另有 `dimension`、`label`、`played` |
-| `abilities.*.this_week`／`last_week`／`best` | 整數 1～100 或 `null` | 沒有分數時為 `null` |
+| `abilities.dimensions` | 陣列（固定 6 筆） | 六大能力，欄位同上，另有 `dimension`、`label`、`played`、`unlocked` |
+| `abilities.dimensions[].unlocked` | 布林 | 到報告週結束為止是否解鎖（累計 3 筆有 z）；`false` 時分數與趨勢都是 `null` |
+| `abilities.*.this_week`／`last_week`／`best` | 整數 1～100 或 `null` | 沒有分數、或這個能力還沒解鎖時為 `null` |
 | `abilities.*.trend` | `"up"`／`"steady"`／`"practice"` 或 `null` | 前端翻成「進步／持平／多練習」 |
 | `play_time.total_seconds` | 整數（秒） | 五款遊戲遊玩時間總和 |
 | `play_time.games` | 陣列（固定 5 筆） | 各遊戲 `source`、`label`、`seconds` |
@@ -217,7 +223,8 @@
 | `dashboard/services.py` | `DIMENSIONS`（六大能力對照）、`diary_z_scores`（每篇日記的語言 z） |
 | `dashboard/diary_zscore.py` | 單篇日記語言 z 的計算 |
 | `ai_service/weekly_summary.py` | 一句話總結：正向事實、AI 呼叫、禁用詞檢查、固定句型 |
-| `games/zscore.py` | `z_score_to_display_score`：z → 1～100 分（五款遊戲與週報共用） |
+| `games/zscore.py` | 共用的 z 計算（收縮基準、二階段標準化）與 `z_score_to_display_score`：z → 1～100 分（五款遊戲與週報共用） |
+| `dashboard/services.py` | 另有 `get_unlock_progress`、`unlocked_sources`：各維度累計幾筆有 z、哪些已解鎖（週報與儀表板共用） |
 | `dashboard/tests_weekly_report.py`、`ai_service/tests.py` | 測試（AI 以 mock 取代，不會真的呼叫 OpenAI） |
 
 ---
@@ -226,11 +233,11 @@
 
 | 項目 | 說明 |
 |---|---|
-| 舊資料沒有 z | 各遊戲加入 `z_score` 前玩的場次不會出現在能力分數裡 |
-| 常模待建立 | 目前一律跟自己的歷史比（冷啟動借全體）；等測試資料累積夠了，再用真實資料決定常模 |
-| 冷啟動 | 全系統某款遊戲（或日記）不滿 3 場（篇）時，新使用者的前幾場算不出 z，該週沒有分數 |
-| 聲影日記權重 | 沿用 `diary/analysis.py` 的 `communication_score` 權重，來源待確認 |
-| 市場買菜速度分 | 前端需送 `reaction_time_ms`，否則速度分為 0、能力分只看正確率 |
+| 舊資料沒有 z | 各遊戲加入 `z_score` 前玩的場次不會出現在能力分數裡；新算法上線前結束的場次可用 `python manage.py recompute_scores` 依新算法重算（先加 `--dry-run` 看會改什麼） |
+| 常模待建立 | 目前一律以自己的歷史為基準（資料少時偏向其他使用者的個人內變異）；收縮強度 k = 3 是保守設定，等測試資料累積夠了，再用真實資料估計 k、決定常模 |
+| 冷啟動 | 第一場是熟悉場不算分；其他使用者的資料也不夠（個人內自由度不滿 3）時，新使用者的前幾場算不出 z，該週沒有分數；累計滿 3 筆有 z 才解鎖該能力 |
+| 聲影日記權重 | 5 個小分數一律等權重，不再沿用 `diary/analysis.py` 的 `communication_score` 權重 |
+| 市場買菜速度分 | 前端需送 `reaction_time_ms`，否則速度分沒有資料（不列入）、能力分只看正確率 |
 | 整理菜籃遊玩時間 | 用反應時間加總，比實際遊玩時間短；更新前的場次為 0 |
 | 對話時長 | 「最後回答 − 建立時間」的近似值 |
 | AI 費用與速度 | 每次打開都呼叫一次 OpenAI（約 2～3 秒），之後可考慮快取 |
