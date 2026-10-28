@@ -1,0 +1,309 @@
+/* 親友分享頁：版面與配色對照 App 的「家屬版動態牆」設計稿。
+   親友也可能是長輩，所以字大、按鈕大、對比足夠。 */
+
+:root {
+  --green: #2e6342;
+  --green-dark: #234d33;
+  --green-soft: #7fb08f;
+  --green-pale: #e3eee5;
+  --bg: #f7f6f1;
+  --card: #ffffff;
+  --text: #1f1f1f;
+  --text-sub: #6b6b6b;
+  --line: #e4e2da;
+  --input-bg: #ecece8;
+  --input-line: #cfcfc8;
+  --error: #b3261e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 18px;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  line-height: 1.6;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* 頂部列：同 App */
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.top-bar-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: 0.05em;
+}
+
+.page {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 24px 16px 40px;
+}
+
+/* 頭像：圓形＋姓氏 */
+.avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+/* 第 1 步 */
+.intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 40px 0 32px;
+}
+
+.intro-title {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.intro-text {
+  margin: 12px 0 0;
+  color: var(--text-sub);
+}
+
+.expired {
+  padding-top: 64px;
+}
+
+.nickname-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.field-label {
+  margin: 0 0 8px 4px;
+  font-weight: 500;
+}
+
+/* 輸入框：膠囊形，同設計稿的留言框 */
+.pill-input {
+  width: 100%;
+  padding: 14px 22px;
+  border: 2px solid var(--input-line);
+  border-radius: 999px;
+  background: var(--input-bg);
+  font: inherit;
+  color: var(--text);
+}
+
+.pill-input::placeholder {
+  color: #8a8a85;
+}
+
+.pill-input:focus {
+  outline: none;
+  border-color: var(--green);
+  background: #fff;
+}
+
+/* 按鈕 */
+.btn-primary {
+  border: none;
+  border-radius: 999px;
+  background: var(--green);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-primary:hover,
+.btn-primary:focus-visible {
+  background: var(--green-dark);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.btn-block {
+  margin-top: 20px;
+  min-height: 56px;
+  font-size: 1.1rem;
+}
+
+.btn-link {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  font: inherit;
+  color: var(--green);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.error-text {
+  margin: 10px 0 0 4px;
+  color: var(--error);
+  font-weight: 500;
+}
+
+/* 第 2 步：貼文卡片 */
+.post-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  overflow: hidden;
+}
+
+.post-photo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--green-pale);
+}
+
+.post-body {
+  padding: 22px 22px 8px;
+}
+
+.author-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.author-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.post-date {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 0.85rem;
+}
+
+.post-title {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.post-text {
+  margin: 0 0 14px;
+  font-size: 1.05rem;
+}
+
+.post-tags {
+  margin: 0 0 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.tag {
+  color: var(--green);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+/* 留言區 */
+.comment-area {
+  padding: 12px 22px 22px;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+}
+
+.sent-list {
+  list-style: none;
+  margin: 4px 0 14px;
+  padding: 0;
+}
+
+.sent-list li {
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.sent-name {
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.sent-mark {
+  display: block;
+  color: var(--text-sub);
+  font-size: 0.8rem;
+}
+
+.as-line {
+  margin: 4px 0 10px 4px;
+  color: var(--text-sub);
+  font-size: 0.9rem;
+}
+
+.as-line span {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.comment-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.comment-input {
+  flex: 1;
+  min-height: 56px;
+  max-height: 160px;
+  resize: none;
+  border-radius: 28px;
+  line-height: 1.5;
+}
+
+.btn-send {
+  flex: none;
+  width: 76px;
+  height: 56px;
+  font-size: 1.05rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

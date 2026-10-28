@@ -10,12 +10,13 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 from decouple import config
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -26,7 +27,7 @@ SECRET_KEY = 'django-insecure-ils*(wye_q#y7@6z_68x^t^*q@#*o_b^zl+@%*h*b=-_x#w^%z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.trycloudflare.com']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver', '.trycloudflare.com']
 
 
 # Application definition
@@ -53,6 +54,7 @@ INSTALLED_APPS = [
     'assessments',
     'ai_service',
     'home',
+    'public_share',
 ]
 
 AUTH_USER_MODEL = 'users.User'
@@ -152,5 +154,16 @@ REST_FRAMEWORK = {
     ),
 }
 
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=2),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+}
+
 # 開發階段允許 Flutter 或其他前端連線
 CORS_ALLOW_ALL_ORIGINS = True
+
+import os
+OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
+OPENAI_MODEL = config('OPENAI_MODEL', default='gpt-4.1-mini')
+OPENAI_BASE_URL = config('OPENAI_BASE_URL', default='https://api.openai.com/v1')
+SHARE_BASE_URL = config('SHARE_BASE_URL', default='http://localhost:8000')

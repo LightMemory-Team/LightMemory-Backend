@@ -1,0 +1,84 @@
+{% load static %}<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ author_name }} 的日記｜憶智防線</title>
+  <meta property="og:title" content="{{ author_name }} 分享了一篇日記：{{ title }}">
+  <meta property="og:description" content="點開看看，留一句話給 {{ author_name }}。">
+  {% if photo_url %}<meta property="og:image" content="{{ photo_url }}">{% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="{% static 'public_share/share.css' %}">
+</head>
+<body data-share-token="{{ share_token }}">
+
+  <header class="top-bar">
+    <span class="top-bar-title">憶智防線</span>
+  </header>
+
+  <!-- 第 1 步：填暱稱（瀏覽器已存過暱稱時，JS 會直接跳到第 2 步） -->
+  <main id="nickname-step" class="page" hidden>
+    <section class="intro">
+      <h1 class="intro-title">{{ author_name }} 向您分享了一篇日記</h1>
+    </section>
+
+    <form id="nickname-form" class="nickname-form" novalidate>
+      <label for="nickname-input" class="field-label">請輸入您的暱稱</label>
+      <input id="nickname-input" class="pill-input" type="text"
+             maxlength="12" autocomplete="nickname" placeholder="例如：小玲">
+      <p id="nickname-error" class="error-text" role="alert" hidden></p>
+      <button type="submit" class="btn-primary btn-block">看日記</button>
+    </form>
+  </main>
+
+  <!-- 第 2 步：看日記、留言 -->
+  <main id="post-step" class="page" hidden>
+    <article class="post-card">
+      {% if photo_url %}
+      <img class="post-photo" src="{{ photo_url }}" alt="{{ title }}" onerror="this.remove()">
+      {% endif %}
+
+      <div class="post-body">
+        <div class="author-row">
+          <div class="avatar" aria-hidden="true">{{ author_name|slice:":1" }}</div>
+          <div>
+            <p class="author-name">{{ author_name }}</p>
+            <p class="post-date">{{ date }}</p>
+          </div>
+        </div>
+
+        {% if title %}<h1 class="post-title">{{ title }}</h1>{% endif %}
+        <p class="post-text">{{ post_text|linebreaksbr }}</p>
+
+        {% if hashtags %}
+        <p class="post-tags">
+          {% for tag in hashtags %}<span class="tag">{{ tag }}</span>{% endfor %}
+        </p>
+        {% endif %}
+      </div>
+
+      <div class="comment-area">
+        <ul id="sent-list" class="sent-list" hidden></ul>
+
+        <p class="as-line">
+          以「<span id="nickname-display"></span>」留言
+          <button type="button" id="change-nickname" class="btn-link">修改</button>
+        </p>
+
+        <form id="comment-form" class="comment-row" novalidate>
+          <label for="comment-input" class="sr-only">留言</label>
+          <textarea id="comment-input" class="pill-input comment-input" rows="1"
+                    maxlength="200" placeholder="留言…"></textarea>
+          <button type="submit" id="comment-submit" class="btn-primary btn-send">發送</button>
+        </form>
+        <p id="comment-error" class="error-text" role="alert" hidden></p>
+      </div>
+    </article>
+  </main>
+
+  <script src="{% static 'public_share/share.js' %}"></script>
+</body>
+</html>
