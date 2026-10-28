@@ -7,6 +7,7 @@ System test：Notification API 端到端流程。
 對應端點：
     GET   /api/social/notifications/
     GET   /api/social/notifications/unread_count/
+    PATCH /api/social/notifications/            （全部標為已讀）
     PATCH /api/social/notifications/<id>/read/
 
 執行：
@@ -125,3 +126,67 @@ class MarkAsReadTests(APITestCase):
         response = self.client.patch(read_url(99999))
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+class MarkAllAsReadTests(APITestCase):
+    """PATCH /api/social/notifications/（全部已讀）"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='wang_yulan', password='Str0ng!Pass2026')
+        self.other = User.objects.create_user(username='other', password='Str0ng!Pass2026')
+        self.client.force_authenticate(user=self.user)
+
+    def make(self, user, is_read=False):
+        return Notification.objects.create(
+            user=user, notification_type='comment', message='有人留言', is_read=is_read
+        )
+
+    def test_marks_all_own_unread_notifications_as_read(self):
+        self.make(self.user)
+        self.make(self.user)
+        self.make(self.user, is_read=True)
+
+        response = self.client.patch(LIST_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {'message': '已全部標記為已讀'})
+        self.assertFalse(Notification.objects.filter(user=self.user, is_read=False).exists())
+
+    def test_unread_count_becomes_zero(self):
+        self.make(self.user)
+
+        self.client.patch(LIST_URL)
+        response = self.client.get(UNREAD_COUNT_URL)
+
+        self.assertEqual(response.data, {'unread_notification_count': 0})
+
+    def test_does_not_touch_other_users_notifications(self):
+        mine = self.make(self.user)
+        theirs = self.make(self.other)
+
+        self.client.patch(LIST_URL)
+
+        mine.refresh_from_db()
+        theirs.refresh_from_db()
+        self.assertTrue(mine.is_read)
+        self.assertFalse(theirs.is_read)
+
+    def test_works_when_there_is_nothing_unread(self):
+        response = self.client.patch(LIST_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_requires_authentication(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.patch(LIST_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_list_still_works_after_marking_all_read(self):
+        self.make(self.user)
+
+        self.client.patch(LIST_URL)
+        response = self.client.get(LIST_URL)
+
+        self.assertEqual(len(response.data['notifications']), 1)
+        self.assertTrue(response.data['notifications'][0]['is_read'])

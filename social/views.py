@@ -6,22 +6,25 @@ from rest_framework.views import APIView
 
 from .models import Comment, Notification
 from .serializers import CommentSerializer, NotificationSerializer
-from .utils import (error_response, get_visible_post,
-                    paginate, post_queryset, serialize_post)
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status, permissions
-
-from .models import Post, Comment, Notification
-from .serializers import CommentSerializer
+from .utils import (
+    error_response,
+    get_visible_post,
+    paginate,
+    post_queryset,
+    serialize_post,
+)
 
 
-# 通知列表
-@api_view(['GET'])
+# 通知列表（GET）／全部標為已讀（PATCH）
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def notification_list(request):
     user = request.user
+    if request.method == 'PATCH':
+        # 只動自己的未讀通知
+        Notification.objects.filter(user=user, is_read=False).update(is_read=True)
+        return Response({"message": "已全部標記為已讀"})
+
     notifications = Notification.objects.filter(user=user).order_by('-created_at')
     serializer = NotificationSerializer(notifications, many=True)
     return Response({"notifications": serializer.data})
