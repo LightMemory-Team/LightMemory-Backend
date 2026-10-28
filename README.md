@@ -370,6 +370,7 @@ FIREBASE_STORAGE_BUCKET=lightmemory-sqlf.firebasestorage.app
 - [x] 首頁（home）API：`user_name`、`daily_tip`、`daily_suggestion`、`games[]`（詳見 [checklist.md](checklist.md)）
 - [x] 使用者註冊 API：`POST /api/users/register/`
 - [x] 使用者登入與 JWT 驗證：`POST /api/users/login/`（登入）、`POST /api/users/login/refresh/`（換發 access token）
+- [x] 首頁改版 API（詳見 [doc/home_revamp_api.md](doc/home_revamp_api.md)）：`GET/PATCH /api/users/me/`、忘記密碼 `password-reset/check/`／`password-reset/`、註冊改用暱稱、`GET /api/home/daily-tasks/`、通知全部已讀、統一錯誤格式
 - [x] 建立 Firebase Storage
 - [x] Django 串接 Firebase Admin SDK
 - [x] Firebase Storage Bucket 設定
