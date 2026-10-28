@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from games.catalog import GAMES
 from social.utils import get_display_name
 
-from . import service
+from . import daily_tasks, service
 
 # Create your views here.
 """
@@ -68,3 +68,10 @@ def games_list(request):
         if game["is_developed"]
     ]
     return Response({"games": games})
+
+
+# 今日任務：當天第一次呼叫時產生並存起來，之後同一天回傳同一份；done 每次即時計算
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def daily_tasks_view(request):
+    return Response(daily_tasks.build_response(request.user, timezone.localdate()))
