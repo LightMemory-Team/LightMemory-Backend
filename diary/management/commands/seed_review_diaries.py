@@ -33,6 +33,7 @@ class Command(BaseCommand):
             user.set_password(password)
             user.first_name = "奶奶"
             user.last_name = "林"
+            user.nickname = "林奶奶"
             user.avatar_url = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200"
             user.save()
             self.stdout.write(self.style.SUCCESS(f"[OK] 建立測試帳號: {username} (密碼: {password})"))

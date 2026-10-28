@@ -30,13 +30,12 @@ REFRESH_URL = '/api/users/login/refresh/'
 VALID_PAYLOAD = {
     'username': 'wang_yulan',
     'password': 'Str0ng!Pass2026',
-    'first_name': '玉蘭',
-    'last_name': '王',
+    'nickname': '玉蘭',
     'gender': 'female',
     'birth_date': '1950-01-01',
-    'phone': '0912345678',
-    'address': '台北市中正區測試路1號',
     'region': 'north',
+    'emergency_contact_name': '王小明',
+    'emergency_contact_phone': '0987654321',
 }
 
 
@@ -48,7 +47,7 @@ class RegisterEndpointTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['username'], 'wang_yulan')
-        self.assertEqual(response.data['last_name'], '王')
+        self.assertEqual(response.data['nickname'], '玉蘭')
         self.assertEqual(response.data['region'], 'north')
 
     def test_register_response_never_contains_password(self):
@@ -60,9 +59,10 @@ class RegisterEndpointTests(APITestCase):
         self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
 
         user = User.objects.get(username='wang_yulan')
-        self.assertEqual(user.first_name, '玉蘭')
-        self.assertEqual(user.phone, '0912345678')
-        self.assertEqual(user.address, '台北市中正區測試路1號')
+        self.assertEqual(user.nickname, '玉蘭')
+        self.assertEqual(user.emergency_contact_name, '王小明')
+        self.assertEqual(user.emergency_contact_phone, '0987654321')
+        self.assertEqual(user.region, 'north')
         self.assertEqual(user.gender, 'female')
         self.assertTrue(user.check_password('Str0ng!Pass2026'))
 
@@ -80,8 +80,37 @@ class RegisterEndpointTests(APITestCase):
         response = self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error']['code'], 'USERNAME_TAKEN')
         self.assertIn('username', response.data['error']['fields'])
         self.assertEqual(User.objects.filter(username='wang_yulan').count(), 1)
+
+    def test_register_without_region_and_emergency_contact_succeeds(self):
+        payload = {
+            key: VALID_PAYLOAD[key]
+            for key in ['username', 'password', 'nickname', 'gender', 'birth_date']
+        }
+
+        response = self.client.post(REGISTER_URL, payload, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data['region'])
+
+    def test_register_without_nickname_returns_400(self):
+        payload = {k: v for k, v in VALID_PAYLOAD.items() if k != 'nickname'}
+
+        response = self.client.post(REGISTER_URL, payload, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error']['code'], 'VALIDATION_ERROR')
+        self.assertIn('nickname', response.data['error']['fields'])
+        self.assertFalse(User.objects.filter(username='wang_yulan').exists())
+
+    def test_register_error_uses_unified_envelope(self):
+        response = self.client.post(REGISTER_URL, {}, format='json')
+
+        self.assertIs(response.data['success'], False)
+        self.assertIsNone(response.data['data'])
+        self.assertIn('message', response.data['error'])
 
     def test_register_with_invalid_region_returns_400(self):
         response = self.client.post(
@@ -299,6 +328,8 @@ class HomeEndpointSystemTests(APITestCase):
 
     def test_get_user_returns_last_name_after_registration(self):
         self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
+        # 註冊已不再收姓氏；home/user 改用暱稱前（第 6 步），先直接補上姓氏維持現況測試
+        User.objects.filter(username='wang_yulan').update(last_name='王')
 
         response = self.client.get('/api/home/user/')
 

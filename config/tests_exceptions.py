@@ -30,6 +30,20 @@ class ApiExceptionHandlerTests(SimpleTestCase):
         self.assertEqual(body["error"]["message"], "兩次密碼不同")
         self.assertNotIn("fields", body["error"])
 
+    def test_username_taken_validation_code_is_mapped(self):
+        exc = exceptions.ValidationError(
+            {
+                "username": [
+                    exceptions.ErrorDetail("帳號已被註冊", code="username_taken")
+                ]
+            }
+        )
+        status_code, body = self.call(exc)
+        self.assertEqual(status_code, 400)
+        self.assertEqual(body["error"]["code"], "USERNAME_TAKEN")
+        self.assertEqual(body["error"]["message"], "帳號已被註冊")
+        self.assertEqual(body["error"]["fields"], {"username": ["帳號已被註冊"]})
+
     def test_not_authenticated(self):
         status_code, body = self.call(exceptions.NotAuthenticated())
         self.assertEqual(status_code, 401)
