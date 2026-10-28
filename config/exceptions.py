@@ -38,6 +38,29 @@ class ApiError(exceptions.APIException):
             self.status_code = status_code
 
 
+# 序列化器用 ValidationError(code=...) 標記的特殊錯誤，轉成規格定義的 error.code
+SPECIAL_VALIDATION_CODES = {
+    "username_taken": "USERNAME_TAKEN",
+}
+
+
+def _special_code(detail):
+    """在驗證錯誤中找 SPECIAL_VALIDATION_CODES 裡的 code，找到就回傳 error.code。"""
+    if isinstance(detail, dict):
+        for sub in detail.values():
+            found = _special_code(sub)
+            if found:
+                return found
+    elif isinstance(detail, (list, tuple)):
+        for sub in detail:
+            found = _special_code(sub)
+            if found:
+                return found
+    else:
+        return SPECIAL_VALIDATION_CODES.get(getattr(detail, "code", None))
+    return None
+
+
 def _flatten(detail):
     """把 DRF 的 ErrorDetail 轉成 {欄位: [訊息, ...]}，巢狀欄位用點連起來。"""
     result = {}
@@ -75,6 +98,10 @@ def _parts(exc):
 
     if isinstance(exc, exceptions.ValidationError):
         fields = _flatten(exc.detail)
+        special = _special_code(exc.detail)
+        if special:
+            first = next(iter(fields.values()))[0]
+            return 400, special, first, fields
         # 只有「整體錯誤」（沒有指定欄位）時，直接把訊息當作 message
         if list(fields) == ["non_field_errors"]:
             return 400, "VALIDATION_ERROR", fields["non_field_errors"][0], None

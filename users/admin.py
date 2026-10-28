@@ -18,30 +18,32 @@ class LightMemoryUserAdmin(UserAdmin):
             "個人資料",
             {
                 "fields": (
+                    "nickname",
                     "gender",
                     "birth_date",
                     "phone",
                     "address",
                     "region",
+                    "emergency_contact_name",
+                    "emergency_contact_phone",
                     "avatar_url",
                 )
             },
         ),
     )
     add_fieldsets = UserAdmin.add_fieldsets + (
-        ("個人資料", {"fields": ("last_name", "gender", "birth_date", "phone")}),
+        ("個人資料", {"fields": ("nickname", "gender", "birth_date")}),
     )
     list_display = (
         "username",
-        "last_name",
+        "nickname",
         "gender",
         "region",
-        "phone",
         "registered_at",
         "is_staff",
     )
     list_filter = UserAdmin.list_filter + ("gender", "region")
-    search_fields = ("username", "last_name", "first_name", "phone")
+    search_fields = ("username", "nickname", "last_name", "first_name")
     inlines = [FamilyContactInline]
 
 

@@ -20,12 +20,18 @@ class User(AbstractUser):
     birth_date = models.DateField(null=True, blank=True)
     phone = models.CharField(max_length=10, blank=True)
     address = models.CharField(max_length=100, blank=True)
-    region = models.CharField(max_length=30, choices=REGION_CHOICES, blank=True)
+    region = models.CharField(
+        max_length=30, choices=REGION_CHOICES, blank=True, null=True
+    )
+    # 首頁改版：暱稱取代姓名，首頁與啟動頁的問候都用它
+    nickname = models.CharField(max_length=20, blank=True, default='')
+    emergency_contact_name = models.CharField(max_length=50, blank=True, null=True)
+    emergency_contact_phone = models.CharField(max_length=20, blank=True, null=True)
     avatar_url = models.CharField(max_length=255, blank=True, null=True)
     registered_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.last_name or self.username
+        return self.nickname or self.last_name or self.username
     
 class FamilyContact(models.Model):
     RELATIONSHIP_CHOICES = [
