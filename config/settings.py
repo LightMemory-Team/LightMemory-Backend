@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "assessments",
     "ai_service",
     "home",
+    "public_share",
 ]
 
 AUTH_USER_MODEL = "users.User"
@@ -166,3 +167,4 @@ CORS_ALLOW_ALL_ORIGINS = True
 OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
 OPENAI_MODEL = config("OPENAI_MODEL", default="gpt-4.1-mini")
 OPENAI_BASE_URL = config("OPENAI_BASE_URL", default="https://api.openai.com/v1")
+SHARE_BASE_URL = config("SHARE_BASE_URL", default="http://localhost:8000")

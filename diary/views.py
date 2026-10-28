@@ -1,13 +1,16 @@
-from datetime import date
+from datetime import date, timedelta
+from django.conf import settings
 from django.utils import timezone
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 
-from .models import Diary,DiaryReply, DiaryAnalysis
-from . import external, ai_gen, analysis as analysis_utils
 from social.models import Post
+from social.utils import get_visible_post, serialize_post
+
+from .models import Diary, DiaryReply, DiaryAnalysis
+from . import external, ai_gen, analysis as analysis_utils
 
 
 
@@ -181,10 +184,6 @@ class DiaryFinalizeView(APIView):
         diary.invite_text = content["invite_text"]
         diary.status = "done"
         diary.save()
-        Post.objects.get_or_create(
-            diary=diary,
-            defaults={"user": diary.user, "content": diary.post_text, "image_path": diary.image_path},
-        )
 
         return self._build_response(diary, http_status=201)
 
@@ -204,3 +203,158 @@ class DiaryFinalizeView(APIView):
                 "invite_text": diary.invite_text,
             }
         }, status=http_status)
+
+
+class DiaryShareView(APIView):
+    """S-1 POST /api/diary/{diary_id}/share/
+    分享日記到動態牆。首次分享回傳 201，已分享過回傳 200 並回傳同筆貼文。
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, diary_id):
+        try:
+            diary = Diary.objects.get(id=diary_id, user=request.user)
+        except Diary.DoesNotExist:
+            return Response(
+                {"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if diary.status != "done":
+            return Response(
+                {"error": {"code": "DIARY_NOT_DONE", "message": "日記還沒完成，完成後才能分享"}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        post, created = Post.objects.get_or_create(
+            diary=diary,
+            defaults={
+                "user": request.user,
+                "post_type": "diary",
+                "content": diary.post_text,
+                "image_path": diary.image_path,
+            },
+        )
+
+        visible_post = get_visible_post(request.user, post.id)
+        data = serialize_post(visible_post, request.user)
+        http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response({"data": data}, status=http_status)
+
+
+class DiaryDetailView(APIView):
+    """D-4 GET /api/diary/{diary_id}/
+    單篇日記詳情。包含問答列表、AI內容與分享狀態（is_shared, post_id, share_url）。
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, diary_id):
+        try:
+            diary = (
+                Diary.objects.select_related("social_post")
+                .prefetch_related("replies")
+                .get(id=diary_id, user=request.user)
+            )
+        except Diary.DoesNotExist:
+            return Response(
+                {"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        replies = diary.replies.all().order_by("round_index")
+        replies_data = [
+            {
+                "round_index": r.round_index,
+                "question": r.question,
+                "transcript": r.transcript,
+                "audio_url": r.audio_path,
+                "is_skipped": r.is_skipped,
+            }
+            for r in replies
+        ]
+
+        reply_count = len(replies_data)
+        non_skipped_count = sum(1 for r in replies_data if not r["is_skipped"])
+        is_done = diary.status == "done"
+
+        has_post = hasattr(diary, "social_post") and diary.social_post is not None and diary.social_post.is_enabled
+        post = diary.social_post if has_post else None
+        post_id = post.id if post else None
+        share_url = (
+            f"{settings.SHARE_BASE_URL.rstrip('/')}/share/{post.share_token}/"
+            if post
+            else None
+        )
+
+        data = {
+            "diary_id": diary.id,
+            "date": timezone.localtime(diary.created_at).date().isoformat(),
+            "created_at": timezone.localtime(diary.created_at).isoformat(),
+            "status": diary.status,
+            "photo_url": diary.image_path,
+            "first_question": diary.first_question,
+            "replies": replies_data,
+            "pending_question": diary.pending_question or None,
+            "reply_count": reply_count,
+            "is_finalizable": non_skipped_count >= 2,
+            "is_done": is_done,
+            "title": diary.title,
+            "ai_response": diary.ai_response,
+            "post_text": diary.post_text,
+            "hashtags": diary.hashtags,
+            "category": diary.category,
+            "is_shared": has_post,
+            "post_id": post_id,
+            "share_url": share_url,
+            "invite_text": diary.invite_text,
+        }
+
+        return Response({"data": data}, status=status.HTTP_200_OK)
+
+
+class DiaryReviewView(APIView):
+    """D-2 GET /api/diary/review/
+    動態回顧：顯示昨天與去年的今天的日記（僅本人且 status='done'）。
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+        try:
+            last_year_date = today.replace(year=today.year - 1)
+        except ValueError:
+            last_year_date = today.replace(year=today.year - 1, day=28)
+
+        base_qs = (
+            Diary.objects.filter(user=request.user, status="done")
+            .select_related("social_post")
+            .prefetch_related("replies")
+            .order_by("-created_at")
+        )
+
+        yesterday_qs = base_qs.filter(created_at__date=yesterday)
+        last_year_qs = base_qs.filter(created_at__date=last_year_date)
+
+        def _serialize(d):
+            has_post = hasattr(d, "social_post") and d.social_post is not None and d.social_post.is_enabled
+            first_reply = next((r for r in d.replies.all() if r.round_index == 1), None)
+            audio_url = first_reply.audio_path if first_reply and first_reply.audio_path else None
+            return {
+                "diary_id": d.id,
+                "date": timezone.localtime(d.created_at).date().isoformat(),
+                "title": d.title,
+                "photo_url": d.image_path,
+                "post_text": d.post_text,
+                "audio_url": audio_url,
+                "is_shared": has_post,
+                "post_id": d.social_post.id if has_post else None,
+                "created_at": timezone.localtime(d.created_at).isoformat(),
+            }
+
+        return Response({
+            "data": {
+                "yesterday": [_serialize(d) for d in yesterday_qs],
+                "last_year": [_serialize(d) for d in last_year_qs],
+            }
+        }, status=status.HTTP_200_OK)
