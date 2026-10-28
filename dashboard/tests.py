@@ -62,17 +62,17 @@ class DashboardApiTests(APITestCase):
         DiaryAnalysis.objects.create(diary=diary, is_valid=is_valid, **scores)
 
     def _unlock_diaries(self):
-        """寫 6 篇超過 7 天的日記，其中 3 篇有語言 z，滿足日記的解鎖條件。
+        """寫 6 篇超過 90 天的日記，其中 3 篇有語言 z，滿足日記的解鎖條件。
 
-        31 天前 0.5、2、3.5：自己沒有更早的日記，算不出 z
-        8 天前 1.5、2、2.5：同一時間建立，都跟前 3 篇比 → 有 z
+        130 天前 0.5、2、3.5：自己沒有更早的日記，算不出 z
+        100 天前 1.5、2、2.5：同一時間建立，都跟前 3 篇比 → 有 z
         6 篇合起來平均 2、標準差 1，之後的日記語言 z 就是小分數 − 2；
-        都超過 7 天，不會算進語言軸的平均。
+        都超過 90 天，不會算進語言軸的平均。
         """
         for value in (0.5, 2, 3.5):
-            self._diary(value, days_ago=31)
+            self._diary(value, days_ago=130)
         for value in (1.5, 2, 2.5):
-            self._diary(value, days_ago=8)
+            self._diary(value, days_ago=100)
 
     def _unlock_all_games(self, z_score=0.0, days_ago=1, *, diaries=True):
         """五款遊戲各玩 REQUIRED_SESSIONS 場、寫滿日記，讓儀表板解鎖。"""
@@ -186,7 +186,7 @@ class DashboardApiTests(APITestCase):
         self.assertTrue(response.data["success"])
         self.assertIsNone(response.data["error"])
         data = response.data["data"]
-        self.assertEqual(data["period_days"], 7)
+        self.assertEqual(data["period_days"], 90)
         self.assertEqual(
             [d["dimension"] for d in data["dimensions"]],
             [d["dimension"] for d in DIMENSIONS],
@@ -194,7 +194,7 @@ class DashboardApiTests(APITestCase):
         self.assertTrue(all(d["unlocked"] for d in data["dimensions"]))
 
     def test_locked_dimension_hides_recent_scores(self):
-        # 近 7 天玩了 2 場（還沒滿 3 場）：雖然有資料，沒解鎖就不顯示分數
+        # 近三個月玩了 2 場（還沒滿 3 場）：雖然有資料，沒解鎖就不顯示分數
         for _ in range(2):
             self._finished_session("market_route", 1.0)
 
@@ -233,18 +233,31 @@ class DashboardApiTests(APITestCase):
         self.assertEqual(attention["source"], "market_route")
         self.assertEqual(attention["label"], "注意力")
 
-    def test_sessions_older_than_seven_days_excluded_from_average(self):
+    def test_sessions_older_than_three_months_excluded_from_average(self):
         self._unlock_all_games(z_score=0.0)
-        self._finished_session("market_route", 2.0, days_ago=8)
+        self._finished_session("market_route", 2.0, days_ago=100)
 
         attention = self._dimension(self.client.get(DASHBOARD_URL), "attention")
 
         self.assertEqual(attention["z_score"], 0.0)
         self.assertEqual(attention["session_count"], 3)
 
+    def test_sessions_within_three_months_included_in_average(self):
+        # 8 天前（舊版 7 天會被排除）和 80 天前都算進近三個月的平均
+        self._unlock_all_games(z_score=0.0)
+        self._finished_session("market_route", 1.0, days_ago=8)
+        self._finished_session("market_route", 2.0, days_ago=80)
+
+        attention = self._dimension(self.client.get(DASHBOARD_URL), "attention")
+
+        # (0 + 0 + 0 + 1 + 2) / 5 = 0.6 → round(50 + 25 x 0.6) = 65
+        self.assertEqual(attention["z_score"], 0.6)
+        self.assertEqual(attention["score"], 65)
+        self.assertEqual(attention["session_count"], 5)
+
     def test_unlocked_but_not_played_recently_is_null(self):
-        # 10 天前就解鎖了，但近 7 天都沒玩：各軸 z、分數是 null，但維持解鎖
-        self._unlock_all_games(days_ago=10)
+        # 100 天前就解鎖了，但近三個月都沒玩：各軸 z、分數是 null，但維持解鎖
+        self._unlock_all_games(days_ago=100)
 
         response = self.client.get(DASHBOARD_URL)
 
@@ -282,7 +295,7 @@ class DashboardApiTests(APITestCase):
         self.assertEqual(language["valid_count"], 0)
 
     def test_language_null_without_recent_diary(self):
-        # 解鎖用的日記都超過 7 天，近 7 天沒寫 → 語言軸是 null
+        # 解鎖用的日記都超過 90 天，近三個月沒寫 → 語言軸是 null
         self._unlock_all_games()
 
         response = self.client.get(DASHBOARD_URL)
@@ -306,7 +319,7 @@ class DashboardApiTests(APITestCase):
         self.assertEqual(language["session_count"], 2)
 
     def test_language_excludes_invalid_old_and_other_users_diaries(self):
-        self._unlock_all_games()  # 8 天前那 3 篇有 z，但超過 7 天不算平均
+        self._unlock_all_games()  # 100 天前那 3 篇有 z，但超過 90 天不算平均
         self._diary(3)  # 語言 z = 1 ÷ √0.7 ≈ 1.195，唯一算進去的
         self._diary(4, is_valid=False)  # 無效日記（錄音太短等）
         other = User.objects.create_user(username="other", password="pw123456")
