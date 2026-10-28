@@ -1,0 +1,435 @@
+import random
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+from games import session_service
+from games.dda import DDAConfig, apply_answer
+from games.utils import get_current_user
+
+from .item_bank import load_distractor_item, load_items
+from .market_score import calculate_step_score, calculate_total_score
+
+GAME_TYPE = "market_route"
+
+STAGE_EXPOSURE_RANGE = {
+    "basic": (2000, 1500),
+    "intermediate": (1500, 1000),
+    "advanced": (1000, 500),
+}
+
+STAGE_ORDER = ["basic", "intermediate", "advanced"]
+PROMOTE_STREAK = 5
+# 連錯 5 次（每次作答都算，包含重看後再錯、超時）退一階
+DEMOTE_STREAK = 5
+FAST_PROMOTE_STREAK = 3
+FAST_RESPONSE_RATIO = 0.5
+MAX_WRONG_ATTEMPTS = 3
+EXPOSURE_STEP_DOWN = 100
+EXPOSURE_STEP_UP = 150
+POSITIONS = ["q1", "q2", "q3", "q4"]
+
+
+class RouteDDAStrategy:
+    """market_route 的 DDA 策略：計算曝光時間調整與快速連續答對。"""
+
+    def on_correct(
+        self, state: dict, config: DDAConfig, *, is_fast: bool = False
+    ) -> dict:
+        stage = state.get("current_stage", "basic")
+        _, tight = STAGE_EXPOSURE_RANGE.get(stage, (2000, 1500))
+        current_exp = state.get("exposure_time_ms", 2000)
+        fast_streak = state.get("fast_correct_streak", 0) + 1 if is_fast else 0
+        new_exp = max(tight, current_exp - EXPOSURE_STEP_DOWN)
+        return {
+            "exposure_time_ms": new_exp,
+            "fast_correct_streak": fast_streak,
+            "wrong_attempts": 0,
+        }
+
+    def on_wrong(self, state: dict, config: DDAConfig) -> dict:
+        stage = state.get("current_stage", "basic")
+        loose, _ = STAGE_EXPOSURE_RANGE.get(stage, (2000, 1500))
+        current_exp = state.get("exposure_time_ms", loose)
+        new_exp = min(loose, current_exp + EXPOSURE_STEP_UP)
+        return {
+            "exposure_time_ms": new_exp,
+            "fast_correct_streak": 0,
+        }
+
+    def on_promote(self, state: dict, config: DDAConfig, new_stage: str) -> dict:
+        loose, _ = STAGE_EXPOSURE_RANGE.get(new_stage, (2000, 1500))
+        return {
+            "exposure_time_ms": loose,
+            "fast_correct_streak": 0,
+            "wrong_attempts": 0,
+        }
+
+    def on_demote(self, state: dict, config: DDAConfig, new_stage: str) -> dict:
+        # 降階跟升階一樣，從新階段最寬鬆的曝光時間重新開始
+        return self.on_promote(state, config, new_stage)
+
+
+DDA_CONFIG = DDAConfig(
+    stage_order=STAGE_ORDER,
+    promote_streak=PROMOTE_STREAK,
+    demote_streak=DEMOTE_STREAK,
+)
+DDA_STRATEGY = RouteDDAStrategy()
+
+
+def _error_response(code, message, status):
+    return Response(
+        {
+            "success": False,
+            "data": None,
+            "error": {"code": code, "message": message},
+        },
+        status=status,
+    )
+
+
+def _get_session_or_error(request, session_id, *, require_in_progress=False):
+    """讀取 session，回傳 (session, error_response)，error_response 為 None 代表成功。
+
+    統一處理 SESSION_NOT_FOUND、FORBIDDEN（session 不屬於這位使用者），
+    require_in_progress=True 時再檢查 SESSION_ALREADY_FINISHED（出題、作答用）。
+    """
+    session = session_service.get_session(GAME_TYPE, session_id)
+    if session is None:
+        return None, _error_response("SESSION_NOT_FOUND", "找不到指定的 session", 404)
+    user = get_current_user(request)
+    if user is None or session["user_id"] != user.id:
+        return None, _error_response("FORBIDDEN", "這場遊戲不屬於目前的使用者", 403)
+    if require_in_progress and session["status"] != "in_progress":
+        return None, _error_response(
+            "SESSION_ALREADY_FINISHED", "這場遊戲已經結束了", 409
+        )
+    return session, None
+
+
+# 1. 取得本場遊戲設定
+@api_view(["GET"])
+def config(request):
+    data = {
+        "is_pretest": False,
+        "current_stage": "basic",
+        "total_questions": 20,
+        "timeout_seconds": 20,
+        "promote_streak": PROMOTE_STREAK,
+        "demote_streak": DEMOTE_STREAK,
+        "fast_promote_streak": FAST_PROMOTE_STREAK,
+        "fast_response_ratio": FAST_RESPONSE_RATIO,
+        "max_wrong_attempts": MAX_WRONG_ATTEMPTS,
+        "stage_exposure_range": {
+            "basic": [2000, 1500],
+            "intermediate": [1500, 1000],
+            "advanced": [1000, 500],
+        },
+    }
+    return Response({"success": True, "data": data, "error": None})
+
+
+# 2. 開始一場遊戲，建立 session
+@api_view(["POST"])
+def start(request):
+    user = get_current_user(request)
+    if user is None:
+        return Response(
+            {
+                "success": False,
+                "data": None,
+                "error": {"code": "USER_NOT_FOUND", "message": "查無使用者資料"},
+            },
+            status=404,
+        )
+
+    loose_exposure, _ = STAGE_EXPOSURE_RANGE["basic"]
+    initial_state = {
+        "current_stage": "basic",
+        "correct_streak": 0,
+        "fast_correct_streak": 0,
+        "wrong_attempts": 0,
+        "wrong_streak": 0,
+        "exposure_time_ms": loose_exposure,
+    }
+    session = session_service.create_session(
+        GAME_TYPE, initial_state=initial_state, user=user
+    )
+    data = {
+        "session_id": session["session_id"],
+        "current_stage": session["state"]["current_stage"],
+    }
+    return Response({"success": True, "data": data, "error": None})
+
+
+def _pick_question(stage, exposure_time_ms, question_number):
+    """依階段出題，advanced 階段的干擾物固定是魚骨頭，位置排除 target 保證不重疊。"""
+    items = load_items()
+    target = random.choice(items)
+
+    if stage == "basic":
+        target_position = "center"
+        distractor_items = []
+    else:
+        target_position = random.choice(POSITIONS)
+        distractor_items = []
+        if stage == "advanced":
+            distractor_position = random.choice(
+                [p for p in POSITIONS if p != target_position]
+            )
+            distractor_items = [
+                {"item": load_distractor_item(), "position": distractor_position}
+            ]
+
+    return {
+        "question_number": question_number,
+        "stage": stage,
+        "target_item": target["item"],
+        "target_position": target_position,
+        "distractor_items": distractor_items,
+        "exposure_time_ms": exposure_time_ms,
+    }
+
+
+# 3. 取得單一題目內容
+@api_view(["GET"])
+def round_view(request):
+    session_id = request.query_params.get("session_id")
+    session, error_response = _get_session_or_error(
+        request, session_id, require_in_progress=True
+    )
+    if error_response is not None:
+        return error_response
+
+    question = _pick_question(
+        session["state"]["current_stage"],
+        session["state"]["exposure_time_ms"],
+        session["question_number"] + 1,
+    )
+    session_service.set_current_question(GAME_TYPE, session_id, question)
+    return Response({"success": True, "data": question, "error": None})
+
+
+def _apply_dda(session, is_correct, is_timeout, response_time_ms):
+    """依 DDA 引擎與策略計算答題後的新狀態，回傳 (更新欄位 dict, action)。
+
+    額外規則（快速升階）：連續 5 題答對才升階，容易因為長者不小心誤觸提前
+    達標。所以加一個更嚴格但門檻更低的條件：連續 3 題「答對且反應時間在
+    當下曝光時間的 50% 以內」也視為熟練，直接升階。只要有一題答錯、或答對
+    但不夠快，這個快速連續計數就歸零重算。
+
+    action：
+        promoted       答對且升階，前端顯示升階對話框後進下一題
+        demoted        答錯（含超時）且連錯達 DEMOTE_STREAK 次，優先於 retry，
+                       前端顯示降階對話框後進下一題
+        retry          答錯但同一題還沒錯滿 MAX_WRONG_ATTEMPTS 次，同一題再試
+        next_question  其他情況，進下一題
+    """
+    state = session["state"]
+    exposure_time_ms = state["exposure_time_ms"]
+
+    is_fast = (not is_timeout) and (
+        response_time_ms is not None
+        and response_time_ms <= exposure_time_ms * FAST_RESPONSE_RATIO
+    )
+
+    def extra_promote_check(st, is_fast_flag):
+        current_fast_streak = st.get("fast_correct_streak", 0)
+        return (
+            (current_fast_streak + 1 >= FAST_PROMOTE_STREAK) if is_fast_flag else False
+        )
+
+    if is_correct:
+        updated_fields, dda_action = apply_answer(
+            state,
+            DDA_CONFIG,
+            DDA_STRATEGY,
+            is_correct=True,
+            is_fast=is_fast,
+            extra_promote_check=extra_promote_check,
+        )
+        action = "promoted" if dda_action == "promoted" else "next_question"
+    elif is_timeout:
+        # 超時：這題當作未作答，直接換下一題；不算進答錯次數
+        # （答錯 3 次換題只看真的答錯，跟超時無關），但會算進降階的連錯次數
+        updated_fields, dda_action = apply_answer(
+            state,
+            DDA_CONFIG,
+            DDA_STRATEGY,
+            is_correct=False,
+        )
+        updated_fields["wrong_attempts"] = 0
+        action = "demoted" if dda_action == "demoted" else "next_question"
+    else:
+        wrong_attempts = state["wrong_attempts"] + 1
+        updated_fields, dda_action = apply_answer(
+            state,
+            DDA_CONFIG,
+            DDA_STRATEGY,
+            is_correct=False,
+        )
+        if dda_action == "demoted":
+            # 降階直接換下一題，不給重看
+            action = "demoted"
+            wrong_attempts = 0
+        elif wrong_attempts >= MAX_WRONG_ATTEMPTS:
+            action = "next_question"
+            wrong_attempts = 0
+        else:
+            action = "retry"
+        updated_fields["wrong_attempts"] = wrong_attempts
+
+    return updated_fields, action
+
+
+# 4. 送出單題作答
+@api_view(["POST"])
+def round_answer(request):
+    session_id = request.data.get("session_id")
+    session, error_response = _get_session_or_error(
+        request, session_id, require_in_progress=True
+    )
+    if error_response is not None:
+        return error_response
+
+    current_question = session["current_question"]
+    if current_question is None:
+        return _error_response(
+            "ROUND_NOT_STARTED", "目前沒有進行中的題目，請先呼叫 round/ 取得題目", 400
+        )
+
+    attempt_number = request.data.get("attempt_number")
+    answer_position = request.data.get("answer_position")
+    is_timeout = request.data.get("is_timeout", False)
+    response_time_ms = request.data.get("response_time_ms")
+
+    is_correct = (not is_timeout) and answer_position == current_question[
+        "target_position"
+    ]
+
+    state = session["state"]
+
+    # 用套用 DDA 規則「之前」的 stage/exposure 記錄這次嘗試，因為那才是玩家
+    # 實際作答當下面對的難度。
+    score_earned = calculate_step_score(
+        attempt_number=attempt_number,
+        stage=state["current_stage"],
+        is_correct=is_correct,
+        is_timeout=is_timeout,
+        response_time_ms=response_time_ms,
+        exposure_time_ms=state["exposure_time_ms"],
+    )
+    session_service.save_step(
+        GAME_TYPE,
+        session_id,
+        {
+            "question_number": current_question["question_number"],
+            "attempt_number": attempt_number,
+            "stage": state["current_stage"],
+            "is_correct": is_correct,
+            "is_timeout": is_timeout,
+            "response_time_ms": response_time_ms,
+            "exposure_time_ms": state["exposure_time_ms"],
+        },
+    )
+
+    updated_fields, action = _apply_dda(
+        session, is_correct, is_timeout, response_time_ms
+    )
+    question_number = session["question_number"]
+    current_question_after = current_question
+    # 只有 retry 停在同一題，其餘（含升降階）都進下一題；換題時清掉這一題，
+    # 下一次作答前一定要先呼叫 round/ 拿新題目，避免重複作答已經結束的題目
+    if action != "retry":
+        question_number += 1
+        current_question_after = None
+    session_service.update_session(
+        GAME_TYPE,
+        session_id,
+        question_number=question_number,
+        current_question=current_question_after,
+        state=updated_fields,
+    )
+
+    data = {
+        "is_correct": is_correct,
+        "action": action,
+        "current_stage": updated_fields["current_stage"],
+        "correct_streak": updated_fields["correct_streak"],
+        "fast_correct_streak": updated_fields["fast_correct_streak"],
+        "wrong_attempts": updated_fields["wrong_attempts"],
+        "score_earned": score_earned,
+    }
+    return Response({"success": True, "data": data, "error": None})
+
+
+# 5. 結束遊戲，計算總結果
+@api_view(["POST"])
+def finish(request):
+    session_id = request.data.get("session_id")
+    session, error_response = _get_session_or_error(request, session_id)
+    if error_response is not None:
+        return error_response
+
+    # 冪等性處理：已經結束過的 session 直接回傳既有結果，不重算不覆寫。
+    if session["status"] == "finished":
+        return Response({"success": True, "data": session["result"], "error": None})
+
+    step_records = session["step_records"]
+    # 遊戲專屬欄位（question_number、is_timeout…）存在每筆紀錄的 detail 裡
+    answered_question_numbers = {r["detail"]["question_number"] for r in step_records}
+    correct_count = sum(1 for r in step_records if r["is_correct"])
+    timeout_count = sum(1 for r in step_records if r["detail"]["is_timeout"])
+    response_times = [
+        r["response_time_ms"] for r in step_records if r["response_time_ms"] is not None
+    ]
+    avg_response_time_ms = (
+        round(sum(response_times) / len(response_times)) if response_times else 0
+    )
+    answered_count = len(answered_question_numbers)
+    accuracy = round(correct_count / answered_count, 2) if answered_count else 0.0
+
+    # detail 多存了 question_number（給上面彙總用），market_score.py
+    # 的計分函式不需要這個欄位，計分前先過濾掉。
+    scoring_inputs = [
+        {k: v for k, v in r["detail"].items() if k != "question_number"}
+        for r in step_records
+    ]
+
+    result = {
+        "total_questions": 20,
+        "answered_count": answered_count,
+        "correct_count": correct_count,
+        "timeout_count": timeout_count,
+        "accuracy": accuracy,
+        "avg_response_time_ms": avg_response_time_ms,
+        "final_stage": session["state"]["current_stage"],
+        "total_score": calculate_total_score(scoring_inputs),
+    }
+    session_service.finish_session(GAME_TYPE, session_id, result)
+    return Response({"success": True, "data": result, "error": None})
+
+
+# 6. 查詢單場結果
+@api_view(["GET"])
+def result(request, session_id):
+    session, error_response = _get_session_or_error(request, session_id)
+    if error_response is not None:
+        return error_response
+    if session["status"] != "finished":
+        return Response(
+            {
+                "success": False,
+                "data": None,
+                "error": {
+                    "code": "SESSION_NOT_FINISHED",
+                    "message": "這場遊戲尚未結束",
+                },
+            },
+            status=400,
+        )
+
+    return Response(
+        {"success": True, "data": {"session_result": session["result"]}, "error": None}
+    )

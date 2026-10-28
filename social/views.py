@@ -9,6 +9,13 @@ from .serializers import CommentSerializer, NotificationSerializer
 from .utils import (error_response, get_visible_post,
                     paginate, post_queryset, serialize_post)
 
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+
+from .models import Post, Comment, Notification
+from .serializers import CommentSerializer
+
 
 # 通知列表
 @api_view(['GET'])

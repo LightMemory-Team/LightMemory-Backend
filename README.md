@@ -6,6 +6,7 @@
 - [技術清單](#技術清單)
 - [專案架構](#專案架構)
 - [模組說明](#模組說明)
+- [遊戲後端架構](#遊戲後端架構)
 - [資料庫 ER 圖](#資料庫-er-圖)
 - [環境需求](#環境需求)
 - [快速開始](#快速開始)
@@ -85,6 +86,16 @@ LightMemory/
 | assessments | AD-8 及其他認知評估 |
 | ai_service | OpenAI、Whisper、AI 分析服務 |
 | home | 首頁整合 API |
+
+---
+
+## 遊戲後端架構
+
+`games/` App 底下每款遊戲（目前：market_route 菜市場找路、market_shopping 市場買菜、market_sort 整理菜籃遊戲）都共用同一套 session 儲存介面與 API 回傳格式，玩法可以各自不同。
+
+開發新遊戲、或想了解現有遊戲的架構設計，請參考：
+
+[`GAME_FRAMEWORK.md`](GAME_FRAMEWORK.md)
 
 ---
 

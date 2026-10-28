@@ -12,6 +12,10 @@ venv/
 # Database
 db.sqlite3
 
+# 各遊戲共用的 JSON session 儲存，是執行期產生的資料，
+# 之後會換成正式資料庫（見 Issue #37）
+games/data/sessions/
+
 # Environment
 .env
 

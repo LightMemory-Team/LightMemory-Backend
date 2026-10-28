@@ -9,4 +9,6 @@ python-decouple==3.8
 sqlparse==0.5.5
 tzdata==2026.3
 opencc-python-reimplemented==0.1.7
-openai-whisper
+firebase-admin==7.7.0
+openai==3.24.0
+openai-whisper==20250625

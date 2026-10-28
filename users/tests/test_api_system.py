@@ -19,6 +19,8 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.settings import api_settings
 
+from games.catalog import GAMES
+
 User = get_user_model()
 
 REGISTER_URL = '/api/users/register/'
@@ -156,13 +158,15 @@ class LoginEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_token_lifetimes_match_documented_values(self):
-        """Notion 記載 access 短效期（5 分鐘）、refresh 長效期（1 天）。
+        """access 1 天、refresh 30 天（config/settings.py 的 SIMPLE_JWT）。
 
-        專案未設定 SIMPLE_JWT，目前沿用 simplejwt 預設值。
-        日後若在 settings 覆寫效期，這個測試會提醒文件需同步更新。
+        原本沿用 simplejwt 預設值（access 5 分鐘），長者玩到一半 token 就過期。
+        測試期間先拉長；日後若再調整效期，這個測試會提醒 Notion 文件需同步更新。
         """
-        self.assertEqual(api_settings.ACCESS_TOKEN_LIFETIME.total_seconds(), 5 * 60)
-        self.assertEqual(api_settings.REFRESH_TOKEN_LIFETIME.total_seconds(), 24 * 60 * 60)
+        self.assertEqual(api_settings.ACCESS_TOKEN_LIFETIME.total_seconds(), 24 * 60 * 60)
+        self.assertEqual(
+            api_settings.REFRESH_TOKEN_LIFETIME.total_seconds(), 30 * 24 * 60 * 60
+        )
 
 
 class TokenRefreshEndpointTests(APITestCase):
@@ -301,8 +305,8 @@ class HomeEndpointSystemTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['user_name'], '王')
 
-    def test_games_list_returns_empty_list_when_no_games(self):
+    def test_games_list_returns_catalog_games(self):
         response = self.client.get('/api/home/games/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {'games': []})
+        self.assertEqual(response.data, {'games': GAMES})
