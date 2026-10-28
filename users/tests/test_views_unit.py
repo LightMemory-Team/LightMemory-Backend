@@ -15,7 +15,7 @@ from unittest import expectedFailure
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework import status
-from rest_framework.test import APIRequestFactory, force_authenticate
+from rest_framework.test import APIRequestFactory
 
 from home import views as home_views
 from users.serializers import RegisterSerializer
@@ -297,11 +297,9 @@ class RegisterViewTests(TestCase):
 
 
 class HomeViewUnitTests(TestCase):
-    """home 系列 view 的單元測試。
+    """home 系列 view 的單元測試（ping／greet／daily_suggetion 開放匿名）。
 
-    這些 view 目前是 AllowAny，且 get_user 取資料庫第一筆而非登入者
-    （見 home/views.py 註解）。此處測的是「現況」，等 README 規劃的
-    JWT 驗證導入後，這些測試會失敗並提醒你更新預期行為。
+    user／games 需要登入，行為見 home/tests/ 底下的測試。
     """
 
     def setUp(self):
@@ -312,22 +310,6 @@ class HomeViewUnitTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, {'message': 'index api is connected'})
-
-    def test_get_user_returns_404_when_no_user_exists(self):
-        response = home_views.get_user(self.factory.get('/'))
-
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertIn('user_name_error', response.data)
-
-    def test_get_user_returns_last_name(self):
-        User.objects.create_user(
-            username='wang_yulan', password='Str0ng!Pass2026', last_name='王'
-        )
-
-        response = home_views.get_user(self.factory.get('/'))
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {'user_name': '王'})
 
     def test_greet_returns_a_tip_from_the_fixed_list(self):
         response = home_views.greet(self.factory.get('/'))
@@ -355,17 +337,3 @@ class HomeViewUnitTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('text', response.data['daily_suggestion'])
         self.assertIn('action_route', response.data['daily_suggestion'])
-
-    def test_force_authenticate_does_not_break_allowany_view(self):
-        """示範 force_authenticate 用法：待 home API 套上 JWT 後，
-        這是免打 login 就能測受保護 view 的方式。
-        """
-        user = User.objects.create_user(
-            username='wang_yulan', password='Str0ng!Pass2026', last_name='王'
-        )
-        request = self.factory.get('/')
-        force_authenticate(request, user=user)
-
-        response = home_views.get_user(request)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)

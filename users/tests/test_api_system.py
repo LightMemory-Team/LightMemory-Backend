@@ -298,10 +298,8 @@ class RegistrationToAuthenticatedRequestFlowTests(APITestCase):
 class HomeEndpointSystemTests(APITestCase):
     """home 系列端點的端到端行為。
 
-    這些端點目前是 AllowAny（README 規劃中要改為 IsAuthenticated），
-    所以此處驗證的是現況：未登入也能存取。改用 JWT 驗證後，
-    test_home_endpoints_currently_allow_anonymous 會失敗，
-    正好作為提醒。
+    ping／greet／daily_suggetion 仍開放未登入；
+    user／games 需要登入（要知道「是誰」才能回暱稱與本週遊玩狀況）。
     """
 
     def test_ping_is_reachable(self):
@@ -310,34 +308,47 @@ class HomeEndpointSystemTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['message'], 'index api is connected')
 
-    def test_home_endpoints_currently_allow_anonymous(self):
+    def test_public_home_endpoints_allow_anonymous(self):
         for url in [
             '/api/home/ping/',
             '/api/home/greet/',
             '/api/home/daily_suggetion/',
-            '/api/home/games/',
         ]:
             with self.subTest(url=url):
                 response = self.client.get(url)
                 self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_get_user_returns_404_before_any_user_registers(self):
-        response = self.client.get('/api/home/user/')
+    def test_user_and_games_require_login(self):
+        for url in ['/api/home/user/', '/api/home/games/']:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+                self.assertEqual(
+                    response.data['error']['code'], 'NOT_AUTHENTICATED'
+                )
 
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-
-    def test_get_user_returns_last_name_after_registration(self):
+    def test_get_user_returns_nickname_after_registration_and_login(self):
         self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
-        # 註冊已不再收姓氏；home/user 改用暱稱前（第 6 步），先直接補上姓氏維持現況測試
-        User.objects.filter(username='wang_yulan').update(last_name='王')
+        login = self.client.post(
+            LOGIN_URL,
+            {'username': 'wang_yulan', 'password': 'Str0ng!Pass2026'},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {login.data["access"]}')
 
         response = self.client.get('/api/home/user/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['user_name'], '王')
+        self.assertEqual(response.data['user_name'], '玉蘭')
 
-    def test_games_list_returns_catalog_games(self):
+    def test_games_list_returns_catalog_games_with_played_flag(self):
+        user = User.objects.create_user(username='u', password='Str0ng!Pass2026')
+        self.client.force_authenticate(user=user)
+
         response = self.client.get('/api/home/games/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {'games': GAMES})
+        self.assertEqual(
+            response.data['games'],
+            [{**game, 'played_this_week': False} for game in GAMES],
+        )

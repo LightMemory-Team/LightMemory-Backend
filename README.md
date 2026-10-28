@@ -379,9 +379,9 @@ FIREBASE_STORAGE_BUCKET=lightmemory-sqlf.firebasestorage.app
 
 ## 後續開發規劃
 
-- 首頁 API 剩餘欄位：`unread_notification_count`、`wall_posts[]`
+- 首頁 API 剩餘欄位：`unread_notification_count`（`wall_posts[]` 已於首頁改版刪除）
 - 首頁 4 支獨立 API 整合為一支 `GET /api/home`
-- home 系列 API 套用 JWT 驗證（`IsAuthenticated` + `request.user`，目前仍是 `AllowAny`）
+- home 系列 API 套用 JWT 驗證（`user`、`games` 已完成；`greet`、`daily_suggetion` 仍是 `AllowAny`）
 - 聲影日記 API
 - Firebase Storage 與聲影日記 API 正式串接
 - AI 分析服務
