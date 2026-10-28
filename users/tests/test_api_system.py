@@ -72,7 +72,7 @@ class RegisterEndpointTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('password', response.data)
+        self.assertIn('password', response.data['error']['fields'])
 
     def test_register_with_duplicate_username_returns_400(self):
         self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
@@ -80,7 +80,7 @@ class RegisterEndpointTests(APITestCase):
         response = self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('username', response.data)
+        self.assertIn('username', response.data['error']['fields'])
         self.assertEqual(User.objects.filter(username='wang_yulan').count(), 1)
 
     def test_register_with_invalid_region_returns_400(self):
@@ -89,7 +89,7 @@ class RegisterEndpointTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('region', response.data)
+        self.assertIn('region', response.data['error']['fields'])
 
     def test_register_requires_no_authentication(self):
         """未帶任何憑證也能註冊"""
