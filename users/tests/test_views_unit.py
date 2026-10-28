@@ -208,7 +208,7 @@ class RegisterViewTests(TestCase):
         response = self.view(request)
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('password', response.data)
+        self.assertIn('password', response.data['error']['fields'])
         self.assertFalse(User.objects.filter(username='wang_yulan').exists())
 
     def test_register_allows_anonymous_access(self):
