@@ -1,4 +1,4 @@
-"""建立 demo 帳號的展示資料：五款遊戲各 9 場、聲影日記 12 篇。
+"""建立 demo 帳號的展示資料：五款遊戲各 30 場、聲影日記 30 篇（分散在近三個月）。
 
     python manage.py seed_demo
     python manage.py seed_demo --username demo --password demo1234
@@ -6,7 +6,10 @@
 分三批，每批每款遊戲 3 場、日記 3 篇，讓儀表板和週報都有東西看：
 - 前週：週報「跟上週比」的比較基準（2 天有活動）
 - 上週：週報的報告週，分數比前週高（3 天有活動 →「比上週多 1 天」）
-- 這週：現在往前 1～3 小時，儀表板雷達圖（近 7 天）用
+- 這週：現在往前 1～3 小時
+另外補 4～11 週前的「更早歷史」（每款遊戲 21 場、日記 18 篇，每週 2～3 筆，
+分數緩慢上升），讓儀表板雷達圖（近三個月 = 90 天）有滿滿一季的資料可平均；
+最早一筆距今不超過 90 天。週報只看上週和前週，不受歷史影響。
 日記有照片（Firebase Storage 的公開網址，見 SEED_IMAGE_BASE），週報的日記才有圖。
 日記另外多一批「暖身」（3 週前 3 篇）：語言 z 跟更早的日記比，前週的日記
 才有 3 篇歷史可比。
@@ -36,6 +39,16 @@ SEED_PREFIX = "seed"
 
 # 每批的 z 基準：前週低一點、上週進步，週報的趨勢才會顯示「進步」
 BATCH_Z = {"warmup": -0.3, "previous": -0.3, "report": 0.3, "recent": 0.5}
+# 更早的歷史：4～11 週前，每週的筆數（加起來遊戲 21 場、日記 18 篇）。
+# 11 週前的週一最遠距今 83 天，才不會超出儀表板的 90 天範圍
+HISTORY_WEEKS = range(4, 12)
+HISTORY_GAMES_PER_WEEK = [3, 3, 3, 3, 3, 2, 2, 2]
+HISTORY_DIARIES_PER_WEEK = [3, 2, 2, 2, 2, 2, 2, 3]
+# 每週 3 筆排週一、三、五，2 筆排週二、四（0 = 週一）
+HISTORY_WEEKDAYS = {2: (1, 3), 3: (0, 2, 4)}
+# 歷史的 z 基準：11 週前 -0.35，每近一週加 0.01，慢慢上升接到前週的 -0.3
+HISTORY_Z_START = -0.35
+HISTORY_Z_STEP = 0.01
 # 同一批 3 筆在基準上下變化一點，看起來比較像真的
 Z_SPREAD = [-0.1, 0.1, 0.0]
 # 日記的語言 z 是跟更早的日記比：同一批差太少的話標準差太小，z 都會卡在 ±2
@@ -115,6 +128,27 @@ def batch_times(now):
         "report": [_at(report + timedelta(days=d), 10) for d in (0, 2, 4)],
         "recent": [now - timedelta(hours=h) for h in (3, 2, 1)],
     }
+
+
+def history_times(now, per_week):
+    """4～11 週前每週幾筆的時間點（台灣時間），key 是 "w4"～"w11"。"""
+    today = timezone.localdate(now)
+    this_monday = today - timedelta(days=today.weekday())
+    times = {}
+    for weeks_ago, count in zip(HISTORY_WEEKS, per_week, strict=True):
+        monday = this_monday - timedelta(days=7 * weeks_ago)
+        times[f"w{weeks_ago}"] = [
+            _at(monday + timedelta(days=day), 10) for day in HISTORY_WEEKDAYS[count]
+        ]
+    return times
+
+
+def batch_z(batch):
+    """這批的 z 基準；歷史批次（w4～w11）離現在越遠越低。"""
+    if batch in BATCH_Z:
+        return BATCH_Z[batch]
+    weeks_ago = int(batch.removeprefix("w"))
+    return HISTORY_Z_START + HISTORY_Z_STEP * (HISTORY_WEEKS.stop - 1 - weeks_ago)
 
 
 def warmup_times(now):
@@ -275,7 +309,7 @@ def create_game_sessions(user, games, times):
     for game_index, code in enumerate(GAME_SOURCES):
         for batch, slots in times.items():
             for i, slot in enumerate(slots):
-                z = BATCH_Z[batch] + Z_SPREAD[i]
+                z = batch_z(batch) + Z_SPREAD[i]
                 # 同一個時段五款遊戲錯開 10 分鐘，每場玩 4 分鐘
                 finished_at = slot + timedelta(minutes=10 * game_index)
                 session = GameSession.objects.create(
@@ -326,7 +360,7 @@ def create_diaries(user, times):
                     created_at=created_at + timedelta(minutes=2 * round_index)
                 )
 
-            create_diary_analysis(diary, BATCH_Z[batch] + DIARY_SPREAD[i])
+            create_diary_analysis(diary, batch_z(batch) + DIARY_SPREAD[i])
 
 
 def create_diary_analysis(diary, z):
@@ -361,7 +395,7 @@ def create_diary_analysis(diary, z):
 
 
 class Command(BaseCommand):
-    help = "建立 demo 帳號的展示資料（五款遊戲各 9 場、聲影日記 12 篇）"
+    help = "建立 demo 帳號的展示資料（五款遊戲各 30 場、聲影日記 30 篇，近三個月）"
 
     def add_arguments(self, parser):
         parser.add_argument("--username", default="demo")
@@ -378,13 +412,22 @@ class Command(BaseCommand):
         clear_seed_data(user)
         now = timezone.now()
         times = batch_times(now)
-        create_game_sessions(user, games, times)
-        create_diaries(user, {"warmup": warmup_times(now), **times})
+        create_game_sessions(
+            user, games, {**history_times(now, HISTORY_GAMES_PER_WEEK), **times}
+        )
+        create_diaries(
+            user,
+            {
+                **history_times(now, HISTORY_DIARIES_PER_WEEK),
+                "warmup": warmup_times(now),
+                **times,
+            },
+        )
 
         account = "新建立" if created else "已存在"
         self.stdout.write(
             self.style.SUCCESS(
                 f"完成！帳號 {user.username}（{account}）："
-                f"五款遊戲各 9 場、聲影日記 12 篇"
+                f"五款遊戲各 30 場、聲影日記 30 篇"
             )
         )
