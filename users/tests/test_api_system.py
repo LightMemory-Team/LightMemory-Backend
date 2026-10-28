@@ -30,13 +30,12 @@ REFRESH_URL = '/api/users/login/refresh/'
 VALID_PAYLOAD = {
     'username': 'wang_yulan',
     'password': 'Str0ng!Pass2026',
-    'first_name': '玉蘭',
-    'last_name': '王',
+    'nickname': '玉蘭',
     'gender': 'female',
     'birth_date': '1950-01-01',
-    'phone': '0912345678',
-    'address': '台北市中正區測試路1號',
     'region': 'north',
+    'emergency_contact_name': '王小明',
+    'emergency_contact_phone': '0987654321',
 }
 
 
@@ -48,7 +47,7 @@ class RegisterEndpointTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['username'], 'wang_yulan')
-        self.assertEqual(response.data['last_name'], '王')
+        self.assertEqual(response.data['nickname'], '玉蘭')
         self.assertEqual(response.data['region'], 'north')
 
     def test_register_response_never_contains_password(self):
@@ -60,9 +59,10 @@ class RegisterEndpointTests(APITestCase):
         self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
 
         user = User.objects.get(username='wang_yulan')
-        self.assertEqual(user.first_name, '玉蘭')
-        self.assertEqual(user.phone, '0912345678')
-        self.assertEqual(user.address, '台北市中正區測試路1號')
+        self.assertEqual(user.nickname, '玉蘭')
+        self.assertEqual(user.emergency_contact_name, '王小明')
+        self.assertEqual(user.emergency_contact_phone, '0987654321')
+        self.assertEqual(user.region, 'north')
         self.assertEqual(user.gender, 'female')
         self.assertTrue(user.check_password('Str0ng!Pass2026'))
 
@@ -72,7 +72,7 @@ class RegisterEndpointTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('password', response.data)
+        self.assertIn('password', response.data['error']['fields'])
 
     def test_register_with_duplicate_username_returns_400(self):
         self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
@@ -80,8 +80,37 @@ class RegisterEndpointTests(APITestCase):
         response = self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('username', response.data)
+        self.assertEqual(response.data['error']['code'], 'USERNAME_TAKEN')
+        self.assertIn('username', response.data['error']['fields'])
         self.assertEqual(User.objects.filter(username='wang_yulan').count(), 1)
+
+    def test_register_without_region_and_emergency_contact_succeeds(self):
+        payload = {
+            key: VALID_PAYLOAD[key]
+            for key in ['username', 'password', 'nickname', 'gender', 'birth_date']
+        }
+
+        response = self.client.post(REGISTER_URL, payload, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data['region'])
+
+    def test_register_without_nickname_returns_400(self):
+        payload = {k: v for k, v in VALID_PAYLOAD.items() if k != 'nickname'}
+
+        response = self.client.post(REGISTER_URL, payload, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error']['code'], 'VALIDATION_ERROR')
+        self.assertIn('nickname', response.data['error']['fields'])
+        self.assertFalse(User.objects.filter(username='wang_yulan').exists())
+
+    def test_register_error_uses_unified_envelope(self):
+        response = self.client.post(REGISTER_URL, {}, format='json')
+
+        self.assertIs(response.data['success'], False)
+        self.assertIsNone(response.data['data'])
+        self.assertIn('message', response.data['error'])
 
     def test_register_with_invalid_region_returns_400(self):
         response = self.client.post(
@@ -89,7 +118,7 @@ class RegisterEndpointTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('region', response.data)
+        self.assertIn('region', response.data['error']['fields'])
 
     def test_register_requires_no_authentication(self):
         """未帶任何憑證也能註冊"""
@@ -269,10 +298,8 @@ class RegistrationToAuthenticatedRequestFlowTests(APITestCase):
 class HomeEndpointSystemTests(APITestCase):
     """home 系列端點的端到端行為。
 
-    這些端點目前是 AllowAny（README 規劃中要改為 IsAuthenticated），
-    所以此處驗證的是現況：未登入也能存取。改用 JWT 驗證後，
-    test_home_endpoints_currently_allow_anonymous 會失敗，
-    正好作為提醒。
+    ping／greet／daily_suggetion 仍開放未登入；
+    user／games 需要登入（要知道「是誰」才能回暱稱與本週遊玩狀況）。
     """
 
     def test_ping_is_reachable(self):
@@ -281,32 +308,47 @@ class HomeEndpointSystemTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['message'], 'index api is connected')
 
-    def test_home_endpoints_currently_allow_anonymous(self):
+    def test_public_home_endpoints_allow_anonymous(self):
         for url in [
             '/api/home/ping/',
             '/api/home/greet/',
             '/api/home/daily_suggetion/',
-            '/api/home/games/',
         ]:
             with self.subTest(url=url):
                 response = self.client.get(url)
                 self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_get_user_returns_404_before_any_user_registers(self):
-        response = self.client.get('/api/home/user/')
+    def test_user_and_games_require_login(self):
+        for url in ['/api/home/user/', '/api/home/games/']:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+                self.assertEqual(
+                    response.data['error']['code'], 'NOT_AUTHENTICATED'
+                )
 
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-
-    def test_get_user_returns_last_name_after_registration(self):
+    def test_get_user_returns_nickname_after_registration_and_login(self):
         self.client.post(REGISTER_URL, VALID_PAYLOAD, format='json')
+        login = self.client.post(
+            LOGIN_URL,
+            {'username': 'wang_yulan', 'password': 'Str0ng!Pass2026'},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {login.data["access"]}')
 
         response = self.client.get('/api/home/user/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['user_name'], '王')
+        self.assertEqual(response.data['user_name'], '玉蘭')
 
-    def test_games_list_returns_catalog_games(self):
+    def test_games_list_returns_catalog_games_with_played_flag(self):
+        user = User.objects.create_user(username='u', password='Str0ng!Pass2026')
+        self.client.force_authenticate(user=user)
+
         response = self.client.get('/api/home/games/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {'games': GAMES})
+        self.assertEqual(
+            response.data['games'],
+            [{**game, 'played_this_week': False} for game in GAMES],
+        )

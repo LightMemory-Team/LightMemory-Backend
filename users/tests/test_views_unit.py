@@ -15,7 +15,7 @@ from unittest import expectedFailure
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework import status
-from rest_framework.test import APIRequestFactory, force_authenticate
+from rest_framework.test import APIRequestFactory
 
 from home import views as home_views
 from users.serializers import RegisterSerializer
@@ -27,13 +27,12 @@ User = get_user_model()
 VALID_PAYLOAD = {
     'username': 'wang_yulan',
     'password': 'Str0ng!Pass2026',
-    'first_name': '玉蘭',
-    'last_name': '王',
+    'nickname': '玉蘭',
     'gender': 'female',
     'birth_date': '1950-01-01',
-    'phone': '0912345678',
-    'address': '台北市中正區測試路1號',
     'region': 'north',
+    'emergency_contact_name': '王小明',
+    'emergency_contact_phone': '0987654321',
 }
 
 
@@ -46,13 +45,12 @@ class RegisterSerializerTests(TestCase):
         user = serializer.save()
 
         self.assertEqual(user.username, 'wang_yulan')
-        self.assertEqual(user.first_name, '玉蘭')
-        self.assertEqual(user.last_name, '王')
+        self.assertEqual(user.nickname, '玉蘭')
         self.assertEqual(user.gender, 'female')
         self.assertEqual(user.birth_date, date(1950, 1, 1))
-        self.assertEqual(user.phone, '0912345678')
-        self.assertEqual(user.address, '台北市中正區測試路1號')
         self.assertEqual(user.region, 'north')
+        self.assertEqual(user.emergency_contact_name, '王小明')
+        self.assertEqual(user.emergency_contact_phone, '0987654321')
 
     def test_password_is_hashed_not_stored_as_plaintext(self):
         """create_user 必須雜湊密碼，資料庫不能存明碼"""
@@ -107,22 +105,91 @@ class RegisterSerializerTests(TestCase):
         self.assertIn('username', serializer.errors)
         self.assertIn('password', serializer.errors)
 
-    def test_optional_profile_fields_may_be_omitted(self):
-        """目前 model 上這些欄位是 blank=True，故 serializer 視為選填。
+    def test_required_fields_are_enforced(self):
+        """必填：帳號、密碼、暱稱、生日、性別"""
+        serializer = RegisterSerializer(data={})
 
-        若日後前端註冊表單要求全部必填，這個測試會提醒行為已改變。
-        """
+        self.assertFalse(serializer.is_valid())
+        for field in ['username', 'password', 'nickname', 'birth_date', 'gender']:
+            self.assertIn(field, serializer.errors)
+
+    def test_region_and_emergency_contact_may_be_omitted(self):
+        """選填：region、緊急聯絡人（註冊畫面按「略過」就不送）"""
+        payload = {
+            key: VALID_PAYLOAD[key]
+            for key in ['username', 'password', 'nickname', 'gender', 'birth_date']
+        }
+        serializer = RegisterSerializer(data=payload)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        user = serializer.save()
+
+        self.assertIsNone(user.region)
+        self.assertIsNone(user.emergency_contact_name)
+        self.assertIsNone(user.emergency_contact_phone)
+
+    def test_blank_optional_fields_are_stored_as_null(self):
         serializer = RegisterSerializer(
-            data={'username': 'minimal_user', 'password': 'Str0ng!Pass2026'}
+            data={
+                **VALID_PAYLOAD,
+                'region': '',
+                'emergency_contact_name': '',
+                'emergency_contact_phone': '',
+            }
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        user = serializer.save()
+
+        self.assertIsNone(user.region)
+        self.assertIsNone(user.emergency_contact_name)
+        self.assertIsNone(user.emergency_contact_phone)
+
+    def test_nickname_cannot_be_blank(self):
+        for value in ['', '   ']:
+            with self.subTest(value=value):
+                serializer = RegisterSerializer(data={**VALID_PAYLOAD, 'nickname': value})
+
+                self.assertFalse(serializer.is_valid())
+                self.assertIn('nickname', serializer.errors)
+
+    def test_nickname_max_length_is_20(self):
+        ok = RegisterSerializer(data={**VALID_PAYLOAD, 'nickname': '哈' * 20})
+        too_long = RegisterSerializer(data={**VALID_PAYLOAD, 'nickname': '哈' * 21})
+
+        self.assertTrue(ok.is_valid(), ok.errors)
+        self.assertFalse(too_long.is_valid())
+        self.assertIn('nickname', too_long.errors)
+
+    def test_removed_fields_are_ignored(self):
+        """姓、名、電話、地址已從註冊移除，傳了也不會存進去"""
+        serializer = RegisterSerializer(
+            data={
+                **VALID_PAYLOAD,
+                'first_name': '蘭',
+                'last_name': '王',
+                'phone': '0912345678',
+                'address': '台北市',
+            }
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
         user = serializer.save()
 
         self.assertEqual(user.first_name, '')
         self.assertEqual(user.last_name, '')
-        self.assertEqual(user.gender, '')
-        self.assertEqual(user.region, '')
-        self.assertIsNone(user.birth_date)
+        self.assertEqual(user.phone, '')
+        self.assertEqual(user.address, '')
+
+    def test_username_can_be_email(self):
+        serializer = RegisterSerializer(
+            data={**VALID_PAYLOAD, 'username': 'yulan.wang@example.com'}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_future_birth_date_rejected(self):
+        serializer = RegisterSerializer(data={**VALID_PAYLOAD, 'birth_date': '2999-01-01'})
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('birth_date', serializer.errors)
 
     def test_duplicate_username_rejected(self):
         User.objects.create_user(username='wang_yulan', password='Str0ng!Pass2026')
@@ -131,6 +198,7 @@ class RegisterSerializerTests(TestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn('username', serializer.errors)
+        self.assertEqual(serializer.errors['username'][0].code, 'username_taken')
 
     def test_invalid_gender_choice_rejected(self):
         serializer = RegisterSerializer(data={**VALID_PAYLOAD, 'gender': 'unknown'})
@@ -208,7 +276,7 @@ class RegisterViewTests(TestCase):
         response = self.view(request)
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('password', response.data)
+        self.assertIn('password', response.data['error']['fields'])
         self.assertFalse(User.objects.filter(username='wang_yulan').exists())
 
     def test_register_allows_anonymous_access(self):
@@ -229,11 +297,9 @@ class RegisterViewTests(TestCase):
 
 
 class HomeViewUnitTests(TestCase):
-    """home 系列 view 的單元測試。
+    """home 系列 view 的單元測試（ping／greet／daily_suggetion 開放匿名）。
 
-    這些 view 目前是 AllowAny，且 get_user 取資料庫第一筆而非登入者
-    （見 home/views.py 註解）。此處測的是「現況」，等 README 規劃的
-    JWT 驗證導入後，這些測試會失敗並提醒你更新預期行為。
+    user／games 需要登入，行為見 home/tests/ 底下的測試。
     """
 
     def setUp(self):
@@ -244,22 +310,6 @@ class HomeViewUnitTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, {'message': 'index api is connected'})
-
-    def test_get_user_returns_404_when_no_user_exists(self):
-        response = home_views.get_user(self.factory.get('/'))
-
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertIn('user_name_error', response.data)
-
-    def test_get_user_returns_last_name(self):
-        User.objects.create_user(
-            username='wang_yulan', password='Str0ng!Pass2026', last_name='王'
-        )
-
-        response = home_views.get_user(self.factory.get('/'))
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {'user_name': '王'})
 
     def test_greet_returns_a_tip_from_the_fixed_list(self):
         response = home_views.greet(self.factory.get('/'))
@@ -287,17 +337,3 @@ class HomeViewUnitTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('text', response.data['daily_suggestion'])
         self.assertIn('action_route', response.data['daily_suggestion'])
-
-    def test_force_authenticate_does_not_break_allowany_view(self):
-        """示範 force_authenticate 用法：待 home API 套上 JWT 後，
-        這是免打 login 就能測受保護 view 的方式。
-        """
-        user = User.objects.create_user(
-            username='wang_yulan', password='Str0ng!Pass2026', last_name='王'
-        )
-        request = self.factory.get('/')
-        force_authenticate(request, user=user)
-
-        response = home_views.get_user(request)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)

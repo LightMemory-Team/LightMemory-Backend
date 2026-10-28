@@ -60,9 +60,7 @@ class MarketShoppingTestCase(APITestCase):
         payload = {"selected_amount": amount}
         if reaction_time_ms is not None:
             payload["reaction_time_ms"] = reaction_time_ms
-        return self.client.post(
-            change_answer_url(session_id), payload, format="json"
-        )
+        return self.client.post(change_answer_url(session_id), payload, format="json")
 
     def _correct_change(self, session_id):
         """找零的正解只留在後端，測試直接讀 state。"""
@@ -92,6 +90,14 @@ class CreateSessionApiTests(MarketShoppingTestCase):
         self.assertEqual(data["total_questions"], TOTAL_QUESTIONS)
         self.assertTrue(data["shopping_list"])
 
+    def test_first_session_is_familiarization(self):
+        data = self.client.post(SESSIONS_URL).data["data"]
+
+        self.assertTrue(data["is_pretest"])
+        self.assertTrue(
+            session_service.get_session(GAME_TYPE, data["session_id"])["is_pretest"]
+        )
+
 
 class ItemAnswerApiTests(MarketShoppingTestCase):
     """POST /api/games/market-shopping/sessions/<session_id>/item-answers/"""
@@ -112,7 +118,9 @@ class ItemAnswerApiTests(MarketShoppingTestCase):
         session_obj = session_service.get_session(GAME_TYPE, question["session_id"])
         self.assertEqual(len(session_obj["step_records"]), 1)
         self.assertTrue(session_obj["step_records"][0]["is_correct"])
-        self.assertEqual(session_obj["step_records"][0]["detail"]["step_type"], "select_items")
+        self.assertEqual(
+            session_obj["step_records"][0]["detail"]["step_type"], "select_items"
+        )
 
     def test_wrong_items_return_retry(self):
         question = self._create()
@@ -145,6 +153,62 @@ class ChangeAnswerApiTests(MarketShoppingTestCase):
         self.assertEqual(data["next_question"]["current_question"], 2)
 
 
+class ReactionTimeValidationTests(MarketShoppingTestCase):
+    """reaction_time_ms 可以不送；有送就必須是 >= 0 的整數（同冰箱檢查）。"""
+
+    def _assert_invalid(self, response, session_id):
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(response.data["success"])
+        self.assertEqual(response.data["error"]["code"], "INVALID_REACTION_TIME")
+        # 格式錯誤不算一次作答：不存明細、不扣作答機會
+        session = session_service.get_session(GAME_TYPE, session_id)
+        self.assertEqual(session["step_records"], [])
+        self.assertEqual(session["state"]["current_wrong_count"], 0)
+
+    def test_item_answer_rejects_string(self):
+        question = self._create()
+
+        response = self._answer_items(question["session_id"], [], "2350")
+
+        self._assert_invalid(response, question["session_id"])
+
+    def test_item_answer_rejects_float(self):
+        question = self._create()
+
+        response = self._answer_items(question["session_id"], [], 2350.5)
+
+        self._assert_invalid(response, question["session_id"])
+
+    def test_item_answer_rejects_bool(self):
+        question = self._create()
+
+        response = self._answer_items(question["session_id"], [], True)
+
+        self._assert_invalid(response, question["session_id"])
+
+    def test_change_answer_rejects_negative(self):
+        question = self._create()
+
+        response = self._answer_change(question["session_id"], 100, -1)
+
+        self._assert_invalid(response, question["session_id"])
+
+    def test_zero_is_allowed(self):
+        question = self._create()
+
+        response = self._answer_items(question["session_id"], [], 0)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_missing_reaction_time_still_allowed(self):
+        # 沒送反應時間照常作答，只是不算速度分
+        question = self._create()
+
+        response = self._answer_items(question["session_id"], [])
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
 class FullGameFlowTests(MarketShoppingTestCase):
     """完整玩完一場：每題都答對，最後完成並出現在 history。"""
 
@@ -175,7 +239,9 @@ class FullGameFlowTests(MarketShoppingTestCase):
         for _ in range(TOTAL_QUESTIONS):
             codes = [item["food_code"] for item in question["shopping_list"]]
             self._answer_items(session_id, codes, reaction_time_ms=2500)
-            change_res = self._answer_change(session_id, self._correct_change(session_id), reaction_time_ms=3000)
+            change_res = self._answer_change(
+                session_id, self._correct_change(session_id), reaction_time_ms=3000
+            )
             data = change_res.data["data"]
             if data["is_completed"]:
                 break
@@ -186,7 +252,8 @@ class FullGameFlowTests(MarketShoppingTestCase):
         self.assertEqual(data["accuracy"], 100.0)
         self.assertEqual(data["speed_score"], 100.0)
         self.assertEqual(data["raw_score"], 100.0)
-        self.assertEqual(data["standard_score"], 90)
+        # 系統裡第一場，沒有歷史可比 → 資料不足，standard_score 為 null
+        self.assertIsNone(data["standard_score"])
         self.assertEqual(data["average_reaction_time_ms"], 2750)
 
         response = self.client.get(HISTORY_URL)
@@ -194,7 +261,7 @@ class FullGameFlowTests(MarketShoppingTestCase):
         self.assertEqual(history_item["score"], 100.0)
         self.assertEqual(history_item["raw_score"], 100.0)
         self.assertEqual(history_item["first_try_correct_count"], 10)
-        self.assertEqual(history_item["standard_score"], 90)
+        self.assertIsNone(history_item["standard_score"])
         self.assertEqual(history_item["speed_score"], 100.0)
         self.assertEqual(history_item["average_reaction_time_ms"], 2750)
         self.assertEqual(history_item["reaction_time"], 2.75)

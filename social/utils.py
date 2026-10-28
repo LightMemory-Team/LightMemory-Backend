@@ -8,8 +8,9 @@ from .models import Post
 
 
 def get_display_name(user):
+    # 優先用暱稱；舊帳號沒有暱稱時退回姓名，再退回帳號
     full = f"{user.last_name}{user.first_name}".strip()
-    return full or user.username
+    return user.nickname or full or user.username
 
 
 def author_dict(user):
