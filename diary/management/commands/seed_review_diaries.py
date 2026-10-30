@@ -29,14 +29,21 @@ class Command(BaseCommand):
         password = options["password"]
 
         user, created = User.objects.get_or_create(username=username)
-        user.set_password(password)
-        user.first_name = "奶奶"
-        user.last_name = "林"
-        user.avatar_url = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200"
-        user.save()
+        if created:
+            user.set_password(password)
+            user.first_name = "奶奶"
+            user.last_name = "林"
+            user.avatar_url = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200"
+            user.save()
+            self.stdout.write(self.style.SUCCESS(f"[OK] 建立測試帳號: {username} (密碼: {password})"))
+        else:
+            self.stdout.write(self.style.SUCCESS(f"[OK] 找到現有帳號: {username}"))
 
-        action = "建立" if created else "更新"
-        self.stdout.write(self.style.SUCCESS(f"[OK] {action}測試帳號: {username} (密碼: {password})"))
+        display_name = (
+            f"{user.last_name}{user.first_name}".strip()
+            if (user.last_name or user.first_name)
+            else user.username
+        )
 
         # 清除舊的測試日記（避免重複塞資料）
         old_diaries = Diary.objects.filter(
@@ -55,12 +62,12 @@ class Command(BaseCommand):
         except ValueError:
             last_year_date = today.replace(year=today.year - 1, day=28)
 
-        now = timezone.now()
-        yesterday_dt = now - timedelta(days=1)
+        local_now = timezone.localtime(timezone.now())
+        yesterday_dt = local_now - timedelta(days=1)
         try:
-            last_year_dt = now.replace(year=today.year - 1)
+            last_year_dt = local_now.replace(year=today.year - 1)
         except ValueError:
-            last_year_dt = now.replace(year=today.year - 1, day=28)
+            last_year_dt = local_now.replace(year=today.year - 1, day=28)
 
         # 1. 昨天的日記（未分享，方便前端測試 S-1 分享到動態牆）
         diary_yesterday = Diary.objects.create(
@@ -73,7 +80,7 @@ class Command(BaseCommand):
             pending_question="",
             hashtags=["#大安森林公園", "#散步", "#好心情"],
             category="daily",
-            invite_text="林奶奶昨天去大安森林公園散步，點進來看看她說了什麼吧！",
+            invite_text=f"{display_name}昨天去大安森林公園散步，點進來看看說了什麼吧！",
             suggested_replies=["散步真棒！", "今天天氣也很好呢！", "下次也帶我去～"],
             ai_response="多出門曬曬太陽散步對身心都很好，看花讓人心情開朗呢！",
         )
@@ -95,6 +102,7 @@ class Command(BaseCommand):
             audio_path="https://actions.google.com/sounds/v1/ambiences/outdoor_ambience.ogg",
             is_skipped=False,
         )
+        DiaryReply.objects.filter(diary=diary_yesterday).update(created_at=yesterday_dt)
         self.stdout.write(
             self.style.SUCCESS(
                 f"[OK] 建立昨天日記 (ID: {diary_yesterday.id}, 日期: {yesterday_date}, 未分享)"
@@ -112,7 +120,7 @@ class Command(BaseCommand):
             pending_question="",
             hashtags=["#元宵節", "#賞花燈", "#美好回憶"],
             category="entertainment",
-            invite_text="林奶奶去年的今天去逛花燈，點進來看看珍貴回憶！",
+            invite_text=f"{display_name}去年的今天去逛花燈，點進來看看珍貴回憶！",
             suggested_replies=["花燈看起來好漂亮！", "湯圓最好吃了～", "真懷念～"],
             ai_response="熱鬧的節慶回憶最溫暖人心了！",
         )
@@ -126,6 +134,7 @@ class Command(BaseCommand):
             audio_path="https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg",
             is_skipped=False,
         )
+        DiaryReply.objects.filter(diary=diary_last_year).update(created_at=last_year_dt)
 
         post = Post.objects.create(
             user=user,
@@ -134,6 +143,7 @@ class Command(BaseCommand):
             image_path=diary_last_year.image_path,
             post_type="diary",
         )
+        Post.objects.filter(id=post.id).update(created_at=last_year_dt)
         self.stdout.write(
             self.style.SUCCESS(
                 f"[OK] 建立去年今日日記 (ID: {diary_last_year.id}, 日期: {last_year_date}, 已分享至 Post ID: {post.id})"
