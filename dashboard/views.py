@@ -16,7 +16,7 @@ def _error_response(code, message, *, data=None, status=200):
     )
 
 
-# 儀表板（雷達圖）：各認知維度近 7 天的 z-score 平均，各維度分開解鎖
+# 儀表板（雷達圖）：各認知維度近三個月（90 天）的 z-score 平均，各維度分開解鎖
 @api_view(["GET"])
 def dashboard(request):
     # DRF 預設的 401 格式是 {"detail": ...}，這裡自己回統一格式

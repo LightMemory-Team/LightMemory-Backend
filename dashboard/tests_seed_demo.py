@@ -4,7 +4,7 @@
 10/12（一）～10/18（日），比較週是 10/5～10/11。
 """
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from io import StringIO
 from unittest.mock import patch
 
@@ -19,8 +19,11 @@ from games.models import Game, GameSession
 from games.session_service import SEED_CLIENT_SESSION_PREFIX
 from users.models import User
 
+from .encouragement import get_encouragement
+from .management.commands.seed_demo import DIARY_THEMES, SEED_IMAGE_BASE
 from .services import (
     GAME_SOURCES,
+    PERIOD_DAYS,
     SEED_DIARY_AUDIO_PREFIX,
     get_dashboard_dimensions,
     get_unlock_progress,
@@ -47,25 +50,63 @@ class SeedDemoDataTests(TestCase):
             set(Game.objects.values_list("code", flat=True)), set(GAME_SOURCES)
         )
 
-    def test_three_per_batch_for_each_game(self):
+    def test_thirty_sessions_for_each_game(self):
         user = seed()
         for code in GAME_SOURCES:
             sessions = GameSession.objects.filter(user=user, game__code=code)
-            # 前週、上週、這週各 3 場
-            self.assertEqual(sessions.count(), 9)
+            # 更早的歷史 21 場 ＋ 前週、上週、這週各 3 場
+            self.assertEqual(sessions.count(), 30)
             for result in sessions.values_list("result", flat=True):
                 self.assertIsNotNone(result["z_score"])
         self.assertFalse(
             GameSession.objects.filter(user=user).exclude(status="finished").exists()
         )
 
-    def test_three_diaries_per_batch(self):
-        # 暖身、前週、上週、這週各 3 篇
+    def test_thirty_diaries(self):
+        # 更早的歷史 18 篇 ＋ 暖身、前週、上週、這週各 3 篇
         user = seed()
-        self.assertEqual(Diary.objects.filter(user=user, status="done").count(), 12)
+        self.assertEqual(Diary.objects.filter(user=user, status="done").count(), 30)
         self.assertEqual(
-            DiaryAnalysis.objects.filter(diary__user=user, is_valid=True).count(), 12
+            DiaryAnalysis.objects.filter(diary__user=user, is_valid=True).count(), 30
         )
+
+    def test_everything_is_within_the_dashboard_period(self):
+        # 最早的一筆也要在儀表板近三個月（90 天）內，雷達圖才算得到
+        user = seed()
+        earliest = timezone.now() - timedelta(days=PERIOD_DAYS)
+        for finished_at in GameSession.objects.filter(user=user).values_list(
+            "finished_at", flat=True
+        ):
+            self.assertGreater(finished_at, earliest)
+        for created_at in Diary.objects.filter(user=user).values_list(
+            "created_at", flat=True
+        ):
+            self.assertGreater(created_at, earliest)
+
+    def test_history_is_spread_over_many_weeks(self):
+        # 不是全擠在最近：30 場分散在 11 週以上的不同週
+        user = seed()
+        sessions = GameSession.objects.filter(user=user, game__code="market_route")
+        weeks = {
+            timezone.localdate(finished_at).isocalendar()[:2]
+            for finished_at in sessions.values_list("finished_at", flat=True)
+        }
+        self.assertGreaterEqual(len(weeks), 10)
+
+    def test_every_diary_has_a_photo(self):
+        user = seed()
+        diaries = Diary.objects.filter(user=user, status="done")
+        for diary in diaries:
+            self.assertTrue(diary.image_path.startswith(SEED_IMAGE_BASE), diary.title)
+
+    def test_each_theme_has_its_own_photo(self):
+        # 三個主題各用不同的圖，週報才不會三篇都同一張
+        urls = [theme["image_url"] for theme in DIARY_THEMES]
+        self.assertEqual(len(urls), len(set(urls)))
+        user = seed()
+        for theme in DIARY_THEMES:
+            diary = Diary.objects.filter(user=user, title=theme["title"]).first()
+            self.assertEqual(diary.image_path, theme["image_url"])
 
     def test_scores_are_fifty_plus_twenty_five_z(self):
         user = seed()
@@ -92,8 +133,8 @@ class SeedDemoDataTests(TestCase):
     def test_rerun_does_not_duplicate(self):
         seed()
         user = seed()
-        self.assertEqual(GameSession.objects.filter(user=user).count(), 45)
-        self.assertEqual(Diary.objects.filter(user=user).count(), 12)
+        self.assertEqual(GameSession.objects.filter(user=user).count(), 150)
+        self.assertEqual(Diary.objects.filter(user=user).count(), 30)
 
     def test_rerun_keeps_real_records(self):
         user = seed()
@@ -110,7 +151,7 @@ class SeedDemoDataTests(TestCase):
     def test_custom_username(self):
         user = seed(username="grandma", password="pw123456")
         self.assertTrue(user.check_password("pw123456"))
-        self.assertEqual(GameSession.objects.filter(user=user).count(), 45)
+        self.assertEqual(GameSession.objects.filter(user=user).count(), 150)
 
 
 class SeedDemoExcludedFromPopulationTests(TestCase):
@@ -138,9 +179,25 @@ class SeedDemoDashboardTests(TestCase):
         user = seed()
 
         self.assertTrue(is_unlocked(get_unlock_progress(user)))
-        # 這週那批在近 7 天內，雷達圖 6 個軸（含語言）都有分數
+        # 近三個月都有資料，雷達圖 6 個軸（含語言）都有分數
         for dimension in get_dashboard_dimensions(user):
             self.assertIsNotNone(dimension["z_score"], dimension["source"])
+            self.assertIsNotNone(dimension["score"], dimension["source"])
+
+    def test_dashboard_averages_thirty_records_per_dimension(self):
+        user = seed()
+
+        dimensions = {d["source"]: d for d in get_dashboard_dimensions(user)}
+        for code in GAME_SOURCES:
+            self.assertEqual(dimensions[code]["session_count"], 30, code)
+        # 日記最早 3 篇沒有更早的日記可比、算不出語言 z，其餘 27 篇都算
+        self.assertEqual(dimensions["diary"]["session_count"], 27)
+
+    def test_encouragement_still_shows_improvement(self):
+        # 補了更早的歷史後，機器人卡片的趨勢仍是進步
+        user = seed()
+
+        self.assertEqual(get_encouragement(user)["trend"], "up")
 
     def test_game_history_apis_work(self):
         # 歷史紀錄 API 用 result["欄位"] 取值，缺欄位會 KeyError
@@ -164,6 +221,16 @@ class SeedDemoWeeklyReportTests(TestCase):
         self.assertEqual(len(report["diary"]["entries"]), 3)
         self.assertGreater(report["play_time"]["total_seconds"], 0)
         self.assertGreater(report["diary"]["talk_seconds"], 0)
+
+    def test_weekly_report_diary_entries_have_photo_url(self, mock_summary):
+        report = build_weekly_report(self.user, self.today)
+
+        entries = report["diary"]["entries"]
+        self.assertEqual(len(entries), 3)
+        for entry in entries:
+            self.assertTrue(entry["photo_url"].startswith(SEED_IMAGE_BASE), entry)
+        # 三篇是三個不同主題，三張圖都不同
+        self.assertEqual(len({e["photo_url"] for e in entries}), 3)
 
     def test_one_more_day_than_previous_week(self, mock_summary):
         build_weekly_report(self.user, self.today)

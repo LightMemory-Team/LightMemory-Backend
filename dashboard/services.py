@@ -1,4 +1,4 @@
-"""儀表板（雷達圖）資料：各認知維度近幾天的 z-score 平均。
+"""儀表板（雷達圖）資料：各認知維度近三個月（90 天）的 z-score 平均。
 
 只讀資料、不寫入任何資料表：每次請求當下計算，所以數字永遠是最新的。
 - 遊戲：從已結束場次 GameSession.result 裡的 z_score 計算。z_score 由各遊戲
@@ -40,7 +40,9 @@ SEED_DIARY_AUDIO_PREFIX = "seed/"
 GAME_SOURCES = [d["source"] for d in DIMENSIONS if d["source"] != DIARY_SOURCE]
 GAME_TITLES = {game["id"]: game["title"] for game in GAMES}
 
-PERIOD_DAYS = 7
+# 雷達圖的計算範圍：近三個月，滾動 90 天（從現在往前推，每天更新）。
+# 週報、機器人卡片各自用「週」計算，不受這個值影響
+PERIOD_DAYS = 90
 
 # 兩段期間的分數差多少以上，才算「進步」或「多練習」；差距小於這個算「持平」
 # 週報（本週 vs 上週）和儀表板機器人卡片（近 7 天 vs 前 7 天）共用
