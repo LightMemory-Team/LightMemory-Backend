@@ -44,6 +44,7 @@ def create_session(request):
             "success": True,
             "data": {
                 "session_id": session["session_id"],
+                "is_pretest": session["is_pretest"],
                 "difficulty": session["state"]["difficulty"],
                 "current_question": session["question_number"],
                 "total_questions": TOTAL_QUESTIONS,
