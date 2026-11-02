@@ -41,11 +41,11 @@ class DiaryCalendarView(APIView):
         diaries_data = [
             {
                 "diary_id": d.id,
-                "date": d.created_at.date().isoformat(),
+                "date": timezone.localtime(d.created_at).date().isoformat(),
                 "title": d.title,
                 "photo_url": d.image_path,
                 "post_text": d.post_text,
-                "created_at": d.created_at.isoformat(),
+                "created_at": timezone.localtime(d.created_at).isoformat(),
             }
             for d in diaries_qs
         ]
@@ -84,7 +84,7 @@ class DiaryCalendarView(APIView):
                 "photo_url": diary.image_path,
                 "first_question": first_question,
                 "status": diary.status,
-                "created_at": diary.created_at.isoformat(),
+                "created_at": timezone.localtime(diary.created_at).isoformat(),
             }
         }, status=status.HTTP_201_CREATED)
 
@@ -192,8 +192,8 @@ class DiaryFinalizeView(APIView):
             "data": {
                 "diary_id": diary.id,
                 "status": diary.status,
-                "date": diary.created_at.date().isoformat(),
-                "created_at": diary.created_at.isoformat(),
+                "date": timezone.localtime(diary.created_at).date().isoformat(),
+                "created_at": timezone.localtime(diary.created_at).isoformat(),
                 "photo_url": diary.image_path,
                 "title": diary.title,
                 "ai_response": diary.ai_response,
