@@ -1,10 +1,9 @@
-from datetime import date
-
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from ai_service.greeting import get_daily_greeting
 from games.catalog import GAMES
 from social.utils import get_display_name
 
@@ -29,19 +28,10 @@ def get_user(request):
     return Response({"user_name": get_display_name(request.user)})
 
 
-# 問候語
+# 問候語：每天由 AI 產生一句 10 字以內的話（失敗時用固定問候語）
 @api_view(["GET"])
 def greet(request):
-    tips = [
-        "今天也要保持大腦活力喔。",
-        "早安,今天心情如何呢？",
-        "陽光正好,適合散散步。",
-    ]
-    today = date.today()
-    index = today.toordinal() % len(tips)
-    if tips is None:
-        return Response({"daily_tip_error": "查無今日問安"}, status=404)
-    return Response({"daily_tip": tips[index]})
+    return Response({"daily_tip": get_daily_greeting()})
 
 
 # 每日建議

@@ -10,13 +10,15 @@ Unit test：view 與 serializer 層。
 """
 
 from datetime import date
-from unittest import expectedFailure
+from unittest import expectedFailure, mock
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIRequestFactory
 
+from ai_service.greeting import FALLBACK_GREETINGS
 from home import views as home_views
 from users.serializers import RegisterSerializer
 from users.views import RegisterView
@@ -304,6 +306,13 @@ class HomeViewUnitTests(TestCase):
 
     def setUp(self):
         self.factory = APIRequestFactory()
+        # greet 會呼叫 AI；測試一律假裝 AI 失敗，不真的打 OpenAI，並清掉當天快取
+        cache.clear()
+        self.addCleanup(cache.clear)
+        patcher = mock.patch('ai_service.greeting._client')
+        mock_client = patcher.start()
+        self.addCleanup(patcher.stop)
+        mock_client.return_value.chat.completions.create.side_effect = RuntimeError('boom')
 
     def test_ping_returns_connection_message(self):
         response = home_views.ping(self.factory.get('/'))
@@ -311,22 +320,17 @@ class HomeViewUnitTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, {'message': 'index api is connected'})
 
-    def test_greet_returns_a_tip_from_the_fixed_list(self):
-        response = home_views.greet(self.factory.get('/'))
+    def test_greet_falls_back_to_the_fixed_list_when_ai_fails(self):
+        with self.assertLogs('ai_service.greeting', level='WARNING'):
+            response = home_views.greet(self.factory.get('/'))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn(
-            response.data['daily_tip'],
-            [
-                '今天也要保持大腦活力喔。',
-                '早安,今天心情如何呢？',
-                '陽光正好,適合散散步。',
-            ],
-        )
+        self.assertIn(response.data['daily_tip'], FALLBACK_GREETINGS)
 
     def test_greet_is_stable_within_the_same_day(self):
-        """問候語由日期決定，同一天內重複呼叫應一致"""
-        first = home_views.greet(self.factory.get('/'))
+        """問候語每天只產生一次，同一天內重複呼叫應一致"""
+        with self.assertLogs('ai_service.greeting', level='WARNING'):
+            first = home_views.greet(self.factory.get('/'))
         second = home_views.greet(self.factory.get('/'))
 
         self.assertEqual(first.data, second.data)
