@@ -9,6 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from games.catalog import GAMES
+from social.models import Notification
 
 from .helpers import make_session
 
@@ -32,7 +33,9 @@ class HomeUserTests(APITestCase):
         response = self.client.get(USER_URL)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {"user_name": "玉蘭"})
+        self.assertEqual(
+            response.data, {"user_name": "玉蘭", "unread_notification_count": 0}
+        )
 
     def test_legacy_account_without_nickname_falls_back(self):
         legacy = User.objects.create_user(
@@ -45,6 +48,47 @@ class HomeUserTests(APITestCase):
 
         self.client.force_authenticate(user=bare)
         self.assertEqual(self.client.get(USER_URL).data["user_name"], "0912345678")
+
+
+class HomeUnreadCountTests(APITestCase):
+    """鈴鐺的未讀數要和通知 API 的 unread_count 一致"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="u", password="x")
+        self.other = User.objects.create_user(username="o", password="x")
+        self.client.force_authenticate(user=self.user)
+
+    def make(self, user, is_read=False):
+        return Notification.objects.create(
+            user=user, notification_type="comment", message="有人留言", is_read=is_read
+        )
+
+    def test_counts_only_own_unread_notifications(self):
+        self.make(self.user)
+        self.make(self.user)
+        self.make(self.user, is_read=True)
+        self.make(self.other)
+
+        response = self.client.get(USER_URL)
+
+        self.assertEqual(response.data["unread_notification_count"], 2)
+
+    def test_matches_notification_unread_count_api(self):
+        self.make(self.user)
+
+        home = self.client.get(USER_URL).data["unread_notification_count"]
+        social = self.client.get("/api/social/notifications/unread_count/").data[
+            "data"
+        ]["unread_notification_count"]
+
+        self.assertEqual(home, social)
+
+    def test_becomes_zero_after_mark_all_read(self):
+        self.make(self.user)
+
+        self.client.patch("/api/social/notifications/")
+
+        self.assertEqual(self.client.get(USER_URL).data["unread_notification_count"], 0)
 
 
 class HomeGamesTests(APITestCase):
@@ -70,6 +114,7 @@ class HomeGamesTests(APITestCase):
         for game in response.data["games"]:
             self.assertIn("id", game)
             self.assertIn("title", game)
+            self.assertTrue(game["name"])
             self.assertIs(game["played_this_week"], False)
 
     def test_played_this_week_true_after_finishing_a_game(self):

@@ -5,6 +5,7 @@ from rest_framework.response import Response
 
 from ai_service.greeting import get_daily_greeting
 from games.catalog import GAMES
+from social.models import Notification
 from social.utils import get_display_name
 
 from . import daily_tasks, service
@@ -25,7 +26,13 @@ def ping(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_user(request):
-    return Response({"user_name": get_display_name(request.user)})
+    unread_count = Notification.objects.filter(user=request.user, is_read=False).count()
+    return Response(
+        {
+            "user_name": get_display_name(request.user),
+            "unread_notification_count": unread_count,
+        }
+    )
 
 
 # 問候語：每天由 AI 產生一句 10 字以內的話（失敗時用固定問候語）
