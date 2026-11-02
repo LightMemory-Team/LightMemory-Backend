@@ -25,6 +25,19 @@ def error_response(code, message, status=400):
     return Response({"error": {"code": code, "message": message}}, status=status)
 
 
+def success_response(data, status=200):
+    """統一回傳格式：{ "success": true, "data": {...}, "error": null }"""
+    return Response({"success": True, "data": data, "error": None}, status=status)
+
+
+def failure_response(code, message, status=400):
+    """統一回傳格式：{ "success": false, "data": null, "error": {code, message} }"""
+    return Response(
+        {"success": False, "data": None, "error": {"code": code, "message": message}},
+        status=status,
+    )
+
+
 def paginate(request, queryset, serialize, default_size=10, max_size=50):
     try:
         page = max(int(request.query_params.get("page", 1)), 1)
