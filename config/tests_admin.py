@@ -59,9 +59,6 @@ class AdminPagesTests(TestCase):
                 "password1": "Str0ng!Pass2026",
                 "password2": "Str0ng!Pass2026",
                 "usable_password": "true",
-                # 頁面上「家屬聯絡人」inline 的管理欄位（瀏覽器會自動送出）
-                "family_contacts-TOTAL_FORMS": "0",
-                "family_contacts-INITIAL_FORMS": "0",
             },
         )
 
