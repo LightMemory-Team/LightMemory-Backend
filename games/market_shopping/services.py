@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from games import session_service
 from games.dda import DDAConfig, NoOpStrategy, apply_answer
+from games.zscore import composite_z_score, z_score_to_display_score
 
 from .constants import BUDGET_OPTIONS, FOODS
 
@@ -22,42 +23,61 @@ DDA_CONFIG = DDAConfig(
 )
 DDA_STRATEGY = NoOpStrategy()
 
-# 常模與 Z-score 設定
-MARKET_SHOPPING_NORM = {
-    "mean": 70.0,
-    "std": 10.0,
-}
-
-Z_SCORE_CLAMP = 2.0
+# Z-score 設定：正確率、速度分兩個指標各自跟歷史比，再等權重加權（越高越好）
+METRIC_RULES = {"accuracy": (1.0, False), "speed_score": (1.0, False)}
 
 
-def calculate_z_score(raw_score):
+def _result_metrics(result):
+    """把一場的結算結果轉成 z 用的指標。
+
+    沒有反應時間資料（average_reaction_time_ms 是 None）的場次，速度分是 0 只代表
+    「沒有資料」，不是真的很慢，所以速度分不列入（None）。
     """
-    依常模計算 Market Shopping 的 Z-score 與跨遊戲標準分數 (standard_score)。
+    has_speed_data = result.get("average_reaction_time_ms") is not None
+    return {
+        "accuracy": result.get("accuracy"),
+        "speed_score": result.get("speed_score") if has_speed_data else None,
+    }
 
-    Z = (raw_score - mean) / std
-    Z-score 限制在 [-Z_SCORE_CLAMP, +Z_SCORE_CLAMP]
-    standard_score = 50 + 20 * z_score
+
+def calculate_math_z_score(accuracy, speed_score, personal_history, population_history):
     """
-    mean = MARKET_SHOPPING_NORM["mean"]
-    std = MARKET_SHOPPING_NORM["std"]
+    數學 Z-score 與跨遊戲標準分數 (standard_score)。
 
-    if std == 0:
-        z_score = 0.0
-    else:
-        z_score = (raw_score - mean) / std
+    正確率、速度分各自跟過去場次比，等權重加權後再做二階段標準化
+    （games/zscore.py）。
+    基準資料少時偏向全體使用者、越多越偏向自己；全體也不夠就是 None（資料不足）。
+    Z-score 限制在 ±2，standard_score = 50 + 25 * z_score（1～100）。
 
-    z_score = max(
-        -Z_SCORE_CLAMP,
-        min(Z_SCORE_CLAMP, z_score),
+    speed_score 是 None 代表這場沒有反應時間資料，只用正確率。
+    personal_history: 自己過去場次的 result 清單（不含這場）
+    population_history: 其他使用者的 result，依使用者分組 {user_id: [result, ...]}
+    """
+    z_score = composite_z_score(
+        {"accuracy": accuracy, "speed_score": speed_score},
+        [_result_metrics(result) for result in personal_history],
+        {
+            user_id: [_result_metrics(result) for result in results]
+            for user_id, results in population_history.items()
+        },
+        METRIC_RULES,
     )
-
-    standard_score = 50 + 20 * z_score
+    if z_score is not None:
+        z_score = round(z_score, 3)
 
     return {
-        "z_score": round(z_score, 3),
-        "standard_score": round(standard_score),
+        "z_score": z_score,
+        "standard_score": z_score_to_display_score(z_score),
     }
+
+
+def _previous_results(session):
+    """這場之前已結束場次的 result：(自己的清單, {其他使用者 id: 清單})。"""
+    session_id = session["session_id"]
+    return (
+        session_service.list_previous_results(GAME_TYPE, session_id),
+        session_service.list_previous_results_by_user(GAME_TYPE, session_id),
+    )
 
 
 def calculate_speed_score(reaction_time_ms):
@@ -196,6 +216,7 @@ def create_game_session(user):
         GAME_TYPE,
         user=user,
         initial_state=initial_state,
+        is_pretest=session_service.is_first_session(GAME_TYPE, user),
     )
     session = session_service.update_session(
         GAME_TYPE,
@@ -427,8 +448,11 @@ def move_to_next_question(session):
     )
 
 
-def calculate_final_result(session):
-    """計算整場最終成績。"""
+def calculate_final_result(session, personal_history=None, population_history=None):
+    """計算整場最終成績。
+
+    personal_history / population_history 沒給時，從資料庫查這場之前的場次。
+    """
     state = session["state"]
     completed_at = timezone.now()
     accuracy = round(
@@ -453,7 +477,17 @@ def calculate_final_result(session):
         else None
     )
 
-    z_result = calculate_z_score(raw_score)
+    # 原始能力分跟自己的歷史比；熟悉場不算分，給空歷史讓 z、標準分數都是 None
+    if session.get("is_pretest"):
+        personal_history, population_history = [], {}
+    elif personal_history is None or population_history is None:
+        personal_history, population_history = _previous_results(session)
+    z_result = calculate_math_z_score(
+        accuracy,
+        clamped_speed_score if answer_count > 0 else None,
+        personal_history,
+        population_history,
+    )
     z_score = z_result["z_score"]
     standard_score = z_result["standard_score"]
 

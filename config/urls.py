@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/games/", include("games.urls")),  # 遊戲
     path("api/diary/", include("diary.urls")),  # 聲影日記
     path("", include("public_share.urls")),  # 親友公開分享與留言
+    path("api/dashboard/", include("dashboard.urls")),  # 儀表板
 ]
 
 if settings.DEBUG:

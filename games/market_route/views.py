@@ -8,7 +8,12 @@ from games.dda import DDAConfig, apply_answer
 from games.utils import get_current_user
 
 from .item_bank import load_distractor_item, load_items
-from .market_score import calculate_step_score, calculate_total_score
+from .market_score import (
+    calculate_step_score,
+    calculate_total_score,
+    normalize_total_score,
+)
+from .market_zscore import calculate_attention_z_score
 
 GAME_TYPE = "market_route"
 
@@ -154,10 +159,14 @@ def start(request):
         "exposure_time_ms": loose_exposure,
     }
     session = session_service.create_session(
-        GAME_TYPE, initial_state=initial_state, user=user
+        GAME_TYPE,
+        initial_state=initial_state,
+        user=user,
+        is_pretest=session_service.is_first_session(GAME_TYPE, user),
     )
     data = {
         "session_id": session["session_id"],
+        "is_pretest": session["is_pretest"],
         "current_stage": session["state"]["current_stage"],
     }
     return Response({"success": True, "data": data, "error": None})
@@ -397,6 +406,10 @@ def finish(request):
         for r in step_records
     ]
 
+    # 注意力 z-score 給 dashboard 用；這場還沒結束，會跟「所有已結束場次」比，
+    # 結果跟之後再算一樣。歷史資料不足時是 None
+    z_score = calculate_attention_z_score(session_id)
+
     result = {
         "total_questions": 20,
         "answered_count": answered_count,
@@ -405,7 +418,8 @@ def finish(request):
         "accuracy": accuracy,
         "avg_response_time_ms": avg_response_time_ms,
         "final_stage": session["state"]["current_stage"],
-        "total_score": calculate_total_score(scoring_inputs),
+        "total_score": normalize_total_score(calculate_total_score(scoring_inputs)),
+        "z_score": round(z_score, 3) if z_score is not None else None,
     }
     session_service.finish_session(GAME_TYPE, session_id, result)
     return Response({"success": True, "data": result, "error": None})

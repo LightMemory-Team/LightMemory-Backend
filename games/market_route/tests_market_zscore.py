@@ -104,8 +104,10 @@ class CalculateAttentionZScoreTests(TestCase):
         self.user = User.objects.create_user(username="tester", password="pw123456")
         self.now = timezone.now()
 
-    def _play(self, user, minutes_ago, steps):
-        session_id = session_service.create_session(GAME_TYPE, user=user)["session_id"]
+    def _play(self, user, minutes_ago, steps, *, is_pretest=False):
+        session_id = session_service.create_session(
+            GAME_TYPE, user=user, is_pretest=is_pretest
+        )["session_id"]
         for step in steps:
             session_service.save_step(GAME_TYPE, session_id, step)
         GameSession.objects.filter(pk=session_id).update(
@@ -134,24 +136,78 @@ class CalculateAttentionZScoreTests(TestCase):
         )
         self._play(user, 20, [_step(1, rt=900), _step(2, rt=900, exposure=1700)])
 
+    # 這一場：正確率 0.5（z = 0）、反應時間 800（z = 0）、收斂曝光 1700（z = +1）
+    CURRENT_STEPS = [
+        _step(1, rt=800),
+        _step(2, correct=False, rt=800, exposure=1700),
+    ]
+    # 三個指標等權重：合成 (0 + 0 + 1) ÷ 3 = 1/3
+    CURRENT_COMPOSITE = 1 / 3
+
     def test_compares_with_personal_history(self):
         self._play_history(self.user)
-        current = self._play(
-            self.user, 10, [_step(1, rt=700), _step(2, rt=700, exposure=1600)]
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+        # 三場歷史的合成分數 -1/3、0、+1/3 → 變異數和 2/9；
+        # 理論變異數 = 3 × (1/3)² = 1/3；收縮後 (2/9 + 3 × 1/3) ÷ (2 + 3) = 11/45
+        var = (2 / 9 + 3 * (1 / 3)) / (2 + 3)
+        self.assertAlmostEqual(
+            calculate_attention_z_score(current), self.CURRENT_COMPOSITE / var**0.5
         )
-        # z_正確率 = (1 - 0.5) / 0.5 = 1
-        # z_反應時間 = -(700 - 800) / 100 = 1
-        # z_曝光時間 = -(1600 - 1800) / 100 = 2
-        # 0.4 * 1 + 0.3 * 1 + 0.3 * 2 = 1.3
-        self.assertAlmostEqual(calculate_attention_z_score(current), 1.3)
 
-    def test_cold_start_uses_other_users_history(self):
-        other_user = User.objects.create_user(username="other", password="pw123456")
-        self._play_history(other_user)
-        current = self._play(
-            self.user, 10, [_step(1, rt=700), _step(2, rt=700, exposure=1600)]
+    def test_familiarization_session_itself_is_none(self):
+        self._play_history(self.user)
+        current = self._play(self.user, 10, [_step(1)], is_pretest=True)
+
+        self.assertIsNone(calculate_attention_z_score(current))
+
+    def test_familiarization_session_is_not_history(self):
+        # 第一場（熟悉場）表現很差，但不進歷史：結果跟沒有它一樣
+        self._play(
+            self.user,
+            50,
+            [_step(1, correct=False, rt=3000), _step(2, correct=False, rt=3000)],
+            is_pretest=True,
         )
-        self.assertAlmostEqual(calculate_attention_z_score(current), 1.3)
+        self._play_history(self.user)
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+
+        var = (2 / 9 + 3 * (1 / 3)) / (2 + 3)
+        self.assertAlmostEqual(
+            calculate_attention_z_score(current), self.CURRENT_COMPOSITE / var**0.5
+        )
+
+    def test_cold_start_borrows_other_users_history(self):
+        # 兩位其他使用者各 3 場：個人內自由度 4，夠當全體基準；
+        # 自己沒有歷史，基準 = 全體平均 ＋ 全體個人內標準差（數值同上面的個人歷史）
+        for name in ("other1", "other2"):
+            other = User.objects.create_user(username=name, password="pw123456")
+            self._play_history(other)
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+
+        # 自己沒有參考場次，合成分數的變異數完全用理論值 1/3
+        self.assertAlmostEqual(
+            calculate_attention_z_score(current),
+            self.CURRENT_COMPOSITE / (1 / 3) ** 0.5,
+        )
+
+    def test_one_other_user_is_not_enough_population(self):
+        # 只有一位其他使用者（個人內自由度 2，不到 3）→ 沒有基準
+        other = User.objects.create_user(username="other", password="pw123456")
+        self._play_history(other)
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+
+        self.assertIsNone(calculate_attention_z_score(current))
+
+    def test_other_users_familiarization_is_not_population(self):
+        # 其他兩位使用者的第一場是熟悉場，排除後各只剩 2 場，個人內自由度 2 → 沒有基準
+        for name in ("other1", "other2"):
+            other = User.objects.create_user(username=name, password="pw123456")
+            self._play(other, 60, [_step(1, rt=5000)], is_pretest=True)
+            self._play(other, 40, [_step(1, rt=700), _step(2, rt=700, exposure=1900)])
+            self._play(other, 30, [_step(1, rt=900), _step(2, rt=900, exposure=1700)])
+        current = self._play(self.user, 10, self.CURRENT_STEPS)
+
+        self.assertIsNone(calculate_attention_z_score(current))
 
     def test_no_history_is_none(self):
         current = self._play(self.user, 10, [_step(1)])
