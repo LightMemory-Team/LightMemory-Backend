@@ -1,12 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import FamilyContact, User
-
-
-class FamilyContactInline(admin.TabularInline):
-    model = FamilyContact
-    extra = 0
+from .models import User
 
 
 # 繼承 Django 內建的 UserAdmin：密碼會以雜湊儲存，並提供「修改密碼」表單；
@@ -44,12 +39,3 @@ class LightMemoryUserAdmin(UserAdmin):
     )
     list_filter = UserAdmin.list_filter + ("gender", "region")
     search_fields = ("username", "nickname", "last_name", "first_name")
-    inlines = [FamilyContactInline]
-
-
-@admin.register(FamilyContact)
-class FamilyContactAdmin(admin.ModelAdmin):
-    list_display = ("family_name", "relationship", "phone", "user")
-    list_filter = ("relationship",)
-    search_fields = ("family_name", "phone", "user__username", "user__last_name")
-    list_select_related = ("user",)
