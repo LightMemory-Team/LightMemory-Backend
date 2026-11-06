@@ -1,10 +1,14 @@
-from datetime import date
-
-from rest_framework.decorators import api_view
+from django.utils import timezone
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from ai_service.greeting import get_daily_greeting
 from games.catalog import GAMES
-from users.models import User
+from social.models import Notification
+from social.utils import get_display_name
+
+from . import daily_tasks, service
 
 # Create your views here.
 """
@@ -18,28 +22,23 @@ def ping(request):
     return Response({"message": "index api is connected"})
 
 
-# 使用者名稱 != username
+# 首頁問候「早安，玉蘭！」用的名字：回傳暱稱（舊帳號沒有暱稱時退回姓名／帳號）
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def get_user(request):
-    user_name = User.objects.first()  # 目前還沒有登入驗證先取資料庫第一筆
-    if user_name is None:
-        return Response({"user_name_error": "查無使用者"}, status=404)
-    return Response({"user_name": user_name.last_name})
+    unread_count = Notification.objects.filter(user=request.user, is_read=False).count()
+    return Response(
+        {
+            "user_name": get_display_name(request.user),
+            "unread_notification_count": unread_count,
+        }
+    )
 
 
-# 問候語
+# 問候語：每天由 AI 產生一句 10 字以內的話（失敗時用固定問候語）
 @api_view(["GET"])
 def greet(request):
-    tips = [
-        "今天也要保持大腦活力喔。",
-        "早安,今天心情如何呢？",
-        "陽光正好,適合散散步。",
-    ]
-    today = date.today()
-    index = today.toordinal() % len(tips)
-    if tips is None:
-        return Response({"daily_tip_error": "查無今日問安"}, status=404)
-    return Response({"daily_tip": tips[index]})
+    return Response({"daily_tip": get_daily_greeting()})
 
 
 # 每日建議
@@ -54,7 +53,22 @@ def daily_suggetion(request):
     return Response({"daily_suggestion": daily_suggestion})
 
 
-# 遊戲卡片列表
+# 遊戲卡片列表：所有已開發的遊戲，並標示本週（週一到今天）有沒有玩過
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def games_list(request):
-    return Response({"games": GAMES})
+    today = timezone.localdate()
+    played = service.played_game_ids(request.user, service.week_start(today), today)
+    games = [
+        {**game, "played_this_week": game["id"] in played}
+        for game in GAMES
+        if game["is_developed"]
+    ]
+    return Response({"games": games})
+
+
+# 今日任務：當天第一次呼叫時產生並存起來，之後同一天回傳同一份；done 每次即時計算
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def daily_tasks_view(request):
+    return Response(daily_tasks.build_response(request.user, timezone.localdate()))

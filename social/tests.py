@@ -7,6 +7,7 @@ System test：Notification API 端到端流程。
 對應端點：
     GET   /api/social/notifications/
     GET   /api/social/notifications/unread_count/
+    PATCH /api/social/notifications/            （全部標為已讀）
     PATCH /api/social/notifications/<id>/read/
 
 執行：
@@ -40,7 +41,9 @@ class NotificationListTests(APITestCase):
         response = self.client.get(LIST_URL)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {'notifications': []})
+        self.assertEqual(
+            response.data, {'success': True, 'data': {'notifications': []}, 'error': None}
+        )
 
     def test_list_returns_created_notification(self):
         Notification.objects.create(
@@ -53,9 +56,12 @@ class NotificationListTests(APITestCase):
         response = self.client.get(LIST_URL)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['notifications']), 1)
-        self.assertEqual(response.data['notifications'][0]['message'], '小明對你的貼文按讚了')
-        self.assertEqual(response.data['notifications'][0]['notification_type_display'], '按讚')
+        self.assertTrue(response.data['success'])
+        self.assertIsNone(response.data['error'])
+        notifications = response.data['data']['notifications']
+        self.assertEqual(len(notifications), 1)
+        self.assertEqual(notifications[0]['message'], '小明對你的貼文按讚了')
+        self.assertEqual(notifications[0]['notification_type_display'], '按讚')
 
     def test_list_orders_newest_first(self):
         Notification.objects.create(
@@ -67,8 +73,9 @@ class NotificationListTests(APITestCase):
 
         response = self.client.get(LIST_URL)
 
-        self.assertEqual(response.data['notifications'][0]['message'], '第二則')
-        self.assertEqual(response.data['notifications'][1]['message'], '第一則')
+        notifications = response.data['data']['notifications']
+        self.assertEqual(notifications[0]['message'], '第二則')
+        self.assertEqual(notifications[1]['message'], '第一則')
 
     def test_list_requires_authentication(self):
         self.client.force_authenticate(user=None)
@@ -89,7 +96,7 @@ class UnreadCountTests(APITestCase):
         response = self.client.get(UNREAD_COUNT_URL)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['unread_notification_count'], 0)
+        self.assertEqual(response.data['data']['unread_notification_count'], 0)
 
     def test_unread_count_ignores_already_read_notifications(self):
         Notification.objects.create(
@@ -101,7 +108,7 @@ class UnreadCountTests(APITestCase):
 
         response = self.client.get(UNREAD_COUNT_URL)
 
-        self.assertEqual(response.data['unread_notification_count'], 1)
+        self.assertEqual(response.data['data']['unread_notification_count'], 1)
 
 
 class MarkAsReadTests(APITestCase):
@@ -118,6 +125,10 @@ class MarkAsReadTests(APITestCase):
         response = self.client.patch(read_url(self.notification.id))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data,
+            {'success': True, 'data': {'message': '已標記為已讀'}, 'error': None},
+        )
         self.notification.refresh_from_db()
         self.assertTrue(self.notification.is_read)
 
@@ -125,3 +136,92 @@ class MarkAsReadTests(APITestCase):
         response = self.client.patch(read_url(99999))
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            response.data,
+            {
+                'success': False,
+                'data': None,
+                'error': {'code': 'NOTIFICATION_NOT_FOUND', 'message': '查無此通知'},
+            },
+        )
+
+    def test_cannot_mark_other_users_notification(self):
+        other = User.objects.create_user(username='other', password='Str0ng!Pass2026')
+        theirs = Notification.objects.create(
+            user=other, notification_type='comment', message='別人的通知'
+        )
+
+        response = self.client.patch(read_url(theirs.id))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        theirs.refresh_from_db()
+        self.assertFalse(theirs.is_read)
+
+
+class MarkAllAsReadTests(APITestCase):
+    """PATCH /api/social/notifications/（全部已讀）"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='wang_yulan', password='Str0ng!Pass2026')
+        self.other = User.objects.create_user(username='other', password='Str0ng!Pass2026')
+        self.client.force_authenticate(user=self.user)
+
+    def make(self, user, is_read=False):
+        return Notification.objects.create(
+            user=user, notification_type='comment', message='有人留言', is_read=is_read
+        )
+
+    def test_marks_all_own_unread_notifications_as_read(self):
+        self.make(self.user)
+        self.make(self.user)
+        self.make(self.user, is_read=True)
+
+        response = self.client.patch(LIST_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data,
+            {'success': True, 'data': {'message': '已全部標記為已讀'}, 'error': None},
+        )
+        self.assertFalse(Notification.objects.filter(user=self.user, is_read=False).exists())
+
+    def test_unread_count_becomes_zero(self):
+        self.make(self.user)
+
+        self.client.patch(LIST_URL)
+        response = self.client.get(UNREAD_COUNT_URL)
+
+        self.assertEqual(response.data['data'], {'unread_notification_count': 0})
+
+    def test_does_not_touch_other_users_notifications(self):
+        mine = self.make(self.user)
+        theirs = self.make(self.other)
+
+        self.client.patch(LIST_URL)
+
+        mine.refresh_from_db()
+        theirs.refresh_from_db()
+        self.assertTrue(mine.is_read)
+        self.assertFalse(theirs.is_read)
+
+    def test_works_when_there_is_nothing_unread(self):
+        response = self.client.patch(LIST_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_requires_authentication(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.patch(LIST_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_list_still_works_after_marking_all_read(self):
+        self.make(self.user)
+
+        self.client.patch(LIST_URL)
+        response = self.client.get(LIST_URL)
+
+        notifications = response.data['data']['notifications']
+        self.assertEqual(len(notifications), 1)
+        self.assertTrue(notifications[0]['is_read'])

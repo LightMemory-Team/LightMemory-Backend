@@ -119,6 +119,31 @@ class StartApiTests(MarketRouteTestCase):
         self.assertEqual(response.data["error"]["code"], "USER_NOT_FOUND")
 
 
+class FamiliarizationFlagTests(MarketRouteTestCase):
+    def test_first_start_is_familiarization(self):
+        response = self.client.post(START_URL)
+
+        self.assertTrue(response.data["data"]["is_pretest"])
+        self.assertTrue(GameSession.objects.get().is_pretest)
+
+    def test_start_after_finishing_once_is_not_familiarization(self):
+        session_id = self._start()
+        question = self._get_round(session_id)
+        self._answer(session_id, question["target_position"])
+        self._finish(session_id)
+
+        response = self.client.post(START_URL)
+
+        self.assertFalse(response.data["data"]["is_pretest"])
+
+    def test_unfinished_first_session_does_not_end_familiarization(self):
+        self._start()
+
+        response = self.client.post(START_URL)
+
+        self.assertTrue(response.data["data"]["is_pretest"])
+
+
 class RoundApiTests(MarketRouteTestCase):
     """GET /api/games/market-route/round/"""
 
@@ -247,7 +272,59 @@ class FinishApiTests(MarketRouteTestCase):
         self.assertEqual(data["correct_count"], 1)
         self.assertEqual(data["timeout_count"], 0)
         self.assertIsInstance(data["accuracy"], float)
-        self.assertIn("total_score", data)
+        # basic 第 1 次快速答對：10 + 速度加成 2 = 12 → 12 / 333 * 100 = 3.6 → 4
+        self.assertEqual(data["total_score"], 4)
+
+    def test_all_wrong_total_score_is_one(self):
+        session_id = self._start()
+        question = self._get_round(session_id)
+        self._answer(session_id, self._wrong_position(question))
+
+        data = self._finish(session_id).data["data"]
+
+        self.assertEqual(data["total_score"], 1)
+
+    def test_z_score_is_none_without_history(self):
+        session_id = self._start()
+        question = self._get_round(session_id)
+        self._answer(session_id, question["target_position"])
+
+        data = self._finish(session_id).data["data"]
+
+        self.assertIsNone(data["z_score"])
+
+    def _play_one_question(self, correct):
+        """開一場、答 1 題、結束，回傳結束的回應。"""
+        session_id = self._start()
+        question = self._get_round(session_id)
+        position = (
+            question["target_position"] if correct else self._wrong_position(question)
+        )
+        self._answer(session_id, position)
+        return self._finish(session_id)
+
+    def test_z_score_saved_with_enough_history(self):
+        self._play_one_question(correct=True)  # 熟悉場，不進歷史
+        # 3 場歷史，正確率 1 / 0 / 1 → 平均 0.667，算得出比較基準
+        for correct in (True, False, True):
+            self._play_one_question(correct)
+
+        response = self._play_one_question(correct=True)
+
+        z_score = response.data["data"]["z_score"]
+        self.assertIsNotNone(z_score)
+        self.assertTrue(-2 <= z_score <= 2)
+        # 也有存進資料庫，dashboard 之後直接讀 result
+        session = GameSession.objects.order_by("-finished_at").first()
+        self.assertEqual(session.result["z_score"], z_score)
+
+    def test_first_session_is_familiarization_without_z_score(self):
+        response = self._play_one_question(correct=True)
+
+        self.assertIsNone(response.data["data"]["z_score"])
+        session = GameSession.objects.get()
+        self.assertTrue(session.is_pretest)
+        self.assertIsNone(session.result["z_score"])
 
 
 class ErrorHandlingTests(MarketRouteTestCase):

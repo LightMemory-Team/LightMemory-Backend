@@ -8,8 +8,9 @@ from .models import Post
 
 
 def get_display_name(user):
+    # 優先用暱稱；舊帳號沒有暱稱時退回姓名，再退回帳號
     full = f"{user.last_name}{user.first_name}".strip()
-    return full or user.username
+    return user.nickname or full or user.username
 
 
 def author_dict(user):
@@ -22,6 +23,19 @@ def author_dict(user):
 
 def error_response(code, message, status=400):
     return Response({"error": {"code": code, "message": message}}, status=status)
+
+
+def success_response(data, status=200):
+    """統一回傳格式：{ "success": true, "data": {...}, "error": null }"""
+    return Response({"success": True, "data": data, "error": None}, status=status)
+
+
+def failure_response(code, message, status=400):
+    """統一回傳格式：{ "success": false, "data": null, "error": {code, message} }"""
+    return Response(
+        {"success": False, "data": None, "error": {"code": code, "message": message}},
+        status=status,
+    )
 
 
 def paginate(request, queryset, serialize, default_size=10, max_size=50):

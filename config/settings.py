@@ -152,6 +152,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+    # 所有錯誤統一成 {"success": false, "error": {"code", "message", "fields"}}
+    "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
 }
 
 # JWT token 有效時間（simplejwt 預設 access 只有 5 分鐘，長者玩到一半就會過期被擋 401）

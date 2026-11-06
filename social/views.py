@@ -6,25 +6,30 @@ from rest_framework.views import APIView
 
 from .models import Comment, Notification
 from .serializers import CommentSerializer, NotificationSerializer
-from .utils import (error_response, get_visible_post,
-                    paginate, post_queryset, serialize_post)
+from .utils import (
+    error_response,
+    failure_response,
+    get_visible_post,
+    paginate,
+    post_queryset,
+    serialize_post,
+    success_response,
+)
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status, permissions
 
-from .models import Post, Comment, Notification
-from .serializers import CommentSerializer
-
-
-# 通知列表
-@api_view(['GET'])
+# 通知列表（GET）／全部標為已讀（PATCH）
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def notification_list(request):
     user = request.user
+    if request.method == 'PATCH':
+        # 只動自己的未讀通知
+        Notification.objects.filter(user=user, is_read=False).update(is_read=True)
+        return success_response({"message": "已全部標記為已讀"})
+
     notifications = Notification.objects.filter(user=user).order_by('-created_at')
     serializer = NotificationSerializer(notifications, many=True)
-    return Response({"notifications": serializer.data})
+    return success_response({"notifications": serializer.data})
 
 
 @api_view(['GET'])
@@ -32,7 +37,7 @@ def notification_list(request):
 def unread_count(request):
     user = request.user
     count = Notification.objects.filter(user=user, is_read=False).count()
-    return Response({"unread_notification_count": count})
+    return success_response({"unread_notification_count": count})
 
 
 @api_view(['PATCH'])
@@ -41,11 +46,11 @@ def mark_as_read(request, notification_id):
     try:
         notification = Notification.objects.get(id=notification_id, user=request.user)
     except Notification.DoesNotExist:
-        return Response({"mark_as_read_error": "查無此通知"}, status=404)
+        return failure_response("NOTIFICATION_NOT_FOUND", "查無此通知", status=404)
 
     notification.is_read = True
     notification.save()
-    return Response({"message": "已標記為已讀"})
+    return success_response({"message": "已標記為已讀"})
 
 class PostListView(APIView):
     """S-2 動態牆列表"""

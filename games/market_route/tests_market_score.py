@@ -7,6 +7,7 @@ from .market_score import (
     calculate_speed_bonus,
     calculate_step_score,
     calculate_total_score,
+    normalize_total_score,
 )
 
 
@@ -142,3 +143,19 @@ class CalculateTotalScoreTests(SimpleTestCase):
 
     def test_empty_list_is_zero(self):
         self.assertEqual(calculate_total_score([]), 0)
+
+
+class NormalizeTotalScoreTests(SimpleTestCase):
+    def test_zero_becomes_minimum_one(self):
+        # 全錯也給 1 分，長者不會看到 0 分
+        self.assertEqual(normalize_total_score(0), 1)
+
+    def test_max_score_becomes_hundred(self):
+        self.assertEqual(normalize_total_score(333), 100)
+
+    def test_half_score(self):
+        # 166 / 333 * 100 = 49.85 → 50
+        self.assertEqual(normalize_total_score(166), 50)
+
+    def test_never_exceeds_hundred(self):
+        self.assertEqual(normalize_total_score(400), 100)
