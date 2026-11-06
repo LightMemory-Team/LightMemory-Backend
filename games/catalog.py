@@ -7,31 +7,37 @@ FOODS、market_route/views.py 的 STAGE_EXPOSURE_RANGE 一樣——這些是不�
 管理介面。
 
 id 對應各遊戲共用 session 儲存時使用的 game_type（見 session_service.py）。
+name 是卡片上顯示的短名稱，title 是完整名稱。
 """
 
 GAMES = [
     {
         "id": "market_route",
+        "name": "菜市場找路",
         "title": "菜市場找路",
         "is_developed": True,
     },
     {
         "id": "market_shopping",
+        "name": "市場買菜",
         "title": "市場買菜",
         "is_developed": True,
     },
     {
         "id": "market_sort",
+        "name": "整理菜籃",
         "title": "整理菜籃遊戲",
         "is_developed": True,
     },
     {
         "id": "memory_recall",
+        "name": "煮菜過程",
         "title": "煮菜過程",
         "is_developed": True,
     },
     {
         "id": "fridge_check",
+        "name": "冰箱檢查",
         "title": "冰箱檢查",
         "is_developed": True,
     },

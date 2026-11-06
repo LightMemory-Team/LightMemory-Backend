@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from . import encouragement, services, weekly_report
+from .models import WeeklyReport
 
 
 def _error_response(code, message, *, data=None, status=200):
@@ -48,12 +49,19 @@ def weekly_report_view(request):
     if not request.user.is_authenticated:
         return _error_response("NOT_AUTHENTICATED", "請先登入", status=401)
 
-    return Response(
-        {
-            "success": True,
-            "data": weekly_report.build_weekly_report(
-                request.user, timezone.localdate()
-            ),
-            "error": None,
-        }
+    today = timezone.localdate()
+    data = weekly_report.build_weekly_report(request.user, today)
+
+    # 記錄這一週的週報：存內容快照，並記下第一次點開的時間。
+    # 首頁今日任務的「看看上週回顧」靠 viewed_at 判斷是否完成。
+    # get_or_create：有就拿出來、沒有才建立，同一週重複點開不會多存。
+    week_start, _ = weekly_report.get_report_week(today)
+    record, _created = WeeklyReport.objects.get_or_create(
+        user=request.user, week_start=week_start
     )
+    record.report = data
+    if record.viewed_at is None:
+        record.viewed_at = timezone.now()
+    record.save(update_fields=["report", "viewed_at"])
+
+    return Response({"success": True, "data": data, "error": None})
