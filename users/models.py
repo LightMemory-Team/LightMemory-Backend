@@ -32,20 +32,3 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.nickname or self.last_name or self.username
-    
-class FamilyContact(models.Model):
-    RELATIONSHIP_CHOICES = [
-        ('spouse', '配偶'),
-        ('child', '子女'),
-        ('sibling', '手足'),
-        ('other', '其他'),
-    ]
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='family_contacts')
-    family_name = models.CharField(max_length=50)
-    relationship = models.CharField(max_length=20, choices=RELATIONSHIP_CHOICES, blank=True)
-    phone = models.CharField(max_length=10, blank=True)
-    email = models.CharField(max_length=100, blank=True)
-
-    def __str__(self):
-        return f"{self.family_name}({self.get_relationship_display()})"
