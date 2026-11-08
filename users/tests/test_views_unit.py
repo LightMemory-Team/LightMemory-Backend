@@ -216,20 +216,34 @@ class RegisterSerializerTests(TestCase):
         self.assertIn('region', serializer.errors)
 
     def test_all_documented_region_choices_accepted(self):
-        for index, region in enumerate(['north', 'central', 'south', 'east']):
+        for index, region in enumerate(['north', 'central', 'south']):
             with self.subTest(region=region):
                 serializer = RegisterSerializer(
                     data={**VALID_PAYLOAD, 'username': f'user_{index}', 'region': region}
                 )
                 self.assertTrue(serializer.is_valid(), serializer.errors)
 
+    def test_east_region_rejected(self):
+        serializer = RegisterSerializer(
+            data={**VALID_PAYLOAD, 'username': 'user_east', 'region': 'east'}
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('region', serializer.errors)
+
     def test_all_documented_gender_choices_accepted(self):
-        for index, gender in enumerate(['male', 'female', 'other']):
+        for index, gender in enumerate(['male', 'female']):
             with self.subTest(gender=gender):
                 serializer = RegisterSerializer(
                     data={**VALID_PAYLOAD, 'username': f'user_g{index}', 'gender': gender}
                 )
                 self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_other_gender_rejected(self):
+        serializer = RegisterSerializer(
+            data={**VALID_PAYLOAD, 'username': 'user_other', 'gender': 'other'}
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('gender', serializer.errors)
 
     def test_malformed_birth_date_rejected(self):
         serializer = RegisterSerializer(data={**VALID_PAYLOAD, 'birth_date': '1950/01/01x'})

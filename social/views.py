@@ -27,7 +27,7 @@ def notification_list(request):
         Notification.objects.filter(user=user, is_read=False).update(is_read=True)
         return success_response({"message": "已全部標記為已讀"})
 
-    notifications = Notification.objects.filter(user=user).order_by('-created_at')
+    notifications = Notification.objects.filter(user=user).order_by('-created_at', '-id')
     serializer = NotificationSerializer(notifications, many=True)
     return success_response({"notifications": serializer.data})
 

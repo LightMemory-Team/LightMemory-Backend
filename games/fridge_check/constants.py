@@ -22,7 +22,7 @@ FOODS = [
     },
     {
         "food_code": "pepper",
-        "food_name": "青椒",
+        "food_name": "甜椒",
     },
     {
         "food_code": "carrot",
