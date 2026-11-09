@@ -49,7 +49,7 @@ def save_avatar_file(avatar_file):
     try:
         from diary.external import upload_to_firebase
 
-        url = upload_to_firebase(avatar_file, "avatars")
+        url = upload_to_firebase(avatar_file, "avatars", public=True)
         if url:
             return url
     except Exception as exc:

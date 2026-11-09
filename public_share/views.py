@@ -6,6 +6,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from diary.media import media_url
 from social.models import Comment, Notification, Post
 from social.utils import get_display_name
 
@@ -38,7 +39,7 @@ class SharePageView(View):
         diary = post.diary
         base_time = diary.created_at if diary else post.created_at
         date_str = timezone.localtime(base_time).date().isoformat()
-        photo_url = post.image_path or (diary.image_path if diary else '')
+        photo_url = media_url(post.image_path or (diary.image_path if diary else ''))
         title = (diary.title if diary and diary.title else '')
         hashtags = diary.hashtags if (diary and isinstance(diary.hashtags, list)) else []
 

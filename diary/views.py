@@ -11,6 +11,7 @@ from social.utils import get_visible_post, serialize_post
 
 from .models import Diary, DiaryReply, DiaryAnalysis
 from . import external, ai_gen, analysis as analysis_utils
+from .media import media_url
 
 
 
@@ -43,7 +44,7 @@ class DiaryCalendarView(APIView):
                 "diary_id": d.id,
                 "date": timezone.localtime(d.created_at).date().isoformat(),
                 "title": d.title,
-                "photo_url": d.image_path,
+                "photo_url": media_url(d.image_path),
                 "post_text": d.post_text,
                 "created_at": timezone.localtime(d.created_at).isoformat(),
             }
@@ -81,7 +82,7 @@ class DiaryCalendarView(APIView):
         return Response({
             "data": {
                 "diary_id": diary.id,
-                "photo_url": diary.image_path,
+                "photo_url": media_url(diary.image_path),
                 "first_question": first_question,
                 "status": diary.status,
                 "created_at": timezone.localtime(diary.created_at).isoformat(),
@@ -138,7 +139,7 @@ class DiaryReplyView(APIView):
             "data": {
                 "round_index": round_index,
                 "transcript": transcript,
-                "audio_url": audio_url,
+                "audio_url": media_url(audio_url),
                 "ai_reply": ai_reply,
                 "reply_count": reply_count,
                 "is_finalizable": non_skipped_count >= 2,
@@ -194,7 +195,7 @@ class DiaryFinalizeView(APIView):
                 "status": diary.status,
                 "date": timezone.localtime(diary.created_at).date().isoformat(),
                 "created_at": timezone.localtime(diary.created_at).isoformat(),
-                "photo_url": diary.image_path,
+                "photo_url": media_url(diary.image_path),
                 "title": diary.title,
                 "ai_response": diary.ai_response,
                 "post_text": diary.post_text,
@@ -267,7 +268,7 @@ class DiaryDetailView(APIView):
                 "round_index": r.round_index,
                 "question": r.question,
                 "transcript": r.transcript,
-                "audio_url": r.audio_path,
+                "audio_url": media_url(r.audio_path),
                 "is_skipped": r.is_skipped,
             }
             for r in replies
@@ -291,7 +292,7 @@ class DiaryDetailView(APIView):
             "date": timezone.localtime(diary.created_at).date().isoformat(),
             "created_at": timezone.localtime(diary.created_at).isoformat(),
             "status": diary.status,
-            "photo_url": diary.image_path,
+            "photo_url": media_url(diary.image_path),
             "first_question": diary.first_question,
             "replies": replies_data,
             "pending_question": diary.pending_question or None,
@@ -344,9 +345,9 @@ class DiaryReviewView(APIView):
                 "diary_id": d.id,
                 "date": timezone.localtime(d.created_at).date().isoformat(),
                 "title": d.title,
-                "photo_url": d.image_path,
+                "photo_url": media_url(d.image_path),
                 "post_text": d.post_text,
-                "audio_url": audio_url,
+                "audio_url": media_url(audio_url),
                 "is_shared": has_post,
                 "post_id": d.social_post.id if has_post else None,
                 "created_at": timezone.localtime(d.created_at).isoformat(),
