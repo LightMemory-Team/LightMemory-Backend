@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from rest_framework.views import APIView
@@ -89,6 +90,43 @@ class DiaryCalendarView(APIView):
             }
         }, status=status.HTTP_201_CREATED)
 
+# 一篇日記最多問答幾輪：第 4 輪回覆後就算完成（is_done）
+MAX_REPLY_ROUNDS = 4
+
+
+def parse_round_index(raw):
+    """把前端送來的 round_index 轉成 1～MAX_REPLY_ROUNDS 的整數。
+
+    不是整數（"abc"、"1.5"、true）或超出範圍都回傳 None。
+    multipart 表單送來的是字串（"1"），JSON 送來的可能是整數（1），兩種都接受。
+    """
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, str):
+        try:
+            value = int(raw.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    if not 1 <= value <= MAX_REPLY_ROUNDS:
+        return None
+    return value
+
+
+def _error(code, message, http_status):
+    return Response({"error": {"code": code, "message": message}}, status=http_status)
+
+
+ROUND_ALREADY_ANSWERED = (
+    "ROUND_ALREADY_ANSWERED",
+    "這一輪已經回答過了",
+    status.HTTP_409_CONFLICT,
+)
+
+
 class DiaryReplyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -96,44 +134,64 @@ class DiaryReplyView(APIView):
         try:
             diary = Diary.objects.get(id=diary_id, user=request.user)
         except Diary.DoesNotExist:
-            return Response({"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}}, status=404)
+            return _error("DIARY_NOT_FOUND", "找不到這篇日記", 404)
 
         if diary.status == "done":
-            return Response({"error": {"code": "DIARY_ALREADY_FINALIZED", "message": "這篇日記已經完成了"}}, status=400)
+            return _error("DIARY_ALREADY_FINALIZED", "這篇日記已經完成了", 400)
 
         audio = request.FILES.get('audio')
-        round_index = request.data.get('round_index')
-        if not audio or not round_index:
-            return Response({"error": {"code": "INVALID_AUDIO", "message": "這一段錄音沒有收到，請再錄一次"}}, status=400)
-        round_index = int(round_index)
+        raw_round_index = request.data.get('round_index')
+        if not audio or raw_round_index is None or raw_round_index == "":
+            return _error("INVALID_AUDIO", "這一段錄音沒有收到，請再錄一次", 400)
+        round_index = parse_round_index(raw_round_index)
+        if round_index is None:
+            return _error("INVALID_ROUND_INDEX", "這一輪的編號不正確，請重新錄音", 400)
+        # 語音辨識、上傳都很花時間，重複的輪次先擋掉，不要白做
+        if diary.replies.filter(round_index=round_index).exists():
+            return _error(*ROUND_ALREADY_ANSWERED)
 
         transcript = external.transcribe_audio(audio)
         if transcript is None:
-            return Response({"error": {"code": "TRANSCRIPTION_FAILED", "message": "語音辨識失敗，請再錄一次"}}, status=500)
+            return _error("TRANSCRIPTION_FAILED", "語音辨識失敗，請再錄一次", 500)
         audio.seek(0)
         audio_url = external.upload_to_firebase(audio, "audio")
         if audio_url is None:
-            return Response({"error": {"code": "UPLOAD_FAILED", "message": "錄音上傳失敗，請再試一次"}}, status=500)
+            return _error("UPLOAD_FAILED", "錄音上傳失敗，請再試一次", 500)
 
-        question_for_this_round = diary.pending_question or diary.first_question
-        DiaryReply.objects.create(
-            diary=diary, round_index=round_index,
-            question=question_for_this_round, transcript=transcript,
-            audio_path=audio_url, is_skipped=False,
-        )
-        diary.status = "processing"
+        # 寫入資料庫的部分放在同一個 transaction：新增回覆、更新日記狀態要嘛都成功、
+        # 要嘛都不寫。select_for_update 鎖住這篇日記，同一篇同時送來的請求會排隊，
+        # 避免重複輪次（IntegrityError → 500）、回覆數算錯。
+        with transaction.atomic():
+            diary = Diary.objects.select_for_update().get(pk=diary.pk)
+            rejected = None
+            if diary.status == "done":
+                rejected = ("DIARY_ALREADY_FINALIZED", "這篇日記已經完成了", 400)
+            elif diary.replies.filter(round_index=round_index).exists():
+                rejected = ROUND_ALREADY_ANSWERED
+            if rejected:
+                # 剛上傳的錄音用不到了，盡力刪掉，不要留下孤兒檔案
+                external.delete_from_firebase([audio_url])
+                return _error(*rejected)
 
-        reply_count = diary.replies.count()
-        non_skipped_count = diary.replies.filter(is_skipped=False).count()
-        is_done = reply_count >= 4
+            question_for_this_round = diary.pending_question or diary.first_question
+            DiaryReply.objects.create(
+                diary=diary, round_index=round_index,
+                question=question_for_this_round, transcript=transcript,
+                audio_path=audio_url, is_skipped=False,
+            )
+            diary.status = "processing"
 
-        ai_reply = None
-        if not is_done:
-            ai_reply = ai_gen.generate_follow_up(transcript)
-            diary.pending_question = ai_reply
-        else:
-            diary.pending_question = ""
-        diary.save()
+            reply_count = diary.replies.count()
+            non_skipped_count = diary.replies.filter(is_skipped=False).count()
+            is_done = reply_count >= MAX_REPLY_ROUNDS
+
+            ai_reply = None
+            if not is_done:
+                ai_reply = ai_gen.generate_follow_up(transcript)
+                diary.pending_question = ai_reply
+            else:
+                diary.pending_question = ""
+            diary.save()
 
         return Response({
             "data": {
@@ -155,36 +213,45 @@ class DiaryFinalizeView(APIView):
         try:
             diary = Diary.objects.get(id=diary_id, user=request.user)
         except Diary.DoesNotExist:
-            return Response({"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}}, status=404)
+            return _error("DIARY_NOT_FOUND", "找不到這篇日記", 404)
 
         if diary.status == "done":
             return self._build_response(diary, http_status=200)
 
-        replies = diary.replies.filter(is_skipped=False).order_by('round_index')
-        combined = '，'.join(r.transcript for r in replies if r.transcript)
-        if not combined:
-            return Response({"error": {"code": "NO_VALID_REPLY", "message": "需要先錄一段內容才能生成日記"}}, status=400)
+        # 分析、AI 內容、日記狀態放在同一個 transaction：中途失敗全部還原，
+        # 不會留下「有分析結果、日記卻停在 processing」的半完成狀態。
+        # 鎖住這篇日記，同時送來的第二個請求會等第一個完成，看到 done 後直接回傳，
+        # 不會重複分析、重複呼叫 AI。
+        with transaction.atomic():
+            diary = Diary.objects.select_for_update().get(pk=diary.pk)
+            if diary.status == "done":
+                return self._build_response(diary, http_status=200)
 
-        diary.transcription = combined
-        diary.diary_text = combined
+            replies = diary.replies.filter(is_skipped=False).order_by('round_index')
+            combined = '，'.join(r.transcript for r in replies if r.transcript)
+            if not combined:
+                return _error("NO_VALID_REPLY", "需要先錄一段內容才能生成日記", 400)
 
-        quality = analysis_utils.assess_sample_quality(combined)
-        if quality != "ok":
-            DiaryAnalysis.objects.update_or_create(diary=diary, defaults={"is_valid": False, "invalid_reason": quality})
-        else:
-            result = analysis_utils.analyze_transcription(combined)
-            DiaryAnalysis.objects.update_or_create(diary=diary, defaults={"is_valid": True, **result})
+            diary.transcription = combined
+            diary.diary_text = combined
 
-        content = ai_gen.generate_finalize_content(combined)
-        diary.title = content["title"]
-        diary.ai_response = content["ai_response"]
-        diary.post_text = content["post_text"]
-        diary.hashtags = content["hashtags"]
-        diary.category = content["category"]
-        diary.suggested_replies = content["suggested_replies"]
-        diary.invite_text = content["invite_text"]
-        diary.status = "done"
-        diary.save()
+            quality = analysis_utils.assess_sample_quality(combined)
+            if quality != "ok":
+                DiaryAnalysis.objects.update_or_create(diary=diary, defaults={"is_valid": False, "invalid_reason": quality})
+            else:
+                result = analysis_utils.analyze_transcription(combined)
+                DiaryAnalysis.objects.update_or_create(diary=diary, defaults={"is_valid": True, **result})
+
+            content = ai_gen.generate_finalize_content(combined)
+            diary.title = content["title"]
+            diary.ai_response = content["ai_response"]
+            diary.post_text = content["post_text"]
+            diary.hashtags = content["hashtags"]
+            diary.category = content["category"]
+            diary.suggested_replies = content["suggested_replies"]
+            diary.invite_text = content["invite_text"]
+            diary.status = "done"
+            diary.save()
 
         return self._build_response(diary, http_status=201)
 
