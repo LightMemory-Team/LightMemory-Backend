@@ -64,4 +64,6 @@ def weekly_report_view(request):
         record.viewed_at = timezone.now()
     record.save(update_fields=["report", "viewed_at"])
 
-    return Response({"success": True, "data": data, "error": None})
+    return Response(
+        {"success": True, "data": weekly_report.with_signed_media(data), "error": None}
+    )

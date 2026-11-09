@@ -17,6 +17,7 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from ai_service.weekly_summary import build_positive_facts, generate_weekly_summary
+from diary.media import media_url
 from diary.models import Diary
 from games.models import GameSession
 from games.zscore import z_score_to_display_score
@@ -290,6 +291,20 @@ def build_abilities(user, week_start, played_sources):
         ),
         "dimensions": dimensions,
     }
+
+
+def with_signed_media(report):
+    """回傳一份把日記照片換成簽名網址的週報（不改動原本的 dict）。
+
+    週報快照存的是照片的檔案路徑；簽名網址有時效，不能存進快照，
+    所以只在回傳給前端時才轉換。
+    """
+    diary = report.get("diary") or {}
+    entries = [
+        {**entry, "photo_url": media_url(entry.get("photo_url"))}
+        for entry in diary.get("entries", [])
+    ]
+    return {**report, "diary": {**diary, "entries": entries}}
 
 
 def build_weekly_report(user, today):

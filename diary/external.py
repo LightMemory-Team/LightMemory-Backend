@@ -14,7 +14,14 @@ except ImportError:
     _cc = None
 
 
-def upload_to_firebase(file_obj, folder):
+def upload_to_firebase(file_obj, folder, public=False):
+    """上傳檔案到 Firebase Storage。
+
+    public=False（預設，日記照片與錄音）：檔案保持私有，回傳「檔案路徑」，
+    要給前端時用 diary.media.media_url() 換成有時效的簽名網址。
+    public=True（頭像）：檔案設成公開，回傳永久公開網址。
+    上傳失敗回傳 None。
+    """
     try:
         from firebase_admin import storage
         from config.firebase import firebase_app
@@ -22,8 +29,10 @@ def upload_to_firebase(file_obj, folder):
         ext = file_obj.name.split('.')[-1] if '.' in file_obj.name else 'bin'
         blob = bucket.blob(f"voice-diary/{folder}/{uuid.uuid4().hex}.{ext}")
         blob.upload_from_file(file_obj, content_type=getattr(file_obj, 'content_type', None))
-        blob.make_public()
-        return blob.public_url
+        if public:
+            blob.make_public()
+            return blob.public_url
+        return blob.name
     except Exception as e:
         logger.error(f"Firebase上傳失敗: {e}")
         return None
