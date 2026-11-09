@@ -41,6 +41,10 @@ class SessionNotFound(Exception):
     """找不到指定的 session_id 時拋出。"""
 
 
+class SessionOwnerMismatch(Exception):
+    """session_id 已經存在，但屬於另一位使用者時拋出。"""
+
+
 def _to_dict(session):
     """將 GameSession ORM instance 轉換為外部呼叫者預期的 dict 結構。"""
     return {
@@ -138,10 +142,18 @@ def get_or_create_session(
     對應到 GameSession.client_session_id，不是資料庫的主鍵。
 
     回傳 (session_dict, created)，created 是 bool，告訴呼叫端這是不是剛建立的。
+
+    session_id 已經存在、但屬於另一位使用者時，拋出 SessionOwnerMismatch，
+    不會回傳（或修改）別人的 session。呼叫端要自己決定怎麼回應（通常是 403）。
     """
     game = _get_game(game_type)
     try:
         session = GameSession.objects.get(game=game, client_session_id=str(session_id))
+        requester_id = (
+            user.id if user is not None else (initial_state or {}).get("user_id")
+        )
+        if requester_id is not None and session.user_id != requester_id:
+            raise SessionOwnerMismatch(session_id)
         return _to_dict(session), False
     except GameSession.DoesNotExist:
         owner = _resolve_user(user, initial_state)
