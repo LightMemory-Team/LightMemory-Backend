@@ -2,6 +2,8 @@ from datetime import timedelta
 import logging
 
 from django.contrib.auth import get_user_model
+from django.core.files.storage import default_storage
+from django.db import transaction
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -11,8 +13,10 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from config.exceptions import ApiError
-from diary.models import Diary
+from diary.external import delete_from_firebase
+from diary.models import Diary, DiaryReply
 from games.models import GameSession
+from social.models import Post
 
 from .serializers import (
     AccountDeleteSerializer,
@@ -42,6 +46,40 @@ def get_active_user_or_404(username):
             status_code=status.HTTP_404_NOT_FOUND,
         )
     return user
+
+
+def collect_user_media(user):
+    """收集這位使用者所有存在檔案儲存空間的檔案（資料庫裡存的路徑或網址）。
+
+    包含頭像、日記照片、日記錄音、社群貼文照片。必須在刪除使用者「之前」呼叫，
+    因為使用者一刪，這些資料列也會一起被刪掉。
+    """
+    values = {user.avatar_url}
+    for image_path, audio_path in Diary.objects.filter(user=user).values_list(
+        "image_path", "audio_path"
+    ):
+        values.update([image_path, audio_path])
+    values.update(
+        DiaryReply.objects.filter(diary__user=user).values_list("audio_path", flat=True)
+    )
+    values.update(Post.objects.filter(user=user).values_list("image_path", flat=True))
+    return {v for v in values if v}
+
+
+def remove_user_media(values):
+    """刪除收集到的檔案：雲端（Firebase）的檔案，以及存在本機 media 的頭像。
+
+    盡力而為：任何一個檔案刪不掉都只記錄，不會影響其他檔案，也不會丟例外。
+    """
+    from django.conf import settings
+
+    local = {v for v in values if v.startswith(settings.MEDIA_URL)}
+    delete_from_firebase(values - local)
+    for value in local:
+        try:
+            default_storage.delete(value[len(settings.MEDIA_URL) :])
+        except Exception as exc:
+            logger.warning("本機檔案刪除失敗（%s）: %s", value, exc)
 
 
 def save_avatar_file(avatar_file):
@@ -163,7 +201,13 @@ class MeView(generics.RetrieveUpdateAPIView):
             data=request.data, context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
-        request.user.delete()
+
+        user = request.user
+        media = collect_user_media(user)
+        with transaction.atomic():
+            user.delete()
+            # 資料庫刪除成功後才刪檔案：刪帳號失敗就不會留下沒檔案的帳號
+            transaction.on_commit(lambda: remove_user_media(media))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
