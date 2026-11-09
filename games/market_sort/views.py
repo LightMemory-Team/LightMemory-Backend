@@ -59,13 +59,27 @@ class MarketSortSubmitView(APIView):
         is_complete = validated["is_complete"]
         questions = validated["questions"]
 
-        session, created = session_service.get_or_create_session(
-            GAME_TYPE,
-            session_id,
-            initial_state={"user_id": request.user.id},
-            user=request.user,
-            is_pretest=session_service.is_first_session(GAME_TYPE, request.user),
-        )
+        try:
+            session, created = session_service.get_or_create_session(
+                GAME_TYPE,
+                session_id,
+                initial_state={"user_id": request.user.id},
+                user=request.user,
+                is_pretest=session_service.is_first_session(GAME_TYPE, request.user),
+            )
+        except session_service.SessionOwnerMismatch:
+            # session_id 已被別的使用者用過：不回傳也不修改對方的 session
+            return Response(
+                {
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "FORBIDDEN",
+                        "message": "這場遊戲不屬於目前的使用者",
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # 冪等性處理：同一個 session_id 已經算過分，直接回傳既有結果，不重算不重寫。
         # 還沒結束的（之前送過未完成、或資料不足被擋下）照常往下驗證、計分，
