@@ -24,6 +24,7 @@ from .serializers import (
     RegisterSerializer,
     validate_new_password,
 )
+from .throttles import PasswordResetIPThrottle, PasswordResetUsernameThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +257,7 @@ class PasswordResetCheckView(APIView):
 
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [PasswordResetIPThrottle, PasswordResetUsernameThrottle]
 
     def post(self, request):
         serializer = PasswordResetCheckSerializer(data=request.data)
@@ -269,6 +271,7 @@ class PasswordResetView(APIView):
 
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [PasswordResetIPThrottle, PasswordResetUsernameThrottle]
 
     def post(self, request):
         serializer = PasswordResetSerializer(data=request.data)
