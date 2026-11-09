@@ -1,10 +1,10 @@
 # 後端修正：前端需配合的變更說明
 
-更新日期：2026-11-09 · 對應分支：`fix/games-auth-fallback`（合併目標 `fix/features`）
+更新日期：2026-11-09 · 對應分支：`fix/games-auth-fallback`（F1）、`fix/games-session-owner`（F2），合併目標皆為 `fix/features`
 
 這份文件給 Flutter 前端閱讀，說明後端這一輪「安全與穩定性修正」中，**會改變 API 行為**的部分，以及前端需要確認或修改的地方。
 
-> 目前只完成第 1 項（F1）。第 2 節是「預告」：已規劃、尚未實作的後端變更，列出來讓前端提早準備；實作時程與細節可能調整，**每項真正上線前會再更新這份文件**。
+> 目前已完成 F1（第 1 節）與 F2（第 1-2 節）。第 2 節是「預告」：已規劃、尚未實作的後端變更，列出來讓前端提早準備；實作時程與細節可能調整，**每項真正上線前會再更新這份文件**。
 
 ---
 
@@ -13,6 +13,7 @@
 | 編號 | 變更 | 狀態 | 前端是否要改 |
 |---|---|---|---|
 | F1 | 遊戲 API：未登入不再被當成「資料庫第一位使用者」 | ✅ 後端已改完（待合併） | ⚠️ **要確認**：所有遊戲請求都要帶 JWT |
+| F2 | 冰箱檢查、市場買菜的「作答」端點：只能操作自己的 session | ✅ 後端已改完（待合併） | ⚠️ **要確認**：作答請求要帶**建立該 session 的同一個帳號**的 JWT |
 | 預告 | 預設所有 API 都需要登入、登入／註冊限速、忘記密碼加驗證、回應格式統一…… | ⏳ 尚未實作 | 見第 2 節 |
 
 ---
@@ -107,13 +108,11 @@
 
 ### 1.4 沒有改變的端點（請注意！）
 
-下列端點**這次沒有動**，所以「沒帶 token」的行為跟以前一樣（不一定會被擋）：
+F1 沒有動作答類端點。其中冰箱檢查與市場買菜已在 **F2（第 1-2 節）** 處理。F1 與 F2 都**還沒動**的是：
 
-- `market-shopping/sessions/<session_id>/item-answers/`、`.../change-answers/`
-- `fridge-check/sessions/<session_id>/answers/`（含 `answer`、`session` 單數等別名）
 - `market-sort/` 底下的端點
 
-這些端點的「檢查 session 是否屬於目前使用者」會在**下一輪修正（F2／F3）**處理。**前端不要因為它們目前沒被擋，就省略 token**，否則等下一輪上線會一次壞掉。
+這些端點的「檢查 session 是否屬於目前使用者」會在**後續修正（F3）**處理。**前端不要因為它們目前沒被擋，就省略 token**，否則等上線會一次壞掉。
 
 ### 1.5 前端要做的事（請逐項確認）
 
@@ -184,6 +183,70 @@
 
 ---
 
+## 1-2. 已完成：F2 — 作答端點檢查 session 擁有者
+
+### 1-2.1 背景
+
+冰箱檢查、市場買菜的「送出答案」端點，之前只用網址上的 `session_id` 找 session，**不檢查這場遊戲是誰的**。只要知道（或猜到）別人的 `session_id`，就能替對方作答、改掉對方的成績。
+
+現在這些端點會先確認「這場遊戲屬於目前登入的人」。
+
+### 1-2.2 受影響的端點
+
+| 方法 | 路徑 |
+|---|---|
+| POST | `fridge-check/sessions/<session_id>/answers/`（含 `answer`、`session` 單數等別名，以及底線版 `fridge_check/...`） |
+| POST | `market-shopping/sessions/<session_id>/item-answers/` |
+| POST | `market-shopping/sessions/<session_id>/change-answers/` |
+
+### 1-2.3 新的判斷順序與回應
+
+後端的檢查順序是：**欄位格式 → 找 session → 檢查擁有者 → 檢查是否已結束 → 判題**。
+
+| 情況 | HTTP | `error.code` |
+|---|---|---|
+| 請求內容格式錯誤（例如 `answer` 不是物件） | 400 | 與以前相同（`INVALID_ANSWER` 等） |
+| `session_id` 不存在 | 404 | `SESSION_NOT_FOUND`（與以前相同） |
+| **session 是別人的，或沒帶 token** | **403** | **`FORBIDDEN`**（新增） |
+| 自己的 session，但已經結束 | 400 | `SESSION_COMPLETED`（與以前相同） |
+| 自己的 session，正常作答 | 200 | 無（與以前相同） |
+
+`403` 的回應內容：
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "這場遊戲不屬於目前的使用者"
+  }
+}
+```
+
+被擋下時，後端**不會**寫入任何作答紀錄，也不會改變 session 狀態。
+
+### 1-2.4 前端要做的事
+
+1. 作答請求一定要帶 `Authorization: Bearer <access_token>`，而且必須是**建立（開始）這場遊戲的同一個帳號**。
+2. **登出再換帳號登入時，要清掉先前的 `session_id`**。否則舊帳號開的遊戲，用新帳號的 token 作答會收到 403。
+3. 收到 `403 FORBIDDEN`：不要重試同一個請求。建議回到首頁或重新開始一場遊戲；如果同時懷疑 token 有問題，先走 refresh／重新登入流程。
+4. 回應格式與 1.3-B 的 `FORBIDDEN` 完全相同，可以共用同一段處理程式。
+
+### 1-2.5 驗證結果（後端）
+
+- 新增 `games/tests_session_owner.py`（11 個測試）：自己作答成功；別人或沒登入作答 → 403 且沒有寫入任何作答紀錄；session 不存在仍是 404。
+- 確認過：把修正拿掉後，其中 6 個「別人／沒登入」的測試會失敗，代表測試確實抓得到這個漏洞。
+- 全部測試通過（778 個，另有 1 個原本就預期失敗）。
+
+### 1-2.6 修改的檔案
+
+- `games/utils.py`：新增共用函式 `forbidden_unless_owner()`。
+- `games/fridge_check/views.py`、`games/market_shopping/views.py`：作答端點呼叫它。
+- `games/tests_session_owner.py`：新增測試。
+
+---
+
 ## 2. 預告：已規劃但尚未實作的變更
 
 > ⚠️ 以下**還沒有改**，只是讓前端提早知道方向。上線前會更新本文件，請勿現在就照這節改程式。標 ❓ 的項目還需要和前端討論後才會定案。
@@ -195,11 +258,11 @@
 - 其他端點（含 `home` 的 `greet`、`daily-suggetion`）未登入會回 `401 NOT_AUTHENTICATED`。
 - 前端影響：確認**除上述公開端點外**，每個請求都帶 token。
 
-### 2.2 遊戲 session 擁有者檢查（F2、F3）— 可能破壞性
+### 2.2 `market-sort` 的 session 擁有者檢查（F3）— 可能破壞性
 
-- `fridge-check` 答題、`market-shopping` 答題（item／change）、`market-sort` 目前不檢查 session 屬於誰。
-- 預計補上，錯誤回應與 1.3-B 相同：`404 SESSION_NOT_FOUND`／`403 FORBIDDEN`。
-- 前端影響：只能操作**自己開的** session；`session_id`（以及 `market-sort` 的 `client_session_id`）要確實用同一個登入帳號建立與使用。
+- `fridge-check`、`market-shopping` 已在 F2 完成（第 1-2 節）。**`market-sort` 還沒改**：它用前端自己產生的 `client_session_id` 查 session，目前沒有比對使用者，猜中別人的 id 就會拿到對方已完成的結果。
+- 預計補上：只能存取**自己的** session，錯誤回應與 1.3-B 相同（`403 FORBIDDEN`）。
+- 前端影響：`client_session_id` 要確實用同一個登入帳號建立與使用；**建議用 UUID 這類不易重複的值**，不要用簡單的流水號。
 
 ### 2.3 忘記密碼加入身分驗證（F4）— 破壞性 ❓
 
