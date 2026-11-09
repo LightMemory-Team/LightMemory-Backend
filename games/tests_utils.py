@@ -24,12 +24,12 @@ class GetCurrentUserTests(TestCase):
 
         self.assertEqual(get_current_user(self.request), logged_in)
 
-    def test_falls_back_to_first_user_when_not_logged_in(self):
-        first = User.objects.create_user(username="first", password="testpass123")
+    def test_returns_none_when_not_logged_in_even_if_users_exist(self):
+        User.objects.create_user(username="first", password="testpass123")
         User.objects.create_user(username="second", password="testpass123")
         self.request.user = AnonymousUser()
 
-        self.assertEqual(get_current_user(self.request), first)
+        self.assertIsNone(get_current_user(self.request))
 
     def test_returns_none_when_no_user_exists(self):
         self.request.user = AnonymousUser()
