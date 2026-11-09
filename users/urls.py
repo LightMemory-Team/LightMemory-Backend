@@ -1,20 +1,3 @@
-"""
-URL configuration for config project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/6.0/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
-
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -35,6 +18,10 @@ urlpatterns = [
         name="password_reset_check",
     ),
     path("password-reset/", views.PasswordResetView.as_view(), name="password_reset"),
-    # 會員中心：取得／修改自己的資料
+    # 會員中心子功能
+    path("me/password/", views.PasswordChangeView.as_view(), name="password_change"),
+    path("me/avatar/", views.AvatarView.as_view(), name="avatar"),
+    path("me/stats/", views.UserStatsView.as_view(), name="user_stats"),
+    # 會員中心：取得／修改／刪除帳號
     path("me/", views.MeView.as_view(), name="me"),
 ]
