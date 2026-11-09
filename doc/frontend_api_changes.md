@@ -1,323 +1,373 @@
-# 後端修正：前端需配合的變更說明
+# 後端安全與穩定性修正總覽（F1～F7）
 
-更新日期：2026-11-09 · 對應分支：`fix/games-auth-fallback`（F1）、`fix/games-session-owner`（F2），合併目標皆為 `fix/features`
+更新日期：2026-11-09 · 範圍：`fix/features` 分支（個別功能問題），F1～F7 已全部合併進去
 
-這份文件給 Flutter 前端閱讀，說明後端這一輪「安全與穩定性修正」中，**會改變 API 行為**的部分，以及前端需要確認或修改的地方。
+這份文件說明這一輪後端修正**改了什麼、為什麼改、前端要配合什麼**。給前端（Flutter）看，也可以當後端的修改紀錄。
 
-> 目前已完成 F1（第 1 節）與 F2（第 1-2 節）。第 2 節是「預告」：已規劃、尚未實作的後端變更，列出來讓前端提早準備；實作時程與細節可能調整，**每項真正上線前會再更新這份文件**。
+> 重點先看第 1 節的「前端待辦」與「錯誤碼總表」。想知道某一項的來龍去脈，再看第 2 節對應的小節。
 
 ---
 
-## 0. 一眼看懂
+## 0. 總覽
 
-| 編號 | 變更 | 狀態 | 前端是否要改 |
+| 編號 | 問題 | 嚴重度 | 前端要改嗎 | PR |
+|---|---|---|---|---|
+| F1 | 遊戲 API 未登入時，會被當成「資料庫第一位使用者」 | 高 | ⚠️ 遊戲請求一律要帶 JWT | [#87](https://github.com/LightMemory-Team/LightMemory-Backend/pull/87) |
+| F2 | 冰箱檢查、市場買菜的作答端點不檢查 session 屬於誰 | 高 | ⚠️ 作答要用建立該場遊戲的同一個帳號 | [#88](https://github.com/LightMemory-Team/LightMemory-Backend/pull/88) |
+| F3 | 市場分類（market_sort）可讀取／覆蓋他人的場次 | 高 | ⚠️ `session_id` 用 UUID，換帳號要換新的 | [#89](https://github.com/LightMemory-Team/LightMemory-Backend/pull/89) |
+| F4 | 忘記密碼 API 沒有任何次數限制 | 中 | ⚠️ 要處理 HTTP 429 | [#90](https://github.com/LightMemory-Team/LightMemory-Backend/pull/90) |
+| F5 | 日記照片與錄音是永久公開網址 | 高 | ⚠️ 網址變成有時效，不可永久儲存 | [#91](https://github.com/LightMemory-Team/LightMemory-Backend/pull/91) |
+| F6 | 刪除帳號後，雲端檔案沒有被刪 | 中 | 不用（可選：刪帳號後清本機快取） | [#92](https://github.com/LightMemory-Team/LightMemory-Backend/pull/92) |
+| F7 | 回覆日記時 `round_index` 不合法或重複會 500；寫入沒有 transaction | 中 | ⚠️ 要處理 400／409 | [#93](https://github.com/LightMemory-Team/LightMemory-Backend/pull/93) |
+
+- 測試：原本 764 個，現在 **835 個全部通過**（另有 1 個原本就預期失敗），新增 71 個測試。
+- 這一輪**沒有修改資料表**，不需要 migration。
+- 每一項都有驗證過「把修正拿掉，新測試就會失敗」，確認測試真的有在保護。
+
+---
+
+## 1. 給前端的重點
+
+### 1.1 前端待辦清單
+
+- [ ] **所有遊戲請求都帶 `Authorization: Bearer <access_token>`**（F1、F2、F3），包含作答端點與 `market-sort`
+- [ ] 登出再換帳號登入時，**清掉舊的 `session_id`**（F2、F3）
+- [ ] `market-sort` 的 `session_id` **用 UUID**，不要用 `test_1` 這類簡單的值（F3）
+- [ ] 忘記密碼兩支 API 要處理 **429**，顯示「操作太頻繁，請稍後再試」，可讀 `Retry-After` 標頭（F4）
+- [ ] 日記的 `photo_url`、`audio_url` **不要永久儲存**，也不要用完整網址當圖片快取 key；用 `diary_id` 當 key（F5）
+- [ ] `photo_url`、`audio_url` 可能是 **`null`**（簽名失敗），要有預設圖／隱藏播放鈕（F5）
+- [ ] 回覆日記（`replies`）要處理 **400 `INVALID_ROUND_INDEX`** 與 **409 `ROUND_ALREADY_ANSWERED`**（F7）
+- [ ] 收到 `401 NOT_AUTHENTICATED` 時，用 refresh token 換新 token 並重送；失敗再導回登入頁
+- [ ] 以 `error.code` 判斷錯誤，**不要比對 `error.message` 文字**
+
+### 1.2 錯誤碼總表（這一輪新增或變更的）
+
+| HTTP | `error.code` | 何時出現 | 建議處理 |
 |---|---|---|---|
-| F1 | 遊戲 API：未登入不再被當成「資料庫第一位使用者」 | ✅ 後端已改完（待合併） | ⚠️ **要確認**：所有遊戲請求都要帶 JWT |
-| F2 | 冰箱檢查、市場買菜的「作答」端點：只能操作自己的 session | ✅ 後端已改完（待合併） | ⚠️ **要確認**：作答請求要帶**建立該 session 的同一個帳號**的 JWT |
-| 預告 | 預設所有 API 都需要登入、登入／註冊限速、忘記密碼加驗證、回應格式統一…… | ⏳ 尚未實作 | 見第 2 節 |
+| 401 | `NOT_AUTHENTICATED` | token 過期或無效（本來就有） | 用 refresh token 換新 token，重送請求 |
+| 404 | `USER_NOT_FOUND` | 遊戲開場／歷史端點**沒帶 token**（F1） | 視為 bug：檢查是否漏帶標頭；使用者端導回登入頁 |
+| 403 | `FORBIDDEN` | 這場遊戲不屬於目前登入的人，或沒帶 token（F1、F2、F3） | 不要重試；回首頁或重新開始一場 |
+| 404 | `SESSION_NOT_FOUND` | `session_id` 不存在（本來就有） | 重新開始一場 |
+| 429 | `TOO_MANY_REQUESTS` | 忘記密碼嘗試太頻繁（F4） | 顯示等待提示，依 `Retry-After`（秒）後再試 |
+| 400 | `INVALID_ROUND_INDEX` | 日記回覆的 `round_index` 不是 1～4 的整數（F7） | 修正前端送出的值 |
+| 409 | `ROUND_ALREADY_ANSWERED` | 日記這一輪已經回答過（F7） | 視為這一輪已成功，重新取得日記狀態 |
+
+錯誤回應的格式（遊戲與使用者相關端點）：
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": { "code": "FORBIDDEN", "message": "這場遊戲不屬於目前的使用者" }
+}
+```
+
+> 注意：`diary` 相關端點的錯誤格式是 `{"error": {"code", "message"}}`，**沒有** `success` 與 `data` 欄位（這是既有的不一致，之後會統一，見第 3 節）。前端請先看 `error.code` 即可，兩種格式都適用。
+
+### 1.3 Flutter 範例（攔截器）
+
+```dart
+dio.interceptors.add(InterceptorsWrapper(
+  onRequest: (options, handler) {
+    final token = tokenStorage.accessToken;
+    if (token != null) {
+      options.headers['Authorization'] = 'Bearer $token';
+    }
+    handler.next(options);
+  },
+  onError: (error, handler) {
+    final status = error.response?.statusCode;
+    final code = error.response?.data?['error']?['code'];
+    if (status == 401 && code == 'NOT_AUTHENTICATED') {
+      // 用 refresh token 換新 access token 後重送；失敗則導回登入頁
+    } else if (status == 429) {
+      final wait = error.response?.headers.value('retry-after'); // 秒
+      // 顯示「操作太頻繁，請稍後再試」
+    }
+    handler.next(error);
+  },
+));
+```
 
 ---
 
-## 1. 已完成：F1 — 遊戲 API 不再借用第一位使用者
+## 2. 各項說明
 
-### 1.1 背景（為什麼要改）
+基底網址：`/api/`。
 
-之前為了讓前端「還沒串登入」也能測試遊戲，後端有一段開發用的捷徑：
+### F1 — 遊戲 API 不再借用第一位使用者
 
-> 如果請求**沒有帶 JWT（沒登入）**，就自動把請求當成「資料庫裡的第一位使用者」。
+**問題**：為了讓前端「還沒串登入」也能測試，後端有一段開發用捷徑：請求沒帶 JWT 時，自動當成「資料庫第一位使用者」。任何人不用登入就能用那位使用者的身分開始遊戲、寫入成績；前端漏帶 token 也不會有錯誤，資料卻默默寫進別人的帳號。
 
-這在正式環境是嚴重的安全問題：
+**修改**：`get_current_user()` 未登入時回傳 `None`，不再取第一位使用者。
 
-- 任何人**不用登入**就能用那位使用者的身分開始遊戲、寫入成績。
-- 第一位使用者的歷史成績可以被未登入的人讀到。
-- 前端如果忘記帶 token，**不會有任何錯誤**，資料卻默默寫進別人的帳號，很難發現。
-
-現在這個捷徑已移除：**沒登入就是沒登入**，後端會明確回錯誤。
-
-### 1.2 行為前後對照
+**行為對照**
 
 | | 修改前 | 修改後 |
 |---|---|---|
-| 有帶有效 JWT | 用登入者身分 | 用登入者身分（**不變**） |
-| 沒帶 JWT，DB 有使用者 | 偷用第一位使用者身分，**請求成功** | **回錯誤**（見 1.3） |
-| 沒帶 JWT，DB 沒有任何使用者 | 404 `USER_NOT_FOUND` | 404 `USER_NOT_FOUND`（不變） |
-| JWT 無效或過期 | 401 `NOT_AUTHENTICATED` | 401 `NOT_AUTHENTICATED`（**不變**，這是登入驗證層處理的） |
+| 有帶有效 JWT | 用登入者身分 | 用登入者身分（不變） |
+| 沒帶 JWT，DB 有使用者 | 偷用第一位使用者，**請求成功** | **回錯誤** |
+| JWT 無效或過期 | 401 `NOT_AUTHENTICATED` | 不變 |
 
-### 1.3 受影響的端點與「未登入」時的回應
+**未登入時的新回應**（基底 `games/`）
 
-基底網址：`/api/games/`。以下全部是**未帶 `Authorization` 標頭**時的新回應。
-
-#### A. 開始一場遊戲／查歷史 → `404 USER_NOT_FOUND`
-
-| 方法 | 路徑 | `error.message` |
+| 方法 | 路徑 | 回應 |
 |---|---|---|
-| POST | `fridge-check/sessions/`（也包含別名 `fridge-check/session/`，以及底線版 `fridge_check/...`） | 找不到可使用的使用者 |
-| GET | `fridge-check/history/`（同上有底線版） | 找不到可使用的使用者 |
-| POST | `market-shopping/sessions/` | 查無使用者資料 |
-| GET | `market-shopping/history/` | 查無使用者資料 |
-| POST | `market-route/start/` | 查無使用者資料 |
-| POST | `memory-recall/start/` | 查無使用者資料 |
+| POST | `fridge-check/sessions/`（含別名 `session/`，以及底線版 `fridge_check/...`） | 404 `USER_NOT_FOUND` |
+| GET | `fridge-check/history/` | 404 `USER_NOT_FOUND` |
+| POST | `market-shopping/sessions/` | 404 `USER_NOT_FOUND` |
+| GET | `market-shopping/history/` | 404 `USER_NOT_FOUND` |
+| POST | `market-route/start/` | 404 `USER_NOT_FOUND` |
+| POST | `memory-recall/start/` | 404 `USER_NOT_FOUND` |
+| GET／POST | `market-route/round/`、`round/answer/`、`finish/`、`result/<session_id>/` | `session_id` 不存在 → 404 `SESSION_NOT_FOUND`；存在 → 403 `FORBIDDEN` |
+| GET／POST | `memory-recall/round/`、`round/answer/`、`finish/`、`result/<session_id>/` | 同上 |
 
-回應範例（HTTP 404）：
+**前端要做**：所有遊戲請求都帶 token。本機測試遊戲時請先登入取得 token：
 
-```json
-{
-  "success": false,
-  "data": null,
-  "error": {
-    "code": "USER_NOT_FOUND",
-    "message": "查無使用者資料"
-  }
-}
+```bash
+curl -X POST https://<後端網址>/api/users/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"username": "<帳號>", "password": "<密碼>"}'
+# 回傳 {"access": "...", "refresh": "..."}
+
+curl -X POST https://<後端網址>/api/games/fridge-check/sessions/ \
+  -H "Authorization: Bearer <access>"
 ```
 
-> `error.code` 是固定字串，前端請用 `code` 判斷，不要用 `message` 比對文字。
-
-#### B. 對既有 session 操作 → `404 SESSION_NOT_FOUND` 或 `403 FORBIDDEN`
-
-這些端點需要 `session_id`。後端先找 session，再比對擁有者：
-
-| 方法 | 路徑 |
-|---|---|
-| GET | `market-route/round/` |
-| POST | `market-route/round/answer/` |
-| POST | `market-route/finish/` |
-| GET | `market-route/result/<session_id>/` |
-| GET | `memory-recall/round/` |
-| POST | `memory-recall/round/answer/` |
-| POST | `memory-recall/finish/` |
-| GET | `memory-recall/result/<session_id>/` |
-
-未登入時：
-
-- `session_id` 不存在 → `404`，`error.code = "SESSION_NOT_FOUND"`
-- `session_id` 存在（屬於某位使用者）→ `403`，`error.code = "FORBIDDEN"`，`message = "這場遊戲不屬於目前的使用者"`
-
-```json
-{
-  "success": false,
-  "data": null,
-  "error": {
-    "code": "FORBIDDEN",
-    "message": "這場遊戲不屬於目前的使用者"
-  }
-}
-```
-
-> 這兩種情形的處理方式相同：**請前端視為「登入狀態有問題」，導回登入或重新取得 token**。
-
-### 1.4 沒有改變的端點（請注意！）
-
-F1 沒有動作答類端點。其中冰箱檢查與市場買菜已在 **F2（第 1-2 節）** 處理。F1 與 F2 都**還沒動**的是：
-
-- `market-sort/` 底下的端點
-
-這些端點的「檢查 session 是否屬於目前使用者」會在**後續修正（F3）**處理。**前端不要因為它們目前沒被擋，就省略 token**，否則等上線會一次壞掉。
-
-### 1.5 前端要做的事（請逐項確認）
-
-1. **所有遊戲請求都要帶標頭**：
-
-   ```
-   Authorization: Bearer <access_token>
-   ```
-
-   包含上面第 1.4 節列的「目前沒被擋」的端點。
-
-2. **檢查有沒有「沒登入也能玩」的測試流程**。之前為了測試，有些畫面可能直接呼叫遊戲 API 而沒帶 token，現在這些畫面會失敗。
-
-3. **錯誤處理建議**：
-
-   | 收到 | 代表 | 建議處理 |
-   |---|---|---|
-   | `401` + `NOT_AUTHENTICATED` | token 過期或無效 | 用 refresh token 換新（`POST /api/users/login/refresh/`），失敗再導回登入頁 |
-   | `404` + `USER_NOT_FOUND` | 這次請求根本沒帶 token | 視為 bug：檢查 HTTP client 是否漏帶標頭；使用者端則導回登入頁 |
-   | `403` + `FORBIDDEN` | 沒登入，或 session 不是這位使用者的 | 導回首頁／重新開始一場 |
-
-4. **開發測試方式**：想在本機測遊戲，請先登入取得 token，不要再依賴「免登入」：
-
-   ```bash
-   # 1. 登入取得 token
-   curl -X POST https://<後端網址>/api/users/login/ \
-     -H "Content-Type: application/json" \
-     -d '{"username": "<帳號>", "password": "<密碼>"}'
-   # 回傳 {"access": "...", "refresh": "..."}
-
-   # 2. 帶 token 開始遊戲
-   curl -X POST https://<後端網址>/api/games/fridge-check/sessions/ \
-     -H "Authorization: Bearer <access>"
-   ```
-
-5. **Flutter 範例**（以 `dio` 為例，用攔截器統一加標頭）：
-
-   ```dart
-   dio.interceptors.add(InterceptorsWrapper(
-     onRequest: (options, handler) {
-       final token = tokenStorage.accessToken; // 你們儲存 token 的地方
-       if (token != null) {
-         options.headers['Authorization'] = 'Bearer $token';
-       }
-       handler.next(options);
-     },
-     onError: (error, handler) {
-       final code = error.response?.data?['error']?['code'];
-       if (error.response?.statusCode == 401 && code == 'NOT_AUTHENTICATED') {
-         // TODO: 用 refresh token 換新 access token 後重送請求；失敗則導回登入頁
-       }
-       handler.next(error);
-     },
-   ));
-   ```
-
-### 1.6 驗證結果（後端）
-
-- 新增測試 `games/tests_anonymous.py`：資料庫有使用者、但沒登入時，4 個開場端點都回 `404 USER_NOT_FOUND`，且**不會建立任何 session**；已登入的使用者仍能正常開始遊戲。
-- 更新 `games/tests_utils.py`：未登入應取得 `None`（不再取第一位使用者）。
-- 全部測試通過（767 個，另有 1 個原本就預期失敗）。
-
-### 1.7 修改的檔案（給有興趣看程式的人）
-
-- `games/utils.py`：`get_current_user()` 未登入時回傳 `None`。
-- `games/tests_utils.py`：更新對應測試。
-- `games/tests_anonymous.py`：新增 view 層測試。
+**檔案**：`games/utils.py`、`games/tests_utils.py`、`games/tests_anonymous.py`（新）
 
 ---
 
-## 1-2. 已完成：F2 — 作答端點檢查 session 擁有者
+### F2 — 冰箱檢查、市場買菜的作答端點檢查擁有者
 
-### 1-2.1 背景
+**問題**：這些端點只用網址上的 `session_id` 找 session，不確認它屬於誰。知道（或猜到）別人的 `session_id` 就能替對方作答、改掉對方成績。
 
-冰箱檢查、市場買菜的「送出答案」端點，之前只用網址上的 `session_id` 找 session，**不檢查這場遊戲是誰的**。只要知道（或猜到）別人的 `session_id`，就能替對方作答、改掉對方的成績。
+**修改**：新增共用函式 `forbidden_unless_owner()`，作答端點在找到 session 後呼叫它。
 
-現在這些端點會先確認「這場遊戲屬於目前登入的人」。
-
-### 1-2.2 受影響的端點
+**受影響端點**
 
 | 方法 | 路徑 |
 |---|---|
-| POST | `fridge-check/sessions/<session_id>/answers/`（含 `answer`、`session` 單數等別名，以及底線版 `fridge_check/...`） |
-| POST | `market-shopping/sessions/<session_id>/item-answers/` |
-| POST | `market-shopping/sessions/<session_id>/change-answers/` |
+| POST | `games/fridge-check/sessions/<session_id>/answers/`（含 `answer`、`session` 單數別名與底線版） |
+| POST | `games/market-shopping/sessions/<session_id>/item-answers/` |
+| POST | `games/market-shopping/sessions/<session_id>/change-answers/` |
 
-### 1-2.3 新的判斷順序與回應
-
-後端的檢查順序是：**欄位格式 → 找 session → 檢查擁有者 → 檢查是否已結束 → 判題**。
+**判斷順序**：欄位格式 → 找 session → 檢查擁有者 → 是否已結束 → 判題
 
 | 情況 | HTTP | `error.code` |
 |---|---|---|
-| 請求內容格式錯誤（例如 `answer` 不是物件） | 400 | 與以前相同（`INVALID_ANSWER` 等） |
-| `session_id` 不存在 | 404 | `SESSION_NOT_FOUND`（與以前相同） |
+| 請求內容格式錯誤 | 400 | 與以前相同（`INVALID_ANSWER` 等） |
+| `session_id` 不存在 | 404 | `SESSION_NOT_FOUND`（不變） |
 | **session 是別人的，或沒帶 token** | **403** | **`FORBIDDEN`**（新增） |
-| 自己的 session，但已經結束 | 400 | `SESSION_COMPLETED`（與以前相同） |
-| 自己的 session，正常作答 | 200 | 無（與以前相同） |
+| 自己的 session，但已結束 | 400 | `SESSION_COMPLETED`（不變） |
+| 自己的 session，正常作答 | 200 | — |
 
-`403` 的回應內容：
+被擋下時，後端**不會**寫入任何作答紀錄，也不會改變 session 狀態。
+
+**前端要做**：作答請求要帶「建立（開始）這場遊戲的同一個帳號」的 token。**登出換帳號時，清掉先前的 `session_id`**，否則舊帳號開的遊戲用新帳號作答會收到 403。
+
+**檔案**：`games/utils.py`、`games/fridge_check/views.py`、`games/market_shopping/views.py`、`games/tests_session_owner.py`（新）
+
+---
+
+### F3 — market_sort（市場分類）檢查擁有者
+
+**問題**：`market_sort` 本來就要求登入，但後端用「`client_session_id`（前端自己產生）」找 session 時完全不看是誰。別的使用者送出相同的 id：
+- 對方的場次**已完成** → 會拿到**對方的成績**（資料外洩）
+- 對方的場次**還沒結束** → 會用自己的資料計分並**覆蓋**對方的 session
+
+**修改**：`get_or_create_session` 找到屬於別人的 session 時丟出 `SessionOwnerMismatch`（不回傳、不修改）；`market_sort` 接住並回 403。
+
+**受影響端點**：`POST games/market-sort/submit/`（body 的 `session_id`）
+
+| 情況 | HTTP | `error.code` |
+|---|---|---|
+| 自己的新 `session_id` 或重送自己的 | 201 | —（重送回相同結果，冪等） |
+| `session_id` 已被**別的帳號**用過 | **403** | **`FORBIDDEN`** |
+
+**前端要做**
+- `session_id` **請用 UUID**。同一款遊戲內全站唯一，如果不同使用者剛好用到同一個簡單的值（例如 `test_1`），後來的人會一直收到 403。
+- 換帳號登入時不要沿用舊的 `session_id`。
+
+**檔案**：`games/session_service.py`、`games/market_sort/views.py`、`games/market_sort/tests_owner.py`（新）
+
+---
+
+### F4 — 忘記密碼 API 加入次數限制
+
+**問題**：`password-reset/check/` 與 `password-reset/` 是公開的，沒有任何次數限制，可被無限次嘗試或大量掃描帳號。
+
+**修改**：新增兩層限制，超過就回 429（兩支 API 共用計數，所以「確認帳號再重設」一輪算 2 次）：
+
+| 限制 | 次數 | 說明 |
+|---|---|---|
+| 同一個帳號名稱 | 每小時 10 次 | 主要防線；帳號名稱會去除空白、忽略大小寫 |
+| 同一個來源（IP） | 每小時 30 次 | 擋同一來源掃很多帳號 |
+
+**受影響端點**：`POST users/password-reset/check/`、`POST users/password-reset/`
 
 ```json
 {
   "success": false,
   "data": null,
-  "error": {
-    "code": "FORBIDDEN",
-    "message": "這場遊戲不屬於目前的使用者"
-  }
+  "error": { "code": "TOO_MANY_REQUESTS", "message": "操作太頻繁了，請稍後再試" }
 }
 ```
 
-被擋下時，後端**不會**寫入任何作答紀錄，也不會改變 session 狀態。
+HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VALIDATION_ERROR`（不計入次數）。
 
-### 1-2.4 前端要做的事
+**前端要做**：處理 429，顯示等待提示。一般使用者不會碰到上限（約 5 輪完整流程／小時）。
 
-1. 作答請求一定要帶 `Authorization: Bearer <access_token>`，而且必須是**建立（開始）這場遊戲的同一個帳號**。
-2. **登出再換帳號登入時，要清掉先前的 `session_id`**。否則舊帳號開的遊戲，用新帳號的 token 作答會收到 403。
-3. 收到 `403 FORBIDDEN`：不要重試同一個請求。建議回到首頁或重新開始一場遊戲；如果同時懷疑 token 有問題，先走 refresh／重新登入流程。
-4. 回應格式與 1.3-B 的 `FORBIDDEN` 完全相同，可以共用同一段處理程式。
+**⚠️ 這一項「沒有」解決的事**：只做了次數限制，**沒有新增身分驗證**。知道帳號名稱的人，仍然能在限制內重設該帳號的密碼。建議下一步加上「註冊時的生日＋手機號碼」當第二驗證因素（不需新服務、不改資料庫）。另外，「帳號不存在」仍回 404 `ACCOUNT_NOT_FOUND`（註冊的 `USERNAME_TAKEN` 同樣能探測帳號，且改掉會讓輸錯帳號的長者得不到提示）。
 
-### 1-2.5 驗證結果（後端）
-
-- 新增 `games/tests_session_owner.py`（11 個測試）：自己作答成功；別人或沒登入作答 → 403 且沒有寫入任何作答紀錄；session 不存在仍是 404。
-- 確認過：把修正拿掉後，其中 6 個「別人／沒登入」的測試會失敗，代表測試確實抓得到這個漏洞。
-- 全部測試通過（778 個，另有 1 個原本就預期失敗）。
-
-### 1-2.6 修改的檔案
-
-- `games/utils.py`：新增共用函式 `forbidden_unless_owner()`。
-- `games/fridge_check/views.py`、`games/market_shopping/views.py`：作答端點呼叫它。
-- `games/tests_session_owner.py`：新增測試。
+**檔案**：`users/throttles.py`（新）、`users/views.py`、`users/tests/test_password_reset_throttle.py`（新）
 
 ---
 
-## 2. 預告：已規劃但尚未實作的變更
+### F5 — 日記照片與錄音不再公開
 
-> ⚠️ 以下**還沒有改**，只是讓前端提早知道方向。上線前會更新本文件，請勿現在就照這節改程式。標 ❓ 的項目還需要和前端討論後才會定案。
+**問題**：上傳日記照片與語音後會呼叫 `make_public()`，網址永久有效、任何人拿到就能看。日記是長者的私人內容。
 
-### 2.1 預設所有 API 都需要登入（G2）— 破壞性
+**修改**
+- 上傳預設保持**私有**，資料庫存「檔案路徑」（例如 `voice-diary/images/3f2a....jpg`）
+- 回傳給前端時才換成 **v4 簽名網址**，預設 **6 小時**有效，過期後網址失效
+- 舊資料（`http(s)://` 開頭的完整網址）和示範資料**原樣回傳**，不受影響
+- 簽名失敗時該欄位回 `null`（並記錄錯誤），不讓整支 API 掛掉
+- **頭像維持公開網址**（行為不變）
 
-- 目前全域預設是「任何人都能存取」，要靠各 view 自己限制。計畫改成**預設需登入**，只有少數公開端點例外。
-- 預計維持公開：註冊、登入、token 刷新、忘記密碼流程、分享頁（`public_share`）、首頁連線測試 `ping`。
-- 其他端點（含 `home` 的 `greet`、`daily-suggetion`）未登入會回 `401 NOT_AUTHENTICATED`。
-- 前端影響：確認**除上述公開端點外**，每個請求都帶 token。
+**網址有簽名的欄位**
 
-### 2.2 `market-sort` 的 session 擁有者檢查（F3）— 可能破壞性
-
-- `fridge-check`、`market-shopping` 已在 F2 完成（第 1-2 節）。**`market-sort` 還沒改**：它用前端自己產生的 `client_session_id` 查 session，目前沒有比對使用者，猜中別人的 id 就會拿到對方已完成的結果。
-- 預計補上：只能存取**自己的** session，錯誤回應與 1.3-B 相同（`403 FORBIDDEN`）。
-- 前端影響：`client_session_id` 要確實用同一個登入帳號建立與使用；**建議用 UUID 這類不易重複的值**，不要用簡單的流水號。
-
-### 2.3 忘記密碼加入身分驗證（F4）— 破壞性 ❓
-
-- 目前只憑帳號名稱就能重設密碼，風險很高。預計加入額外驗證與嘗試次數限制。
-- **驗證方式（簡訊／Email 驗證碼，或其他方式）尚未決定**，確定後前端流程（`/api/users/password-reset/check/`、`/api/users/password-reset/`）會需要新增一個步驟與畫面。
-- 另外也會調整「帳號不存在」的回應，避免被拿來探測帳號是否存在。
-
-### 2.4 請求頻率限制（G3）— 新增 429
-
-- 登入、註冊、改密碼、重設密碼預計加上限速。
-- 超過次數會回 **HTTP 429**，前端請準備一個「操作太頻繁，請稍後再試」的提示。
-
-### 2.5 Token 政策調整（G4）— 需前端配合 ❓
-
-- 預計縮短 access token 有效期（目前 1 天，原本是測試期間放寬的）、啟用 refresh token 輪替，以及改密碼後舊 token 失效。
-- 前端必須實作「**access token 過期 → 用 refresh token 自動換新 → 重送原請求**」的流程（若尚未做）。
-- 若啟用輪替，每次 refresh 會回傳**新的 refresh token**，前端要存起來取代舊的。
-
-### 2.6 統一回應格式（G5、G6）— 破壞性 ❓
-
-專案規範的格式是：
-
-```json
-{ "success": true, "data": { }, "error": null }
-```
-
-目前有些 API 沒遵守，預計逐步統一：
-
-| 模組 | 現況 | 預計 |
-|---|---|---|
-| 日記 `diary` | 成功只回 `{"data": ...}`，失敗只回 `{"error": ...}`，沒有 `success` | 補上 `success`，失敗時 `data: null` |
-| 社群 `social` | 部分端點缺 `success`／`data` | 統一 |
-| 首頁 `home`、部分 `users` | 直接回裸資料（例如 `{"message": ...}`） | 包進統一格式 |
-| 登入、註冊 | 登入回 `{access, refresh}`，註冊回裸資料 | ❓ **改動影響最大，會先和前端確認再動** |
-
-前端建議：現在就把「解析回應」集中在一個地方，並同時相容新舊格式（先看有沒有 `success` 欄位），之後切換會輕鬆很多。
-
-### 2.7 其他會影響前端畫面或資料的項目
-
-| 項目 | 影響 |
+| 端點 | 欄位 |
 |---|---|
-| 日記照片／錄音改用簽名網址（F5） | 回傳的檔案網址將**有時效**，不可永久存起來當連結；過期要重新向後端取得 |
-| 刪除帳號時清除雲端檔案（F6） | 無介面變化；刪除後頭像、日記檔案網址會失效 |
-| 日記 `round_index` 傳非數字（F7） | 由 500 錯誤改為 400 並附說明，前端請照 `error.code`／`message` 顯示 |
-| 週報 `GET`（F10） | 查看週報時不再同步產生 AI 內容；若報告尚未備妥可能回「產生中」狀態（細節定案後補） |
-| 遊戲完成時間日期（F11） | `played_date` 等日期會改為**台灣時間**的日期，台灣 00:00–08:00 玩的場次不再少一天 |
+| `GET／POST diary/`（月曆、上傳照片） | `photo_url` |
+| `GET diary/<id>/` | `photo_url`、`replies[].audio_url` |
+| `POST diary/<id>/replies/` | `audio_url` |
+| `POST diary/<id>/finalize/` | `photo_url` |
+| `GET diary/review/` | `yesterday[]`、`last_year[]` 裡的 `photo_url`、`audio_url` |
+| 社群貼文（`social/posts/`、貼文詳情、`POST diary/<id>/share/`） | `photo_url` |
+| 公開分享頁 `GET /share/<share_token>/` | 頁面上的圖片網址 |
+| `GET dashboard/weekly-report/` | `diary.entries[].photo_url` |
+
+**前端要做**
+1. **不要把 `photo_url` / `audio_url` 當成永久連結存起來**。過期後重新呼叫 API 取得新的。
+2. 每次取得的網址都不同（含簽名）。圖片快取如果用完整網址當 key，會被當成新圖片重複下載；**建議用 `diary_id` 當快取 key**。
+3. 欄位可能是 `null`：準備預設圖，錄音播放鈕要能隱藏。
+4. 6 小時內有效：畫面開著超過 6 小時不重新整理，圖片會載入失敗，載入失敗時請重新抓一次資料。
+
+**⚠️ 尚未處理**：**既有的檔案仍然是公開的**。之前上傳的檔案已經被設成公開，資料庫存的完整網址仍可被任何人開啟。需要另外寫一次性腳本把舊檔案改回私有並轉成路徑（會動到線上資料，要先備份與確認）。
+
+**其他細節**：週報會把內容存成快照，快照存的是**路徑**，回傳 API 時才換成簽名網址（簽名網址有時效，不能存進快照）。
+
+**檔案**：`diary/media.py`（新）、`diary/external.py`、`diary/views.py`、`social/utils.py`、`public_share/views.py`、`dashboard/weekly_report.py`、`dashboard/views.py`、`users/views.py`、`diary/tests_media.py`（新）
 
 ---
 
-## 3. 給前端的檢查清單（現在就能做）
+### F6 — 刪除帳號時一併清除檔案
 
-- [ ] 所有遊戲請求（含 1.4 節列的端點）都帶 `Authorization: Bearer <access_token>`
-- [ ] 拿掉任何「不登入直接玩遊戲」的測試用流程
-- [ ] 收到 `401 NOT_AUTHENTICATED` 時，會用 refresh token 換新 token 並重送
-- [ ] 收到 `404 USER_NOT_FOUND`、`403 FORBIDDEN` 時，導回登入／首頁而不是顯示空白
-- [ ] 以 `error.code` 判斷錯誤，不依賴 `error.message` 文字
-- [ ] 回應解析集中在單一處，先相容「有／沒有 `success` 欄位」兩種格式
-- [ ] 預留 HTTP 429（太頻繁）的提示畫面
+**問題**：`DELETE users/me/` 只刪資料庫（含級聯的日記、貼文），Firebase Storage 裡的日記照片、錄音、頭像都留著。而且舊檔案是公開網址，帳號刪掉後別人仍然看得到。
+
+**修改**
+- 刪除前先收集這個人的所有檔案：頭像、日記照片、日記錄音、回覆錄音、貼文照片
+- 資料庫刪除成功**之後**才刪檔案（`transaction.on_commit`）
+- 認得兩種 Firebase 網址格式（`storage.googleapis.com`、`firebasestorage.googleapis.com`）與路徑；**別人網站的網址、示範資料、本機路徑不會被誤刪**
+- 本機 `media/` 的頭像一併刪除
+- 檔案刪除失敗**不會**擋住帳號刪除（只記錄錯誤）
+
+**受影響端點**：`DELETE users/me/`（body：`{"password": "..."}`）
+
+| 情況 | 回應 |
+|---|---|
+| 密碼正確 | 204，帳號與檔案刪除 |
+| 密碼錯誤 | 400 `VALIDATION_ERROR`，**什麼都不刪** |
+| 雲端刪除失敗 | 仍然 204，帳號照常刪除 |
+
+**前端要做**：不用改。刪除成功後建議清掉本機的 token 與快取，並導回登入頁。
+
+**已知限制**：檔案是同步逐一刪除，檔案很多的帳號回應會比較慢；刪除失敗不會重試。頭像「更換」或「移除」時舊檔案不會被刪（不在這一項範圍）。
+
+**檔案**：`diary/external.py`、`users/views.py`、`users/tests/test_delete_account_files.py`（新）
+
+---
+
+### F7 — 回覆日記：驗證 `round_index` 並加上 transaction
+
+**問題**
+- `POST diary/<id>/replies/` 直接 `int(round_index)`：傳 `"abc"`、`"1.5"` 或超大數字會 **500**
+- 同一輪重複送出會撞到唯一限制，也是 **500**（例如網路重試）
+- 新增回覆與更新日記狀態不在同一個 transaction，中途失敗會留下半完成資料
+- `POST diary/<id>/finalize/` 同時送兩次會重複分析、重複呼叫 AI；AI 失敗還會留下「有分析結果、日記卻停在處理中」
+
+**修改**
+- `round_index` 只接受 **1～4 的整數**（`"1"` 字串與 `1` 整數都可）
+- 重複的輪次在語音辨識與上傳**之前**就擋下，不白做
+- 寫入資料庫的部分放進 transaction 並鎖住該篇日記；鎖內再檢查一次（被別的請求搶先、或日記剛完成），失敗時回錯誤並**刪除剛上傳的錄音**
+- finalize 整段放進 transaction：失敗全部還原；同時來的第二個請求等第一個完成後直接回 200，不重複呼叫 AI
+
+**`POST diary/<id>/replies/`**（multipart：`audio`、`round_index`）
+
+| 情況 | HTTP | `error.code` |
+|---|---|---|
+| 缺少 `audio`，或沒帶 `round_index` | 400 | `INVALID_AUDIO`（不變） |
+| `round_index` 不是 1～4 的整數（`"abc"`、`"1.5"`、`0`、`-1`、`5`、超大數字） | 400 | **`INVALID_ROUND_INDEX`**（原本是 500） |
+| 這一輪已經回答過 | **409** | **`ROUND_ALREADY_ANSWERED`**（原本是 500） |
+| 日記已完成 | 400 | `DIARY_ALREADY_FINALIZED`（不變） |
+| 語音辨識／上傳失敗 | 500 | `TRANSCRIPTION_FAILED`／`UPLOAD_FAILED`（不變） |
+| 成功 | 201 | — |
+
+**`POST diary/<id>/finalize/`**：行為不變——第一次完成回 201，已完成再送回 200。差別是同時送兩次也只會呼叫一次 AI。
+
+**前端要做**
+- 收到 **409 `ROUND_ALREADY_ANSWERED`**：通常是網路重試造成，代表這一輪**已經成功**。用 `GET diary/<id>/` 同步狀態（`replies`、`pending_question`），不要顯示錯誤。
+- 收到 **400 `INVALID_ROUND_INDEX`**：前端送出的值有誤，檢查 `round_index` 是 1～4。
+- 錯誤格式沒有 `success` 欄位，請看 `error.code`。
+
+**備註**：資料庫鎖定（`select_for_update`）只在 PostgreSQL 生效，測試用的 SQLite 會忽略它；建議在測試環境用兩個並行請求再驗證一次。
+
+**檔案**：`diary/views.py`、`diary/tests_reply_validation.py`（新）
+
+---
+
+## 3. 還沒做的事（前端可以先知道方向）
+
+> 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。
+
+### 屬於這一輪（`fix/features`）但還沒完成
+- **忘記密碼的身分驗證**（F4 的後續）：預計加「生日＋手機號碼」。上線時前端要在重設密碼流程加兩個輸入欄位。
+- **舊的公開檔案改成私有**（F5 的後續）：一次性腳本，前端無感，但舊網址會失效。
+
+### 屬於共通問題（`fix/global` 分支，規劃中）
+| 項目 | 前端影響 |
+|---|---|
+| 預設所有 API 都需要登入，只有註冊、登入、token 刷新、忘記密碼、分享頁等公開 | 除公開端點外，每個請求都要帶 token |
+| 登入、註冊、改密碼加入次數限制 | 會有 429，同 F4 |
+| 縮短 access token 有效期、refresh token 輪替、改密碼後舊 token 失效 | 必須實作「過期 → 用 refresh 換新 → 重送」；若啟用輪替，refresh 時要存新的 refresh token |
+| 統一回應格式 `{ success, data, error }`（日記、社群、首頁、部分使用者端點目前不一致） | 建議現在就把解析回應集中在一處，並相容有／沒有 `success` 欄位兩種格式。登入、註冊的格式改動影響最大，會先和前端確認 |
+| 遊戲完成時間改用台灣時間日期 | `played_date` 等日期在台灣 00:00–08:00 不再少一天 |
+
+---
+
+## 4. 後端維運注意（給部署與後端同學）
+
+- **次數限制的計數存在 Django cache**。目前沒有設定 `CACHES`，用的是單一 process 的記憶體快取；多個 worker 時各自計數，實際上限會變寬鬆。正式環境請改用共用快取（例如 Redis）。
+- **簽名網址需要 Firebase 金鑰有簽名權限**（目前的 `secrets/firebase-key.json` 具備）。有效秒數可在 settings 加 `MEDIA_SIGNED_URL_SECONDS` 覆蓋，預設 21600（6 小時）。
+- **被鎖住的是帳號名稱**（F4）：知道對方帳號的人可以故意把它鎖一小時。這是次數限制的取捨。
+- **同步刪除檔案**（F6）：檔案很多的帳號，刪除請求會比較久；之後可改成背景處理。
+- **資料庫鎖**（F7）需要 PostgreSQL 才有實際效果。
+
+---
+
+## 5. 附錄：PR 與 commit 對照
+
+| 編號 | PR | commit 標題 |
+|---|---|---|
+| F1 | #87 | `fix(games)!: 移除未登入時改用第一位使用者的 fallback` |
+| F2 | #88 | `fix(games): 遊戲作答前檢查 session 擁有者` |
+| F3 | #89 | `fix(games): market_sort 比對 session 擁有者，避免讀取或覆蓋他人場次` |
+| F4 | #90 | `fix(users): 忘記密碼 API 加入請求次數限制` |
+| F5 | #91 | `fix(diary): 日記照片與錄音改用簽名網址，不再公開` |
+| F6 | #92 | `fix(users): 刪除帳號時一併清除雲端與本機檔案` |
+| F7 | #93 | `fix(diary): 回覆日記驗證 round_index，寫入改用 transaction` |
+
+> 只有 F1 的 commit 有 `!`（破壞性變更）。F2～F7 對「正常使用」的前端流程不造成破壞，但上面第 1.1 節列的項目仍需要確認。
+
+新增的測試檔：`games/tests_anonymous.py`、`games/tests_session_owner.py`、`games/market_sort/tests_owner.py`、`users/tests/test_password_reset_throttle.py`、`diary/tests_media.py`、`users/tests/test_delete_account_files.py`、`diary/tests_reply_validation.py`。
