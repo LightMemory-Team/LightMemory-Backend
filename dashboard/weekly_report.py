@@ -16,7 +16,11 @@ from django.db.models import Max
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
-from ai_service.weekly_summary import build_positive_facts, generate_weekly_summary
+from ai_service.weekly_summary import (
+    build_fallback_summary,
+    build_positive_facts,
+    generate_weekly_summary,
+)
 from diary.media import media_url
 from diary.models import Diary
 from games.models import GameSession
@@ -314,7 +318,36 @@ def with_signed_media(report):
     return {**report, "diary": {**diary, "entries": entries}}
 
 
-def build_weekly_report(user, today):
+# 週報快照（WeeklyReport.report）裡記下「當時餵給 AI 的事實」用的欄位名稱。
+# 只存在快照裡，不會出現在 API 回應。
+SUMMARY_FACTS_KEY = "_summary_facts"
+
+
+def _reusable_summary(facts, previous_snapshot):
+    """上次存的 AI 總結，如果還能用就回傳，否則回傳 None（要重新產生）。
+
+    能沿用的條件：
+    - 上次餵給 AI 的事實跟這次完全一樣（同樣的輸入，不需要再花一次 AI）
+    - 上次的總結不是「AI 失敗時的固定句型」（失敗就該在下次重試）
+    """
+    if not previous_snapshot:
+        return None
+    saved = previous_snapshot.get("summary")
+    if (
+        saved
+        and previous_snapshot.get(SUMMARY_FACTS_KEY) == facts
+        and saved != build_fallback_summary(facts)
+    ):
+        return saved
+    return None
+
+
+def build_weekly_report_with_facts(user, today, previous_snapshot=None):
+    """組出週報，回傳 (週報內容, 餵給 AI 的事實)。
+
+    previous_snapshot 是這一週上次存的快照（WeeklyReport.report）。有給而且事實
+    沒變，就沿用上次的 AI 總結，不再呼叫 AI。
+    """
     week_start, week_end = get_report_week(today)
     previous_week_start = week_start - timedelta(days=7)
 
@@ -329,11 +362,12 @@ def build_weekly_report(user, today):
     abilities = build_abilities(
         user, week_start, played_sources, diary_scores=diary_scores
     )
-    summary = generate_weekly_summary(
-        build_positive_facts(active_day_count, previous_active_day_count, abilities)
-    )
+    facts = build_positive_facts(active_day_count, previous_active_day_count, abilities)
+    summary = _reusable_summary(facts, previous_snapshot)
+    if summary is None:
+        summary = generate_weekly_summary(facts)
 
-    return {
+    data = {
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
         "summary": summary,
@@ -349,3 +383,8 @@ def build_weekly_report(user, today):
         "next_week_goal": suggest_untried_source(played_sources),
         "disclaimer": DISCLAIMER,
     }
+    return data, facts
+
+
+def build_weekly_report(user, today):
+    return build_weekly_report_with_facts(user, today)[0]
