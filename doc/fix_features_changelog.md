@@ -1,6 +1,6 @@
-# F1～F7 後端修改紀錄（詳細版）
+# F1～F13 後端修改紀錄（詳細版）
 
-更新日期：2026-11-09 · 分支：`fix/features`（F1～F7 已全部合併） · PR：#87～#93
+更新日期：2026-11-10 · 分支：`fix/features`（F1～F13 已全部合併） · PR：#87～#93、#96～#103
 
 ## 這份文件是什麼
 
@@ -12,6 +12,8 @@
 |---|---|---|
 | [frontend_api_changes.md](frontend_api_changes.md) | 前端（Flutter） | API 行為變了什麼、前端要做什麼、錯誤碼 |
 | **本文件** | 後端開發者、專題組員 | 程式怎麼改、為什麼這樣改、怎麼驗證、有什麼限制 |
+
+> **關於測試檔的路徑**：#103 把所有測試搬進各 app 的 `tests/` 資料夾（見[第 14 章](#14-測試檔搬進各-app-的-tests-資料夾pr-103)）。本文件一律寫**搬移後**的新路徑。
 
 遇到不熟悉的名詞，請看最後的「[附錄 B：名詞小辭典](#附錄-b名詞小辭典)」。
 
@@ -30,6 +32,13 @@
 | F5 | 日記照片與錄音是永久公開網址 | 個資外洩 | 高 | #91 | diary、social、dashboard、public_share、users |
 | F6 | 刪除帳號後雲端檔案還在 | 個資殘留 | 中 | #92 | users、diary |
 | F7 | `round_index` 不合法或重複會 500；寫入沒有 transaction | 輸入驗證＋資料一致性 | 中 | #93 | diary |
+| F8 | 遊戲歷史紀錄載入全站場次，且每場各查一次資料庫（N+1） | 效能 | 中 | #97 | games |
+| F9 | 一次儀表板請求重複掃描全站日記 4 次（週報 2 次） | 效能 | 中 | #98 | dashboard |
+| F10 | 週報每次 GET 都呼叫 AI 並寫資料庫 | 成本＋GET 不安全 | 中 | #100、#101 | dashboard |
+| F11 | 台灣凌晨的日期用 UTC 計算，少一天 | 時區 | 低 | #99 | games、users |
+| F12 | 後台留著失智篩檢與警示等級的診斷性模型 | 產品定位／資料清理 | 中 | #102 | assessments、dashboard |
+| F13 | 日記 AI 輸出完全沒檢查；禁用詞不全且誤殺字母 z | 內容安全＋輸入驗證 | 高 | #96 | ai_service、diary |
+| （整理） | 測試檔散在各 app 根目錄 | 專案結構 | — | #103 | 全部 |
 
 ### 0.2 規模與測試
 
@@ -48,16 +57,34 @@
 | **合計** | **+449／−84** | **約 +1,160** | **71** | **835（另 1 個原本就預期失敗）** |
 
 - F1～F7 合計（不含 `doc/`）：23 個檔案、約新增 1,600 行、刪除 86 行（程式加測試）。
-- 這一輪**沒有修改任何資料表**，沒有新增 migration。
+- F1～F7 **沒有修改任何資料表**，沒有新增 migration。
+
+F8 起各 PR 的規模（`gh pr view` 的新增／刪除行數，**含測試與文件**）與測試數：
+
+| 編號 | PR | 新增／刪除 | 檔案數 | 新增測試數 | 全部測試數 |
+|---|---|---|---|---|---|
+| F13 | #96 | +579／−48 | 6 | 30 | 865 |
+| F8 | #97 | +377／−29 | 5 | 17 | 882 |
+| F9 | #98 | +368／−33 | 5 | 10 | 892 |
+| F11 | #99 | +214／−5 | 6 | 18 | 910 |
+| F10 | #100 | +247／−14 | 3 | 10 | 920（合併時有 1 個失敗，見 10.5） |
+| F10 修正 | #101 | +2／−1 | 1 | 0 | 920 全過 |
+| F12 | #102 | +115／−93 | 9 | 6 | 926 |
+| 測試搬移 | #103 | +90／−99 | 66 | 0 | 926 |
+| **F8～F13 合計** | | | | **91** | **926（另 1 個原本就預期失敗）** |
+
+- 實際合併順序是 F13 → F8 → F9 → F11 → F10 → F12，不是編號順序。
+- **F12 是這一輪唯一修改資料表的項目**（刪除兩張表、兩個 migration）；F8～F11、F13 都沒有動資料表。
 
 ### 0.3 共同的做法
 
-七項修正都遵守同樣的規則，之後做 `fix/global` 也沿用：
+F1～F13 都遵守同樣的規則，之後做 `fix/global` 也沿用：
 
 1. **一個編號 = 一個小分支 = 一個 PR**，commit 訊息用 Conventional Commits（`fix(games)!: …`）。
 2. **測試和程式放同一個 commit**，而且一定驗證過「**把修正拿掉，新測試會失敗**」，確認測試不是隨便寫寫就會過。
-3. **不改資料表**：用既有欄位解決（例如 F5 把「網址」改存「路徑」，仍用同一個欄位）。
+3. **盡量不改資料表**：用既有欄位解決（例如 F5 把「網址」改存「路徑」，F10 把 AI 事實存進原本就是 JSON 的快照）。唯一的例外是 F12，而且事先問過你。
 4. **向下相容舊資料**：舊的完整網址、示範資料照常運作。
+5. **全部測試通過才 commit**：F10 之後（見 10.5）所有指令都用測試的結束代碼把關，不再只看輸出的最後幾行。
 5. **外部服務失敗不拖垮 API**：Firebase 簽名或刪檔失敗只記錄，不讓整支 API 500。
 6. **錯誤格式沿用該區原本的格式**，不趁機改格式（統一格式是 `fix/global` 的事）。
 7. **只對自己改到的檔案跑 ruff**；既有檔案本來就有的格式問題不順手重排，避免 PR 混進無關差異。
@@ -663,17 +690,479 @@ with transaction.atomic():
 
 ---
 
-## 8. 驗證方式與結果
+## 8. F8 — 遊戲歷史紀錄改在資料庫篩選，消除 N+1
 
-### 8.1 指令
+### 8.1 問題與風險
+
+三款遊戲的「歷史紀錄」（`fridge-check/history/`、`market-shopping/history/`，以及 `market-sort/submit/` 回應裡附的歷史）都呼叫 `session_service.list_sessions`。它做了三件浪費的事：
+
+1. 載入**全站所有使用者**的該遊戲場次（不管是誰的）。
+2. 每一場的 `_to_dict` 又各自查一次 `step_logs`（逐題作答紀錄）和一次 `session.game`，這就是 **N+1 查詢**（1 次查場次，加上 N 場 × 2 次額外查詢）。
+3. 全部載入之後，才在 Python 裡用 `state["user_id"]` 篩出「自己的」場次。
+
+使用者與場次越多越慢；而且「看自己的歷史」每次都付出「全站的代價」。這不是安全漏洞，是會隨使用者成長而惡化的效能問題。
+
+### 8.2 修改
+
+**`games/session_service.py`**
+
+```python
+def list_user_sessions(game_type, user_id, status=None, with_steps=False):
+    game = _get_game(game_type)
+    sessions = GameSession.objects.filter(game=game, user_id=user_id).select_related("game")
+    if status is not None:
+        sessions = sessions.filter(status=status)
+    if with_steps:
+        sessions = sessions.prefetch_related("step_logs")
+    return [_to_dict(s, with_steps=with_steps) for s in sessions]
+```
+
+- 在**資料庫**就用外鍵 `user` 與 `status` 篩選，只讀這位使用者自己的場次。
+- `select_related("game")`：把 `game` 用 JOIN 一起查回來，不再每場各查一次。
+- `with_steps` 預設 `False`：歷史紀錄用不到逐題紀錄，`step_records` 會是空 list，也就不查 `step_logs`。需要時傳 `True`，會用 `prefetch_related("step_logs")` **一次**載入，而不是每場各查一次。
+- `_to_dict(session, with_steps=True)`：逐題紀錄改用 `session.step_logs.all()` 取出後在 Python 排序，有 prefetch 時直接用快取，不再多查。
+- 原本的 `list_sessions` 保留（給需要全站資料的情況），但也加上 `select_related`／`prefetch_related`，查詢次數不再隨場次數增加。
+
+**三個呼叫端改用新函式**：`games/fridge_check/services.py`、`games/market_shopping/services.py`、`games/market_sort/views.py`，都是 `list_user_sessions(..., status="finished")`。
+
+### 8.3 設計決策
+
+- **為什麼用外鍵 `user`，不用 `state["user_id"]`？** `state["user_id"]` 是各遊戲建立場次時自己塞進 JSON 的舊寫法。我確認過所有建立場次的路徑（各遊戲 services、`market_sort`、`seed_demo`）都**同時**寫入外鍵與 `state`，兩者一致；以外鍵為準比較可靠，也能用到資料庫索引 `(game, user)`。
+- **為什麼 `with_steps` 預設關閉？** 預設值選「最省」的，需要的人明確開啟，避免不小心又變回 N+1。
+- **為什麼不順便改成資料庫排序？** 歷史的排序依據是 `result` JSON 裡的時間字串，而且現在只剩單一使用者的資料量，改動收益小、風險大，這次不動。
+
+### 8.4 測試（`games/tests/test_list_user_sessions.py`，17 個）
+
+`ListUserSessionsTests`（資料行為）：
+
+- 只回這位使用者的場次、沒有場次回空 list
+- `status` 篩選；只回被要求的那個遊戲
+- **擁有者以外鍵 `user` 為準**，`state` 裡的 `user_id` 與外鍵不同時不受影響
+- `with_steps` 預設不載入逐題紀錄；開啟時依題號順序載入
+- 回傳的 dict 鍵與修改前相同（不破壞既有呼叫端）
+
+`QueryCountTests`（查詢次數，用 `CaptureQueriesContext`）：
+
+- `list_user_sessions`、`list_user_sessions(with_steps=True)`、`list_sessions` 在場次變多時，查詢次數**不再增加**
+- `list_sessions` 仍回傳依序排好的逐題紀錄
+
+`HistoryEndpointTests`（端點）：
+
+- 冰箱檢查歷史只回我已完成的場次；查詢次數不隨場次增加
+- 逛市場歷史回我最近 10 場（舊的在前）；查詢次數不隨場次增加
+- 歷史不會載入他人的場次
+
+這個檔案同時匯出 `make_session`、`FRIDGE`、`FRIDGE_RESULT` 等測試資料 helper，F11 的日期測試借用它們。
+
+### 8.5 已知限制
+
+- `list_sessions` 仍存在（目前只剩測試使用），保留給需要全站資料的用途；已避免 N+1，但仍會載入全部場次。
+- 其他地方的全站掃描（`dashboard` 的日記 z-score）不在這個 PR，見 F9。
+
+---
+
+## 9. F9 — 日記語言 z 一次請求只掃一次全站日記
+
+### 9.1 問題與風險
+
+`dashboard/services.diary_z_scores` 要讀「**全站所有有效日記**」並依時間逐篇比對，才算得出一位使用者每篇日記的語言 z（每篇要跟更早的自己，以及其他人的日記比，才能得到相對位置）。這是儀表板最貴的一步，而**一次請求會呼叫它很多次**：
+
+| 請求 | 原本掃描次數 | 呼叫來源 |
+|---|---|---|
+| `GET /api/dashboard/` | 4 次 | 雷達圖：語言軸平均＋解鎖進度；機器人卡片：解鎖進度＋週分數歷史 |
+| `GET /api/dashboard/weekly-report/` | 2 次 | 解鎖進度＋週分數歷史 |
+
+每次都從頭讀全站、重算一遍，結果卻完全相同。
+
+### 9.2 修改
+
+**`dashboard/services.py`**
+
+```python
+def _compute_diary_z_scores(user):
+    # 兩個不影響結果的省時做法：
+    # - 這位使用者沒有任何有效日記 → 不可能有結果，不掃全站
+    # - 每篇日記的 z 只取決於「更早」的日記，所以只掃到他最新一篇為止
+    last_created_at = DiaryAnalysis.objects.filter(
+        is_valid=True, diary__user=user
+    ).aggregate(last=Max("diary__created_at"))["last"]
+    if last_created_at is None:
+        return []
+    analyses = DiaryAnalysis.objects.filter(
+        is_valid=True, diary__created_at__lte=last_created_at
+    )
+    ...
+```
+
+- 原本 `diary_z_scores` 的主體搬到 `_compute_diary_z_scores(user)`，產生這位使用者**全部**有效日記的 `(建立時間, 語言 z)`。
+- **提早結束**：沒有有效日記的人（新使用者、沒寫過日記的人佔大多數）直接回 `[]`，不掃全站。
+- **只掃到他最新一篇為止**：之後才建立的日記不會影響他。
+- `diary_z_scores(user, start, end, scores=None)`：先有完整結果、再依期間篩選；可傳入已算好的 `scores`，就不重算。
+- 這些函式都加了**選用參數** `diary_scores`／`scores`（有預設值，既有呼叫不必改）：`average_diary_z_score`、`get_unlock_progress`、`get_dashboard_dimensions`、`get_weekly_scores_history`、`build_abilities`（`dashboard/weekly_report.py`）、`get_encouragement`（`dashboard/encouragement.py`）。
+- `dashboard/views.py` 的儀表板 View 與 `build_weekly_report` 在請求開頭**先算一次**，再往下傳 → **每次請求只掃 1 次**。
+
+### 9.3 為什麼結果完全相同
+
+每篇日記的 z 只由「**更早建立**」的有效日記決定，所以：
+
+- 先算出全部、再依期間篩選 = 只算期間內的（`end` 以後的日記不影響 `end` 以前的）。
+- 只讀到使用者最新一篇為止 = 讀全部（之後的資料不會影響他）。
+
+### 9.4 刻意「沒有」做的事：跨請求快取
+
+計畫原本寫「快取」。評估後**沒有加**：
+
+- 任何人寫一篇日記，**所有人**的全體基準都會變；要精準失效必須掛 signal 並用共用快取。
+- 專案沒有設定 `CACHES`，預設是各 process 自己的記憶體快取：多 worker 時別的 worker 不知道失效，解鎖進度會用到**過期資料**。
+- 測試之間會共用快取，容易產生難查的測試污染。
+- 上面的做法已把每次請求的成本從 4 倍降到 1 倍，且**沒有任何過期資料的風險**。
+
+等之後換成共用快取（Redis，屬於 `fix/global`）再加跨請求快取比較安全。
+
+### 9.5 測試（`dashboard/tests/test_diary_z_scan.py`，10 個）
+
+`DiaryZScoreEquivalenceTests`（結果與舊版相同）：
+
+- 把舊演算法原樣放進測試當對照，用多位使用者、同時間建立的日記、測試帳號（`is_staff`）、示範日記（`seed/`）、無效日記，對**每一種期間**逐一比對，結果完全相同
+- 傳入預先算好的分數時結果相同，而且不查資料庫
+- 平均語言 z 與解鎖進度和舊做法一致
+- 沒有日記的人、只有無效日記的人**不會掃全站**
+- 使用者最新日記**之後**才建立的日記不會被載入
+
+`ScanCountTests`（掃描次數）：
+
+- 儀表板含「機器人卡片」時只掃 1 次（原本 4 次）；新使用者也只掃 1 次
+- 週報只掃 1 次（原本 2 次）
+- 儀表板回應內容不因為「共用掃描結果」而改變
+
+這個檔案借用 `test_dashboard_api.DashboardApiTests` 的 `setUp` 與資料 helper（用 `from . import test_dashboard_api as dashboard_tests`，只 import **模組**、不 import 類別，否則 Django 會把那個類別的測試再跑一遍）。
+
+### 9.6 已知限制
+
+- 單次掃描仍是 O(全站有效日記數)，只是少了重複與提早結束。日記量很大時還需要預先彙總或共用快取。
+- 建議替 `DiaryAnalysis(is_valid)` 與 `Diary(created_at)` 補索引（`fix/global` G10，需要 migration）。
+
+---
+
+## 10. F10 — 週報重複點開不再重複呼叫 AI 與寫資料庫
+
+### 10.1 問題與風險
+
+`GET /api/dashboard/weekly-report/` 每次請求都會：
+
+1. **重新呼叫 OpenAI** 產生一句總結——花錢，而且在 request 內同步等待，沒有 timeout。
+2. **把整份快照寫進資料庫**（`record.save()`），即使內容完全沒變。
+
+GET 應該是「安全、可重複」的讀取。同一週重複點開（很常見：看完回首頁再點開）卻每次付出 AI 成本與一次寫入。
+
+### 10.2 修改
+
+**快照多存「當時餵給 AI 的事實」**（`WeeklyReport.report` 是 JSON，不需要新欄位）：
+
+```python
+SUMMARY_FACTS_KEY = "_summary_facts"   # dashboard/weekly_report.py
+```
+
+這個欄位**只存在快照裡，不會出現在 API 回應**。
+
+**`dashboard/weekly_report.py`**
+
+```python
+def _reusable_summary(facts, previous_snapshot):
+    # 能沿用的條件：
+    # - 上次餵給 AI 的事實跟這次完全一樣（同樣的輸入，不需要再花一次 AI）
+    # - 上次的總結不是「AI 失敗時的固定句型」（失敗就該在下次重試）
+    ...
+
+def build_weekly_report_with_facts(user, today, previous_snapshot=None):
+    """回傳 (週報內容, 餵給 AI 的事實)"""
+```
+
+- 事實和上次**完全一樣**、而且上次的總結**不是 AI 失敗後的固定句型** → 沿用，不呼叫 AI。
+- 事實變了（多玩了幾天、進步的能力變了…），或上次是固定句型（代表當時 AI 失敗）→ 重新產生。失敗的情況因此會在下次點開時**自動重試**。
+- `build_weekly_report(user, today)` 保留原本的回傳，既有呼叫端與測試不用改。
+
+**`dashboard/views.py` 的 `weekly_report_view`**
+
+- 先查這一週有沒有舊快照，有就把它傳進去。
+- 首次建立改用 `get_or_create(defaults=...)`，一次寫入。
+- 已存在時，**內容沒變且 `viewed_at` 也記過了 → 完全不寫資料庫**；有變只用 `save(update_fields=[...])` 更新有變的欄位。
+- `viewed_at` 仍只記**第一次**點開的時間，首頁今日任務（「看看上週回顧」）不受影響。
+
+### 10.3 為什麼沿用總結是安全的
+
+同樣的事實 = 同樣的 AI 輸入，重新問一次也只是換個說法，沒有新資訊。事實一變就會重新產生，所以不會出現過期的數字。
+
+### 10.4 測試（`dashboard/tests/test_weekly_report_view.py`，10 個）
+
+- 首次點開建立 1 筆紀錄並記下 `viewed_at`
+- 內部事實在快照裡、**不在回應裡**
+- 連續點開 3 次，AI 只被呼叫 1 次，三次回應相同
+- 第二次點開用 `CaptureQueriesContext` 驗證**沒有任何 INSERT／UPDATE／DELETE**
+- `viewed_at` 只記第一次
+- 事實變了 → 重新產生，`viewed_at` 不變
+- AI 失敗留下的固定句型，下次點開會重試，成功後之後沿用
+- 內容（日記）變了但事實沒變 → 更新快照、不呼叫 AI、只一次 UPDATE
+- 紀錄沒有 `viewed_at` 時，下次點開補上
+- 其他使用者互不影響
+
+### 10.5 後續修正（PR #101）
+
+#100 合併後，完整測試出現 1 個錯誤：F5 的測試 `test_weekly_report_snapshot_keeps_path_but_response_is_signed` 仍用 `patch` 替換舊函式 `build_weekly_report`，但 View 現在呼叫 `build_weekly_report_with_facts`，替身沒生效，View 建出真實（沒有日記）的週報，測試取 `entries[0]` 時 `IndexError`。**只修測試的替換目標**，程式沒有問題。
+
+這個疏失的原因是我在 #100 合併前把測試輸出接了 `tail`，測試失敗沒有讓流程停下。之後每個 PR 都改成「測試沒有全過就不 commit、不 push」（見 16 的說明）。
+
+### 10.6 已知限制
+
+- **首次點開仍會寫入一次**（記 `viewed_at` 與快照）。要讓 GET 完全變成純讀取，需要前端配合新增「標記已讀」端點，這次不動 API 契約，建議之後與前端討論。
+- 沒有替 OpenAI 加 timeout／retry（`fix/global` G9）。
+
+---
+
+## 11. F11 — 遊戲與會員中心的日期改用台灣時間
+
+### 11.1 問題與風險
+
+資料庫與遊戲結果存 **UTC**，台灣是 **UTC+8**。直接取 UTC 的日期，會讓台灣 **00:00～08:00** 發生的事少一天。找到三處：
+
+| 位置 | 原本 | 影響 |
+|---|---|---|
+| 冰箱檢查歷史 `played_date` | `completed_at[:10]`（直接切 UTC 字串前 10 個字） | 凌晨玩的場次日期少一天 |
+| 會員統計 `joined_at` | `registered_at.date()`（UTC 日期） | 凌晨註冊的人「加入日期」少一天 |
+| 生日驗證 | `date.today()`（作業系統日期） | 與 Django `TIME_ZONE` 設定脫鉤，換伺服器時區行為就變 |
+
+### 11.2 修改
+
+**`games/utils.py` 新增 `local_date_from_iso()`**
+
+```python
+def local_date_from_iso(iso_string):
+    try:
+        parsed = parse_datetime(iso_string)
+    except ValueError:
+        parsed = None
+    if parsed is None or timezone.is_naive(parsed):
+        return str(iso_string)[:10]          # 沒有時區資訊或格式不對：退回舊行為，不丟例外
+    return timezone.localtime(parsed).date().isoformat()
+```
+
+- `games/fridge_check/services.py`：`played_date` 改用它；`completed_at`、`played_at` **原樣回傳**。
+- `users/views.py`：`joined_at` 先 `timezone.localtime()` 再取日期。
+- `users/serializers.py`：生日驗證改用 `timezone.localdate()`。
+
+### 11.3 刻意「沒有」改儲存格式
+
+`completed_at` 仍存 UTC 字串（`…+00:00`）。如果改成存台灣時間（`…+08:00`），新舊資料混用不同偏移的字串，而歷史是用**字串排序**找最新的，會排錯順序。要改格式得連歷史資料一起轉換，風險不值得；只在「取日期」時換算。
+
+### 11.4 測試
+
+- `games/tests/test_local_date.py`（11 個）
+  - `LocalDateFromIsoTests`：UTC 晚上 = 台灣隔天；台灣午夜前一刻仍是當天；UTC 早上 = 同一天；已是 +08:00 的字串維持；其他時區偏移會換算；月底、年底換日；沒有時區資訊與無法解析的字串退回前 10 個字、不丟例外
+  - `FridgeCheckHistoryDateTests`：`played_date` 是台灣日期、`completed_at`／`played_at` 原樣回傳、白天玩的場次日期不變。借用 F8 的 `make_session` 等 helper
+- `users/tests/test_local_dates.py`（7 個）
+  - `JoinedAtTests`：台灣午夜後註冊算隔天、午夜前保持當天、統計 API 用台灣日期、`registered_at` 缺少時退回 `date_joined`
+  - `BirthDateTests`：UTC 還是昨天但台灣已是今天時，今天的生日被接受；明天被拒絕；正常的過去日期被接受
+
+### 11.5 其他遊戲
+
+`market_shopping`、`market_sort`、`memory_recall` 的 `completed_at`／`generated_at` 前端使用完整時間字串，後端沒有取日期，所以**不受影響**。
+
+---
+
+## 12. F12 — 移除未使用的診斷性模型（有 migration）
+
+### 12.1 問題與風險
+
+專案定位是「輔助維持認知活躍度」，**不做診斷**。盤點時發現兩個沒有被任何 API 或程式使用、只剩後台頁面的診斷性質模型：
+
+| 模型 | 內容 | 使用處 |
+|---|---|---|
+| `assessments.Ad8Record` | AD-8（**失智症篩檢量表**）分數與結果 | 只有後台 |
+| `dashboard.HealthDashboardRecord` | 腦年齡、趨勢警示等級（低／中／高） | 只有後台 |
+
+儀表板與週報早就改成**即時計算**，不依賴這兩張表。留著它們有兩個問題：一是和產品定位衝突（後台看得到「篩檢結果」「警示等級」）；二是日後有人誤以為要寫入。
+
+這項需要修改資料表，依專案慣例**先問過你**（你選擇「完整移除，要 migration」）。
+
+### 12.2 修改
+
+- 刪除兩個模型與後台註冊。
+- **新增兩個 migration**（各刪除一張資料表）：
+  - `assessments/migrations/0002_delete_ad8record.py`（依賴 `0001_initial`）
+  - `dashboard/migrations/0003_delete_healthdashboardrecord.py`（依賴 `0002_weeklyreport`）
+- `assessments` 變成**空 app**（保留在 `INSTALLED_APPS`）：已經套用過 `0001` 的資料庫需要它才能執行刪表 migration；若連 app 一起拿掉，這些資料庫會留下孤立的 migration 紀錄。
+- `README.md`、`doc/DATABASE_SETUP.md`：移除相關說明與 ER 圖。
+
+### 12.3 測試（`dashboard/tests/test_removed_models.py`，6 個）
+
+原本放在 `config/`，PR #103 才搬到 `dashboard/tests/`。
+
+| 測試 | 驗證什麼 |
+|---|---|
+| 兩個模型不存在 | `apps.get_model()` 找不到 `Ad8Record`、`HealthDashboardRecord`（`LookupError`） |
+| `WeeklyReport` 模型還在 | 同一個 app 的其他模型沒被誤刪 |
+| 沒有遺漏的 migration | `makemigrations --check --dry-run` 不報錯（模型與 migration 同步） |
+| 資料表被刪除 | 套用最新 migration 後兩張表都不存在 |
+| 可倒退再重新套用 | migrate 到 `assessments 0001`／`dashboard 0002` 時兩張表存在，再 migrate 到最新又消失 |
+| `WeeklyReport` 資料表沒被動到 | `dashboard_weeklyreport` 仍在 |
+
+後兩類用 `TransactionTestCase` + `MigrationExecutor` 實際倒退與前進；`tearDown` 一定把資料庫恢復到最新，不會影響其他測試。`makemigrations --check` 需要資料庫，所以放 `TestCase` 而不是 `SimpleTestCase`。
+
+### 12.4 部署前注意（重要）
+
+- 套用 migration 會**永久刪除**這兩張資料表。本機資料庫兩張表都是 **0 筆**；**正式環境我無法確認，部署前請先 `SELECT COUNT(*)` 並備份**。
+- migration 可以倒退，但只會重建**空的**資料表，原本的資料不會回來。
+- 若 `fix/global` 也新增 `dashboard` 或 `assessments` 的 migration，合併時要留意編號衝突（目前 `fix/global` 尚未開始）。
+
+### 12.5 沒有處理的相關項目
+
+- `diary.DiaryAnalysis.risk_level`（low／medium／high）與 `ai_feedback`：API 不會輸出，只有後台與示範資料使用；移除要動日記分析與 `seed_demo`，範圍較大，另外處理。
+- `activities.HealthInformation`、`ActivityRecord` 等其他未使用模型不在這次範圍。
+
+---
+
+## 13. F13 — 補齊禁用詞，並對日記 AI 輸出加過濾與驗證
+
+### 13.1 問題與風險
+
+專案定位是「輔助維持認知活躍度」，**不能**出現醫療療效宣稱（延緩失智、降低風險…）。檢查前的狀況：
+
+- 只有**週報總結**與**首頁問候語**會檢查 AI 的句子；**日記的 AI 產生（首問、追問、完成日記內容）完全沒檢查**，AI 回什麼就直接顯示給長者。
+- 禁用詞不完整（沒有「延緩」「風險」「退化」「惡化」「阿茲海默」等）。
+- 把單一字母 `z`／`Z` 列為禁用詞，會誤殺任何含 z 的句子。
+- AI 回傳的欄位沒驗證型別與長度；`title`（資料庫 50）、`invite_text`（100）超長在 PostgreSQL 會 `DataError` 變 500；而 F7 之後 finalize 是 transaction，整個會還原。
+
+### 13.2 修改
+
+**新增 `ai_service/wording.py`**：集中禁用詞，分成疾病名稱、醫療與療效宣稱、負面字眼、專有名詞（分數、標準差、百分位…）、「玩語言」等類別。
+
+```python
+def find_banned_word(text):
+    """回傳 text 裡第一個禁用詞；沒有就回傳 None。text 不是字串也回傳 None。"""
+
+def contains_banned_word(text): ...
+```
+
+- **只列多字詞**。單一個字（「病」「症」「z」）會誤傷正常句子，例如「生病了要多休息」。
+- 比對不分大小寫。
+- `z`／`Z` 改為「z 分數」「z-score」等完整詞。
+- `ai_service/weekly_summary.py`、`ai_service/greeting.py` 改用這份共用清單。
+
+**`diary/ai_gen.py`（整檔重寫）**
+
+| 項目 | 做法 |
+|---|---|
+| 提示詞 | 三個提示詞（首問、追問、完成日記）都附上 `SAFETY_RULES`：不提醫療、不評論長者記憶力與健康、不用負面字眼 |
+| 首問、追問 | `_safe_text()`：空白或有禁用詞 → 固定句型（與 AI 失敗時相同） |
+| 完成日記 | `clean_finalize_content()` 逐欄檢查：禁用詞或型別錯誤 → 該欄用預設值 |
+| 長度 | `title` 截到 `TITLE_MAX_LENGTH = 50`、`invite_text` 截到 `INVITE_TEXT_MAX_LENGTH = 100`（對應資料庫欄位） |
+| `category` | 限定在 `ALLOWED_CATEGORIES`，不在範圍就用預設 |
+| 清單欄位 | `hashtags`、`suggested_replies` 過濾後最多 5 筆，沒剩就用預設 |
+| 記錄 | `print` 改成 `logger.warning` |
+
+### 13.3 測試
+
+`ai_service/tests/test_wording.py`
+
+- `FindBannedWordTests`：醫療宣稱、負面字眼會被擋；專有名詞不分大小寫與空白都會被擋；正常溫暖的句子（含「生病」）會通過；回傳的是命中的那個詞；非字串輸入不算禁用；**清單裡沒有任何單一字元**
+- `OtherModulesUseTheSharedListTests`：週報總結與問候語會擋新增的禁用詞；週報總結**不再因為字母 z 被誤殺**
+
+`diary/tests/test_ai_gen.py`
+
+- `QuestionTests`：乾淨的問題照常回傳；首問、追問含禁用詞 → 固定句型；AI 回空白 → 固定句型；AI 出錯 → 固定句型並記 log；三個提示詞都附上安全規則
+- `FinalizeContentTests`：好的內容原樣保留（含被 markdown 圍欄包住的 JSON）；某欄有禁用詞只有該欄用預設值，其他欄保留；超長的 `title`／`invite_text` 截到資料庫允許長度；不明分類用預設、所有允許的分類都不超過資料庫欄位長度；錯誤型別用預設；清單裡的禁用詞與非字串被丟棄、剩下沒東西用預設、最多 5 筆；JSON 不是物件、JSON 壞掉、AI 出錯都用預設；清理過程不會修改傳入的資料
+
+合計新增 30 個，全部測試 865 個。
+
+### 13.4 已知限制
+
+- 只檢查 **AI 產生的句子**，**不檢查長者自己說的話**（日記預設的 `title`／`post_text` 取自長者原話）。
+- 禁用詞是字串比對，不是語意判斷；換個說法（例如「讓腦袋不再生鏽」）擋不到，仍要靠提示詞約束。
+- 單一字（病、症）刻意不列，所以「生病」這類句子可以出現。
+
+---
+
+## 14. 測試檔搬進各 app 的 `tests/` 資料夾（PR #103）
+
+這不是 F 編號的問題修正，而是整理專案結構：你指出測試檔大多散在各 app 的根目錄（`tests.py`、`tests_*.py`），只有 `users/`、`home/` 有 `tests/` 資料夾。這個 PR 統一改成每個 app 都用 `tests/` 套件。**只搬檔案，沒有改測試內容。**
+
+### 14.1 搬移規則
+
+| 原本 | 搬到 |
+|---|---|
+| `<app>/tests.py` | `<app>/tests/test_<主題>.py` |
+| `<app>/tests_x.py` | `<app>/tests/test_x.py` |
+| `<app>/test_x.py` | `<app>/tests/test_x.py` |
+| `games/<遊戲>/tests_x.py` | `games/<遊戲>/tests/test_x.py` |
+| `config/tests_removed_models.py` | `dashboard/tests/test_removed_models.py`（它測的是 assessments／dashboard 的模型） |
+
+`tests.py` 沒有主題名稱，所以依內容命名：
+
+| 原檔 | 新檔 |
+|---|---|
+| `ai_service/tests.py` | `ai_service/tests/test_weekly_summary.py` |
+| `dashboard/tests.py` | `dashboard/tests/test_dashboard_api.py` |
+| `diary/tests.py` | `diary/tests/test_diary_api.py` |
+| `public_share/tests.py` | `public_share/tests/test_public_share.py` |
+| `social/tests.py` | `social/tests/test_social.py` |
+| `games/market_sort/tests.py` | `games/market_sort/tests/test_views.py`（與其他遊戲一致） |
+
+- 共 **46 個測試檔**用 `git mv` 搬動（Git 會把它們認成「重新命名」，保留修改歷史）。
+- 每個新的 `tests/` 資料夾補一個空的 `__init__.py`（Python 套件需要；Django 的測試探索會找 `tests/` 底下 `test*.py` 的檔案）。
+- 刪除 `activities`、`assessments`、`games` 三個只有 Django 範本註解（`# Create your tests here.`）的空 `tests.py`。
+- `users/tests/`、`home/tests/` 原本就是這個結構，不動。
+
+### 14.2 連帶修改
+
+1. **相對 import 多一層**：檔案深了一層，`from .models import …` 要改成 `from ..models import …`（涵蓋 `.services`、`.views`、`.utils`、`.weekly_report`、`.management…` 等）。
+2. **測試之間互相借用的 import**：
+   - `games/market_sort/tests/test_owner.py`：`from .tests import …` → `from .test_views import …`
+   - `dashboard/tests/test_diary_z_scan.py`：`from . import tests as dashboard_tests` → `from . import test_dashboard_api as dashboard_tests`
+   - `games/tests/test_local_date.py`：`games.tests_list_user_sessions` → `games.tests.test_list_user_sessions`
+   - `games/tests/test_recompute_scores.py`：`games.market_route.tests_market_zscore` → `games.market_route.tests.test_market_zscore`，`games.memory_recall.tests_memory_zscore` 同理
+3. **執行指令**：測試檔開頭 docstring 的 `python manage.py test …` 與 `doc/` 裡的測試路徑（`frontend_api_changes.md`、`game_scoring_algorithms.md`、`score_standardization_changes.md`、`weekly_report.md`，以及本文件）一併更新。
+
+### 14.3 執行方式的變更
+
+```bash
+# 舊
+python manage.py test diary.tests_media --settings=config.settings_test
+# 新
+python manage.py test diary.tests.test_media --settings=config.settings_test
+
+# 整個 app
+python manage.py test diary --settings=config.settings_test
+
+# 全部（不變）
+python manage.py test --settings=config.settings_test
+```
+
+> 本文件第 1～7 章提到的測試檔，路徑是**搬移後**的新位置；當時這些 PR（#87～#93）合併時，它們還是 `games/tests_anonymous.py` 這種平放的檔名。
+
+### 14.4 驗證
+
+- 完整測試 **926 個通過、1 個預期失敗**，與搬移前**完全相同**（沒有漏跑、也沒有重複跑）。
+- 搬移後專案中沒有殘留的 `tests.py`／`tests_*.py`。
+- **刻意沒有對舊檔跑 `ruff format`**：舊的測試檔（例如 `social/tests/test_wall.py`）本來就有格式與行長問題，在純搬移的 PR 裡混進格式差異，會讓 Git 無法把它們認成「單純重新命名」，也讓 review 變困難。
+
+### 14.5 已知限制
+
+- 舊的指令（`diary.tests_media`…）、舊的文件連結或書籤會失效。專案內的我都改了，個人筆記需要自己更新。
+- 目前 `games/` 底下還有 `tests_dda.py` 等演算法測試與 API 測試混在同一個 `tests/` 裡，沒有再細分。
+
+---
+
+## 15. 驗證方式與結果
+
+### 15.1 指令
 
 ```bash
 source venv/bin/activate
 
-# 全部測試（目前 835 個，1 個預期失敗）
+# 全部測試（目前 926 個，1 個預期失敗）
 python manage.py test --settings=config.settings_test
 
-# 單一模組（以 F5 為例）
+# 單一模組（以 F5 為例；測試搬進 tests/ 之後的路徑）
 python manage.py test diary.tests.test_media --settings=config.settings_test
 
 # 只對自己改到的檔案檢查（不要 ruff format . 全專案，會動到約 50 個無關檔案）
@@ -681,7 +1170,7 @@ ruff format <改到的檔案>
 ruff check <改到的檔案>
 ```
 
-### 8.2 「拿掉修正，測試會失敗」的結果
+### 15.2 「拿掉修正，測試會失敗」的結果
 
 | 編號 | 還原的內容 | 結果 |
 |---|---|---|
@@ -692,25 +1181,42 @@ ruff check <改到的檔案>
 | F5 | 所有讀取點與上傳 | 9 個失敗（8 failure＋1 error） |
 | F6 | `users/views.py` | 2 個失敗；整個移除新函式 → `ImportError` |
 | F7 | `diary/views.py` | 12 個斷言失敗 |
+| F8 | 只還原三個呼叫端 | 「歷史不載入他人場次」測試失敗 |
+| F8 | 連 `session_service.py` 一起還原 | 7 個失敗（N+1 與查詢次數） |
+| F9 | `dashboard/services.py` 與呼叫端 | 8 個失敗（掃描次數、提早結束、傳入預先算好的結果）；另 2 個「與舊版結果一致」的測試兩邊都通過——它們的用途是保護這次重構沒有改變結果 |
+| F10 | `dashboard/views.py` | 6 個失敗（重複呼叫 AI、重複寫入、事實變更、固定句型重試…） |
+| F11 | 三個使用處 | 5 個失敗 |
+| F12 | 模型與 migration | 4 個失敗 |
+| F13 | `ai_gen.py`、`wording.py` | 約 20 個失敗 |
 
-### 8.3 還沒有做的驗證
+### 15.3 還沒有做的驗證
 
 - 沒有在真的 PostgreSQL＋多 worker＋真的 Firebase 環境實測（F4 的共用快取、F5 的簽名、F6 的刪檔、F7 的鎖）。以上都是用 mock 驗證程式邏輯。**合併到正式環境前，建議在測試環境手動走一遍。**
+- **F12 的 migration 沒有在正式資料庫上演練**。本機兩張表都是 0 筆，但正式環境未知；套用前請先確認筆數並備份（見 12.4）。
+- F8、F9 的效能改善是用「查詢次數」驗證（場次變多時查詢數不增加、掃描次數降低），**沒有在大量資料下量測實際秒數**。
+- F10 的 AI 沿用邏輯用 mock 驗證；沒有用真的 OpenAI 回應測過。
 
 ---
 
-## 9. 開發過程備註
+## 16. 開發過程備註
 
 - **測試的假設錯誤**（F3）：我以為未結束 session 的 `result` 是 `{}`，實際是 `None`。修正的是測試。
 - **指令失誤**（F5）：驗證「拿掉修正會失敗」時，我一個 `git stash push` 指令因為檔名引用錯誤沒有成功，後面的 `git stash pop` 卻照常執行，把你原本 `feat/score_standardization` 的舊 WIP stash（一行文件修改）取出來了。發現後立刻放回原樣，內容完全一致。之後所有還原驗證改用 `git diff > patch` ＋ `git apply -R`，不再碰 stash。
 - **程式碼多寫一行**（F6）：`collect_user_media` 一度多了一行無意義的程式，馬上自己發現並刪掉，之後有測試保護。
-- **合併方式**：#87 依你的指示「直接 merge」；#88～#93 在你詢問「為什麼還沒 merge」之後，我以同樣方式用 merge commit 合併。
+- **合併方式**：#87 依你的指示「直接 merge」；#88～#93 在你詢問「為什麼還沒 merge」之後，我以同樣方式用 merge commit 合併；之後的 PR 也照這個做法。
+- **F10 帶著失敗的測試被合併**（#100，已由 #101 修正）：我把完整測試的輸出接 `tail`，管線的結束代碼是 `tail` 的（永遠成功），測試失敗沒有讓流程停下。**修正**：之後每個 PR 的指令都改成 `if ! python manage.py test … > 輸出檔; then exit 1; fi`，測試沒有全過就不 commit、不 push。這件事我當時就在 PR #101 的說明裡寫明了。
+- **整檔重寫 `diary/ai_gen.py`**（F13）：我第一次用取代腳本改這個檔案，結果把檔案弄壞了，所以改成整份重寫。重寫後有測試保護。
+- **測試類別被重複執行**（F9）：`test_diary_z_scan.py` 想借用 `DashboardApiTests` 的 helper，一開始用 `from … import DashboardApiTests`，結果 Django 把它當成這個檔案裡的測試類別又跑一遍（測試數變成 28 而不是 10）。改成只 import **模組**、用 `模組.類別.方法` 取用。
+- **測試的假設錯誤**（F8、F10）：我以為未結束場次的 `result` 是 `{}`、`market_shopping` 歷史的 `data` 是 dict，實際分別是 `None` 與 list，修正的是測試，不是程式。
+- **`SimpleTestCase` 不能碰資料庫**（F12）：`makemigrations --check` 需要資料庫，放在 `SimpleTestCase` 會被擋，改放 `TestCase`。
+- **既有的 ruff 問題沒有順手處理**：`diary/views.py`、`users/serializers.py`、`ai_service` 的部分舊檔本來就有，我只對自己改到的檔案跑 ruff，避免 PR 混進無關差異。
+- **搬移測試時的失誤與修正**（#103）：我用腳本批次搬檔與改 import。第一版的相對 import 規則寫錯（正規表示式要求點後面接空白，但 `.models` 後面沒有空白），結果大部分檔案沒有被修正；我在 review 搬移後的差異時發現，馬上補上規則重跑，並確認全部測試通過後才 commit。另外取代舊路徑時，`diary.tests`（舊的 `tests.py`）被取代後，又被後面的規則重複取代，造成 docstring 裡的指令變成 `diary.tests.test_diary_api.test_media`，也已經修正。過程中還有一個誤把 `grep -r` 的檔案清單留空、掃描了整個 `venv/` 而卡住的指令，已中止，沒有造成任何修改。
 
 ---
 
-## 10. 尚未處理的事與後續建議
+## 17. 尚未處理的事與後續建議
 
-### 10.1 `fix/features` 的後續（建議優先）
+### 17.1 `fix/features` 的後續（建議優先）
 
 | 優先 | 項目 | 說明 |
 |---|---|---|
@@ -719,9 +1225,14 @@ ruff check <改到的檔案>
 | 中 | 頭像更換／移除時刪除舊檔案 | F6 的延伸 |
 | 中 | 刪帳號時檔案改成背景刪除，並提供孤兒檔案清理腳本 | F6 的限制 |
 | 低 | F2 的檢查改成 `market_route`／`memory_recall` 也共用 `forbidden_unless_owner` | 目前兩套並存，功能都正確 |
-| 低 | F8～F13（效能、時區、診斷性模型清理等） | 見計畫檔 |
+| 中 | **正式環境套用 F12 的 migration 前** | 先確認 `assessments_ad8record`、`dashboard_healthdashboardrecord` 兩張表的筆數並備份 |
+| 中 | `DiaryAnalysis.risk_level`、`ai_feedback` 清理 | F12 刻意沒動；要連 `seed_demo` 一起改 |
+| 中 | 週報改成純讀取 | F10 首次點開仍會寫一次；要與前端新增「標記已讀」端點 |
+| 中 | 日記語言 z 的跨請求快取／預先彙總 | F9 只做到「一次請求只掃一次」；等有共用快取（Redis）再做 |
+| 低 | 日記預設的 `title`／`post_text` 也加用語檢查 | F13 只檢查 AI 產生的句子，不檢查長者原話 |
+| 低 | `games/` 的 `tests/` 內部再依類型分組 | #103 只把檔案搬進去，沒有再細分 |
 
-### 10.2 `fix/global`（共通問題，規劃中）
+### 17.2 `fix/global`（共通問題，規劃中）
 
 | 編號 | 項目 | 備註 |
 |---|---|---|
@@ -731,30 +1242,42 @@ ruff check <改到的檔案>
 | G4 | JWT blacklist 與 rotation、縮短 token 效期 | 需要 migration，要先確認 |
 | G5～G6 | 統一回應格式 `common/responses.py` | `diary` 目前沒有 `success` 欄位 |
 | G8 | 遊戲 session 加 transaction／鎖 | F7 對日記做了，遊戲那邊（`update_session`、`save_step`）還沒 |
-| G9 | OpenAI 加 timeout 與 retry | F7 的鎖會因此受益 |
+| G10 | 補常用查詢索引 | F8、F9 的查詢會用到 `GameSession(game, user)`、`DiaryAnalysis(is_valid)`、`Diary(created_at)` |
+| G9 | OpenAI 加 timeout 與 retry | F7 的鎖、F10 的週報都會因此受益 |
 | G11～G14 | CI、pre-commit、部署文件、外部服務單元測試 | |
 
 ---
 
-## 11. 檔案索引
+## 18. 檔案索引
 
 依檔案列出「哪些編號動過它」，方便日後查「這一行是為什麼寫的」。
 
 | 檔案 | 編號 | 說明 |
 |---|---|---|
-| `games/utils.py` | F1、F2 | `get_current_user` 改回 `None`；新增 `forbidden_unless_owner` |
-| `games/session_service.py` | F3 | 新增 `SessionOwnerMismatch`；`get_or_create_session` 檢查擁有者 |
+| `games/utils.py` | F1、F2、F11 | `get_current_user` 改回 `None`；新增 `forbidden_unless_owner`、`local_date_from_iso` |
+| `games/session_service.py` | F3、F8 | 新增 `SessionOwnerMismatch`；`get_or_create_session` 檢查擁有者；新增 `list_user_sessions`、`_to_dict(with_steps=)`，`list_sessions` 加 `select_related`／`prefetch_related` |
 | `games/fridge_check/views.py` | F2 | `submit_answer` 加擁有者檢查 |
 | `games/market_shopping/views.py` | F2 | `submit_item_answer`、`submit_change_answer` 加擁有者檢查 |
-| `games/market_sort/views.py` | F3 | 接住 `SessionOwnerMismatch` 回 403 |
+| `games/market_sort/views.py` | F3、F8 | 接住 `SessionOwnerMismatch` 回 403；歷史改用 `list_user_sessions` |
+| `games/fridge_check/services.py` | F8、F11 | 歷史改用 `list_user_sessions`；`played_date` 改用 `local_date_from_iso` |
+| `games/market_shopping/services.py` | F8 | 歷史改用 `list_user_sessions` |
 | `users/throttles.py`（新） | F4 | 兩個忘記密碼限速類別 |
-| `users/views.py` | F4、F5、F6 | 套用限速；頭像 `public=True`；`collect_user_media`／`remove_user_media`；刪帳號流程 |
+| `users/views.py` | F4、F5、F6、F11 | 套用限速；頭像 `public=True`；`collect_user_media`／`remove_user_media`；刪帳號流程；`joined_at` 用台灣日期 |
+| `users/serializers.py` | F11 | 生日驗證用 `timezone.localdate()` |
 | `diary/media.py`（新） | F5 | `media_url()` |
 | `diary/external.py` | F5、F6 | `upload_to_firebase(public=)`；`blob_name_from_stored`、`delete_from_firebase` |
 | `diary/views.py` | F5、F7 | 讀取點套 `media_url`；回覆驗證與 transaction |
 | `social/utils.py` | F5 | `serialize_post` 套 `media_url` |
 | `public_share/views.py` | F5 | 分享頁照片套 `media_url` |
-| `dashboard/weekly_report.py`、`dashboard/views.py` | F5 | `with_signed_media`；快照存路徑 |
+| `dashboard/weekly_report.py`、`dashboard/views.py` | F5、F9、F10 | `with_signed_media`；快照存路徑；F9 傳遞預先算好的日記分數；F10 `SUMMARY_FACTS_KEY`、`_reusable_summary`、`build_weekly_report_with_facts`、不重複寫入 |
+| `dashboard/services.py` | F9 | `_compute_diary_z_scores`、`diary_z_scores(scores=)`、各函式的 `diary_scores` 選用參數 |
+| `dashboard/encouragement.py` | F9 | `get_encouragement` 接受預先算好的分數 |
+| `ai_service/wording.py`（新） | F13 | 共用禁用詞與 `find_banned_word`、`contains_banned_word` |
+| `ai_service/weekly_summary.py`、`ai_service/greeting.py` | F13 | 改用共用禁用詞 |
+| `diary/ai_gen.py` | F13 | 整檔重寫：安全規則、輸出清理與驗證、長度限制 |
+| `assessments/models.py`、`assessments/admin.py`、`assessments/migrations/0002_delete_ad8record.py` | F12 | 移除 `Ad8Record`（app 保留為空） |
+| `dashboard/models.py`、`dashboard/migrations/0003_delete_healthdashboardrecord.py` | F12 | 移除 `HealthDashboardRecord` |
+| `README.md`、`doc/DATABASE_SETUP.md` | F12 | 移除相關說明與 ER 圖 |
 | `games/tests/test_utils.py`、`games/tests/test_anonymous.py` | F1 | |
 | `games/tests/test_session_owner.py` | F2 | |
 | `games/market_sort/tests/test_owner.py` | F3 | |
@@ -762,7 +1285,14 @@ ruff check <改到的檔案>
 | `diary/tests/test_media.py` | F5 | |
 | `users/tests/test_delete_account_files.py` | F6 | |
 | `diary/tests/test_reply_validation.py` | F7 | |
-| `doc/frontend_api_changes.md` | 全部 | 前端對照文件 |
+| `games/tests/test_list_user_sessions.py` | F8 | |
+| `dashboard/tests/test_diary_z_scan.py` | F9 | |
+| `dashboard/tests/test_weekly_report_view.py` | F10 | |
+| `games/tests/test_local_date.py`、`users/tests/test_local_dates.py` | F11 | |
+| `dashboard/tests/test_removed_models.py` | F12 | 原在 `config/`，#103 搬移 |
+| `ai_service/tests/test_wording.py`、`diary/tests/test_ai_gen.py` | F13 | |
+| 全部 `*/tests/` | 整理 | #103 把所有測試搬進各 app 的 `tests/` |
+| `doc/frontend_api_changes.md` | F1～F7 | 前端對照文件（F8～F13 對前端沒有介面變化，只有 F11 的日期值差異） |
 
 ---
 
@@ -778,8 +1308,16 @@ ruff check <改到的檔案>
 | F6 | #92 | `fix/users-delete-cloud-files` | `fix(users): 刪除帳號時一併清除雲端與本機檔案` |
 | F7 | #93 | `fix/diary-reply-validation` | `fix(diary): 回覆日記驗證 round_index，寫入改用 transaction` |
 | 文件 | #94 | `docs/fix-features-summary` | `docs: 整合 F1～F7 後端修正說明，供前端對照修改` |
+| F13 | #96 | `fix/ai-banned-words` | `fix(ai_service): 補齊禁用詞，並對日記 AI 輸出加上過濾與驗證` |
+| F8 | #97 | `perf/games-list-sessions` | `perf(games): 歷史紀錄改在資料庫篩選使用者的場次，消除 N+1` |
+| F9 | #98 | `perf/dashboard-diary-zscore-cache` | `perf(dashboard): 日記語言 z 一次請求只掃一次全站日記` |
+| F11 | #99 | `fix/games-local-date` | `fix(games): 遊戲與會員中心的日期改用台灣時間` |
+| F10 | #100 | `fix/dashboard-weekly-report-get` | `fix(dashboard): 週報重複點開不再重複呼叫 AI 與寫資料庫` |
+| F10 修正 | #101 | `test/diary-media-weekly-report-patch` | `test(diary): 週報簽名網址測試改為替換 build_weekly_report_with_facts` |
+| F12 | #102 | `refactor/remove-diagnostic-models` | `refactor(assessments): 移除未使用的 AD-8 與健康儀表板診斷性模型` |
+| 整理 | #103 | `test/move-tests-into-app-packages` | `test: 測試檔搬到各 app 的 tests/ 資料夾` |
 
-只有 F1 帶 `!`（Conventional Commits 的破壞性變更標記）；其餘對正常使用的前端流程不造成破壞。
+只有 F1 帶 `!`（Conventional Commits 的破壞性變更標記）；其餘對正常使用的前端流程不造成破壞。F12 雖然動到資料表，但這兩個模型從來沒有對外 API，所以沒有 `!`。
 
 ---
 
@@ -801,7 +1339,14 @@ ruff check <改到的檔案>
 | **冪等（idempotent）** | 同一個請求送一次或送很多次，結果都一樣。例如重送同一個 `session_id` 會拿到同樣的結果，不會重複計分 |
 | **簽名網址（signed URL）** | 雲端儲存替「某個檔案、某段時間」產生的臨時網址，過期就失效。檔案本身保持私有 |
 | **Firebase Storage / bucket / blob** | Google 的檔案儲存服務。bucket＝一個儲存空間（像資料夾的根）；blob＝裡面的一個檔案 |
-| **migration** | 修改資料表結構的紀錄檔。這一輪沒有新增 |
+| **migration** | 修改資料表結構的紀錄檔。F1～F7 沒有新增；F12 新增了兩個（刪除兩張表） |
 | **mock（模擬）** | 測試時用假物件代替真的外部服務（Firebase、OpenAI、Whisper），這樣測試又快又穩，也不會花錢 |
 | **Conventional Commits** | commit 訊息的固定格式：`類型(範圍): 描述`，例如 `fix(games): ...`；類型後加 `!` 代表會破壞既有行為 |
+| **N+1 查詢** | 先用 1 次查詢取得 N 筆資料，再對每一筆各查一次關聯資料，總共 N+1 次。資料越多越慢。用 `select_related`（JOIN）或 `prefetch_related`（批次查詢）一次取回 |
+| **`select_related` / `prefetch_related`** | Django 預先把關聯資料一起查回來的兩種方法：前者用 JOIN（適合一對一、多對一），後者另外用一次查詢批次取（適合一對多） |
+| **UTC / Asia/Taipei** | UTC 是世界標準時間；台灣是 UTC+8。UTC 16:00 就是台灣隔天 00:00，直接取 UTC 的日期會讓台灣凌晨少一天 |
+| **z 分數（z-score）** | 一個數值相對於「某群體平均」差幾個標準差。專案用它把不同遊戲、不同指標放到同一把尺上比較；不會顯示給長者看 |
+| **快照（snapshot）** | 把某一刻算出的結果整份存起來。週報用它記下「那一週當時的內容」 |
+| **`DeleteModel` migration** | 刪除一個模型（資料表）的 migration。套用會刪除資料表與全部資料；倒退只會重建空表 |
+| **禁用詞** | 不能出現在給長者看的句子裡的詞，例如醫療與療效宣稱。AI 產生的句子會先過一遍檢查 |
 | **merge target（合併目標）** | 小分支做完要合併進去的分支。這一輪是 `fix/features` |
