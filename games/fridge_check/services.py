@@ -560,19 +560,15 @@ def get_history(user_id):
     3. 有 result 的 session
     """
 
-    sessions = session_service.list_sessions(GAME_TYPE)
+    # 在資料庫就篩選出「這位使用者、已完成」的場次，不載入全站資料
+    sessions = session_service.list_user_sessions(
+        GAME_TYPE, user_id, status="finished"
+    )
 
     history = []
 
     for session in sessions:
-        state = session.get("state", {})
         result = session.get("result")
-
-        if state.get("user_id") != user_id:
-            continue
-
-        if session.get("status") != "finished":
-            continue
 
         if not result:
             continue

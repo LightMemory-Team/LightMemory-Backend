@@ -129,12 +129,10 @@ class MarketSortSubmitView(APIView):
         return self._build_response(request.user, session)
 
     def _build_response(self, user, session):
-        all_sessions = session_service.list_sessions(GAME_TYPE)
-        history = [
-            s
-            for s in all_sessions
-            if s["status"] == "finished" and s["state"].get("user_id") == user.id
-        ]
+        # 在資料庫就篩選出「這位使用者、已完成」的場次，不載入全站資料
+        history = session_service.list_user_sessions(
+            GAME_TYPE, user.id, status="finished"
+        )
         history.sort(key=lambda s: s["result"]["generated_at"], reverse=True)
 
         # 資料不足的場次分數是 None，最高分、近期分數都不算它
