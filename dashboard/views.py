@@ -24,6 +24,9 @@ def dashboard(request):
     if not request.user.is_authenticated:
         return _error_response("NOT_AUTHENTICATED", "請先登入", status=401)
 
+    # 日記的語言 z 要掃全站日記：算一次，雷達圖與機器人卡片共用
+    diary_scores = services.diary_z_scores(request.user)
+
     return Response(
         {
             "success": True,
@@ -32,10 +35,14 @@ def dashboard(request):
                 "required_sessions": services.REQUIRED_SESSIONS,
                 # 固定 6 個維度，各自帶解鎖狀態；沒解鎖的維度前端畫灰色軸、
                 # 顯示「再玩 N 次就能看到」
-                "dimensions": services.get_dashboard_dimensions(request.user),
+                "dimensions": services.get_dashboard_dimensions(
+                    request.user, diary_scores=diary_scores
+                ),
                 # 機器人卡片：總體分數的趨勢代碼，前端翻成鼓勵文字；
                 # 6 個維度都解鎖前是 null
-                "encouragement": encouragement.get_encouragement(request.user),
+                "encouragement": encouragement.get_encouragement(
+                    request.user, diary_scores=diary_scores
+                ),
             },
             "error": None,
         }
