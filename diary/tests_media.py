@@ -224,7 +224,8 @@ class OtherEndpointsSignedUrlTests(APITestCase):
         with (
             fake_firebase(),
             patch(
-                "dashboard.views.weekly_report.build_weekly_report", return_value=report
+                "dashboard.views.weekly_report.build_weekly_report_with_facts",
+                return_value=(report, {"active_day_count": 0}),
             ),
         ):
             response = self.client.get("/api/dashboard/weekly-report/")
