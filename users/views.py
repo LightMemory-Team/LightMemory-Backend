@@ -115,8 +115,9 @@ def calculate_user_stats(user, today=None):
     if today is None:
         today = timezone.localdate()
 
-    reg_date = (getattr(user, "registered_at", None) or user.date_joined).date()
-    joined_at = reg_date.isoformat()
+    # 資料庫存的是 UTC，要先轉成台灣時間再取日期，不然台灣 00:00～08:00 註冊會少一天
+    registered = getattr(user, "registered_at", None) or user.date_joined
+    joined_at = timezone.localtime(registered).date().isoformat()
 
     session_count = GameSession.objects.filter(
         user=user, status="finished", is_pretest=False
