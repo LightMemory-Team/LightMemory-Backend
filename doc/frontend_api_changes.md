@@ -134,7 +134,7 @@ curl -X POST https://<後端網址>/api/games/fridge-check/sessions/ \
   -H "Authorization: Bearer <access>"
 ```
 
-**檔案**：`games/utils.py`、`games/tests_utils.py`、`games/tests_anonymous.py`（新）
+**檔案**：`games/utils.py`、`games/tests/test_utils.py`、`games/tests/test_anonymous.py`（新）
 
 ---
 
@@ -166,7 +166,7 @@ curl -X POST https://<後端網址>/api/games/fridge-check/sessions/ \
 
 **前端要做**：作答請求要帶「建立（開始）這場遊戲的同一個帳號」的 token。**登出換帳號時，清掉先前的 `session_id`**，否則舊帳號開的遊戲用新帳號作答會收到 403。
 
-**檔案**：`games/utils.py`、`games/fridge_check/views.py`、`games/market_shopping/views.py`、`games/tests_session_owner.py`（新）
+**檔案**：`games/utils.py`、`games/fridge_check/views.py`、`games/market_shopping/views.py`、`games/tests/test_session_owner.py`（新）
 
 ---
 
@@ -189,7 +189,7 @@ curl -X POST https://<後端網址>/api/games/fridge-check/sessions/ \
 - `session_id` **請用 UUID**。同一款遊戲內全站唯一，如果不同使用者剛好用到同一個簡單的值（例如 `test_1`），後來的人會一直收到 403。
 - 換帳號登入時不要沿用舊的 `session_id`。
 
-**檔案**：`games/session_service.py`、`games/market_sort/views.py`、`games/market_sort/tests_owner.py`（新）
+**檔案**：`games/session_service.py`、`games/market_sort/views.py`、`games/market_sort/tests/test_owner.py`（新）
 
 ---
 
@@ -258,7 +258,7 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 
 **其他細節**：週報會把內容存成快照，快照存的是**路徑**，回傳 API 時才換成簽名網址（簽名網址有時效，不能存進快照）。
 
-**檔案**：`diary/media.py`（新）、`diary/external.py`、`diary/views.py`、`social/utils.py`、`public_share/views.py`、`dashboard/weekly_report.py`、`dashboard/views.py`、`users/views.py`、`diary/tests_media.py`（新）
+**檔案**：`diary/media.py`（新）、`diary/external.py`、`diary/views.py`、`social/utils.py`、`public_share/views.py`、`dashboard/weekly_report.py`、`dashboard/views.py`、`users/views.py`、`diary/tests/test_media.py`（新）
 
 ---
 
@@ -323,7 +323,7 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 
 **備註**：資料庫鎖定（`select_for_update`）只在 PostgreSQL 生效，測試用的 SQLite 會忽略它；建議在測試環境用兩個並行請求再驗證一次。
 
-**檔案**：`diary/views.py`、`diary/tests_reply_validation.py`（新）
+**檔案**：`diary/views.py`、`diary/tests/test_reply_validation.py`（新）
 
 ---
 
@@ -370,4 +370,4 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 
 > 只有 F1 的 commit 有 `!`（破壞性變更）。F2～F7 對「正常使用」的前端流程不造成破壞，但上面第 1.1 節列的項目仍需要確認。
 
-新增的測試檔：`games/tests_anonymous.py`、`games/tests_session_owner.py`、`games/market_sort/tests_owner.py`、`users/tests/test_password_reset_throttle.py`、`diary/tests_media.py`、`users/tests/test_delete_account_files.py`、`diary/tests_reply_validation.py`。
+新增的測試檔：`games/tests/test_anonymous.py`、`games/tests/test_session_owner.py`、`games/market_sort/tests/test_owner.py`、`users/tests/test_password_reset_throttle.py`、`diary/tests/test_media.py`、`users/tests/test_delete_account_files.py`、`diary/tests/test_reply_validation.py`。

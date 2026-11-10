@@ -111,8 +111,8 @@ def get_current_user(request):
 
 | 檔案 | 內容 |
 |---|---|
-| `games/tests_utils.py`（修改） | 登入者回傳自己；**未登入即使資料庫有使用者也回 `None`**（原本是「回傳第一位」的測試，改成相反的預期）；資料庫沒有使用者回 `None` |
-| `games/tests_anonymous.py`（新） | 資料庫有使用者、但沒登入時，4 個開場端點（`fridge-check/sessions/`、`market-shopping/sessions/`、`market-route/start/`、`memory-recall/start/`）都回 404 `USER_NOT_FOUND`；**不會建立任何 `GameSession`**；已登入的使用者仍可正常開始遊戲 |
+| `games/tests/test_utils.py`（修改） | 登入者回傳自己；**未登入即使資料庫有使用者也回 `None`**（原本是「回傳第一位」的測試，改成相反的預期）；資料庫沒有使用者回 `None` |
+| `games/tests/test_anonymous.py`（新） | 資料庫有使用者、但沒登入時，4 個開場端點（`fridge-check/sessions/`、`market-shopping/sessions/`、`market-route/start/`、`memory-recall/start/`）都回 404 `USER_NOT_FOUND`；**不會建立任何 `GameSession`**；已登入的使用者仍可正常開始遊戲 |
 
 既有的 365 個 games 測試沒有任何一個依賴 fallback（修改後全過）。
 
@@ -182,7 +182,7 @@ if forbidden is not None:
 - **`session["user_id"]` 從哪來？** `session_service._to_dict()` 直接讀資料庫外鍵 `session.user_id`，**不依賴**各遊戲塞在 `state` 裡的 `user_id`（舊寫法），所以不會被遊戲自己的狀態影響。
 - **回應格式**：沿用 `market_route` 既有的 403 body，前端可以共用同一段處理。
 
-### 2.4 測試（`games/tests_session_owner.py`，11 個）
+### 2.4 測試（`games/tests/test_session_owner.py`，11 個）
 
 | 類別 | 測試 |
 |---|---|
@@ -259,7 +259,7 @@ except session_service.SessionOwnerMismatch:
 - **`requester_id` 為什麼有兩個來源？** `get_or_create_session` 的 `user` 參數是可選的，舊寫法是把 `user_id` 放進 `initial_state`（`_resolve_user` 也是這樣相容）。兩個來源都沒有時（`None`）不檢查，維持舊行為，避免影響沒傳 user 的呼叫端。
 - **保留唯一限制不變。** 如果改成 `(game, user, client_session_id)` 唯一，要新增 migration 並可能破壞既有資料；而且「全站唯一」本身是合理的。因此 B 用到 A 的 id 時回 403，要求前端用 UUID。
 
-### 3.4 測試（`games/market_sort/tests_owner.py`，7 個）
+### 3.4 測試（`games/market_sort/tests/test_owner.py`，7 個）
 
 | 類別 | 測試 |
 |---|---|
@@ -465,7 +465,7 @@ return Response({"success": True,
 - **為什麼簽名失敗回 `None` 而不是丟例外？** 一張圖片簽不出來不該讓整個日記月曆（可能 30 筆）都 500。前端拿到 `null` 顯示預設圖即可，錯誤會寫進 log。
 - **公開分享頁的 `og:image`**（給 LINE／Facebook 預覽用）也會是簽名網址，6 小時內有效；社群平台通常在分享當下就會抓取，影響很小。
 
-### 5.5 測試（`diary/tests_media.py`，15 個）
+### 5.5 測試（`diary/tests/test_media.py`，15 個）
 
 不連真的 Firebase：用假的 bucket（`MagicMock`）與假的 `config.firebase` 模組。
 
@@ -643,7 +643,7 @@ with transaction.atomic():
 - **為什麼回覆重複輪次回 409 而不是 400？** 409 Conflict 的語意就是「請求和資源目前狀態衝突」，前端可以把它當成「這一輪已經成功」（常見於網路重試）。
 - **錯誤格式維持 `{"error": {...}}`**（沒有 `success`）：這是 `diary` app 既有的格式，統一格式是 `fix/global`（G5/G6）。為了不在三個地方重複寫同樣的 `Response({...})`，順便加了一個 `_error(code, message, status)` 小函式。
 
-### 7.4 測試（`diary/tests_reply_validation.py`，13 個）
+### 7.4 測試（`diary/tests/test_reply_validation.py`，13 個）
 
 | 類別 | 測試 |
 |---|---|
@@ -674,7 +674,7 @@ source venv/bin/activate
 python manage.py test --settings=config.settings_test
 
 # 單一模組（以 F5 為例）
-python manage.py test diary.tests_media --settings=config.settings_test
+python manage.py test diary.tests.test_media --settings=config.settings_test
 
 # 只對自己改到的檔案檢查（不要 ruff format . 全專案，會動到約 50 個無關檔案）
 ruff format <改到的檔案>
@@ -755,13 +755,13 @@ ruff check <改到的檔案>
 | `social/utils.py` | F5 | `serialize_post` 套 `media_url` |
 | `public_share/views.py` | F5 | 分享頁照片套 `media_url` |
 | `dashboard/weekly_report.py`、`dashboard/views.py` | F5 | `with_signed_media`；快照存路徑 |
-| `games/tests_utils.py`、`games/tests_anonymous.py` | F1 | |
-| `games/tests_session_owner.py` | F2 | |
-| `games/market_sort/tests_owner.py` | F3 | |
+| `games/tests/test_utils.py`、`games/tests/test_anonymous.py` | F1 | |
+| `games/tests/test_session_owner.py` | F2 | |
+| `games/market_sort/tests/test_owner.py` | F3 | |
 | `users/tests/test_password_reset.py`、`test_password_reset_throttle.py` | F4 | |
-| `diary/tests_media.py` | F5 | |
+| `diary/tests/test_media.py` | F5 | |
 | `users/tests/test_delete_account_files.py` | F6 | |
-| `diary/tests_reply_validation.py` | F7 | |
+| `diary/tests/test_reply_validation.py` | F7 | |
 | `doc/frontend_api_changes.md` | 全部 | 前端對照文件 |
 
 ---
