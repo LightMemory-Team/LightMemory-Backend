@@ -1,6 +1,7 @@
 from django.utils import timezone
 
 from games import session_service
+from games.utils import local_date_from_iso
 from games.dda import DDAConfig, NoOpStrategy, apply_answer
 from games.zscore import composite_z_score, z_score_to_display_score
 
@@ -588,7 +589,7 @@ def get_history(user_id):
                 ),
                 "final_difficulty": result["final_difficulty"],
                 "played_at": completed_at,
-                "played_date": completed_at[:10],
+                "played_date": local_date_from_iso(completed_at),
 
                 # 新版完整資料
                 "session_id": session["session_id"],
