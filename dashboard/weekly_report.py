@@ -194,7 +194,7 @@ def _monday_of(moment):
     return day - timedelta(days=day.weekday())
 
 
-def get_weekly_scores_history(user, until_week_start):
+def get_weekly_scores_history(user, until_week_start, diary_scores=None):
     """每週各能力的分數，回傳 {週一日期: {source: 分數}}。
 
     只取到 until_week_start 那週為止。source 是遊戲 id，或聲影日記的 "diary"。
@@ -202,6 +202,9 @@ def get_weekly_scores_history(user, until_week_start):
     週分數 = 那週各場（遊戲依結束時間、日記依建立時間）z 的平均，再換成
     1～100 分（跟煮菜過程結束畫面同一個公式）。z 是 None 的場次、無效日記
     不算；那週沒有分數的能力不會出現。
+
+    diary_scores：事先算好的 diary_z_scores(user)，同一次請求要用好幾次時傳進來，
+    就不會重新掃一遍全站日記（結果一樣）。
     """
     _, end = _week_bounds(until_week_start)
     sessions = _game_sessions(user).filter(status="finished", finished_at__lt=end)
@@ -215,7 +218,7 @@ def get_weekly_scores_history(user, until_week_start):
             continue
         z_by_week[_monday_of(finished_at)][code].append(z_score)
 
-    for created_at, z_score in diary_z_scores(user, end=end):
+    for created_at, z_score in diary_z_scores(user, end=end, scores=diary_scores):
         z_by_week[_monday_of(created_at)][DIARY_SOURCE].append(z_score)
 
     return {
@@ -241,7 +244,7 @@ def _only(scores, sources):
     return {source: score for source, score in scores.items() if source in sources}
 
 
-def build_abilities(user, week_start, played_sources):
+def build_abilities(user, week_start, played_sources, diary_scores=None):
     """「本週 vs 上週」：整體表現＋6 個能力的分數、個人最佳、趨勢。
 
     只列已解鎖的能力：到報告週結束為止，該能力累計有 z 的場次（篇）滿
@@ -249,10 +252,14 @@ def build_abilities(user, week_start, played_sources):
     整體表現也不算它；played 照常標示這週有沒有碰過。
     """
     _, week_end = _week_bounds(week_start)
-    unlocked = unlocked_sources(get_unlock_progress(user, end=week_end))
+    unlocked = unlocked_sources(
+        get_unlock_progress(user, end=week_end, diary_scores=diary_scores)
+    )
     history = {
         week: _only(scores, unlocked)
-        for week, scores in get_weekly_scores_history(user, week_start).items()
+        for week, scores in get_weekly_scores_history(
+            user, week_start, diary_scores=diary_scores
+        ).items()
     }
     this_scores = history.get(week_start, {})
     last_scores = history.get(week_start - timedelta(days=7), {})
@@ -317,7 +324,11 @@ def build_weekly_report(user, today):
         1 for day in get_daily_activity(user, previous_week_start) if day["is_active"]
     )
     played_sources = get_played_sources(user, week_start)
-    abilities = build_abilities(user, week_start, played_sources)
+    # 日記的語言 z 要掃全站日記，整份週報只算一次
+    diary_scores = diary_z_scores(user)
+    abilities = build_abilities(
+        user, week_start, played_sources, diary_scores=diary_scores
+    )
     summary = generate_weekly_summary(
         build_positive_facts(active_day_count, previous_active_day_count, abilities)
     )
