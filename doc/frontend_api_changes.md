@@ -1,10 +1,12 @@
-# 後端安全與穩定性修正總覽（F1～F7）
+# 後端安全與穩定性修正總覽（F1～F13）
 
-更新日期：2026-11-09 · 範圍：`fix/features` 分支（個別功能問題），F1～F7 已全部合併進去
+更新日期：2026-11-10 · 範圍：`fix/features` 分支（個別功能問題），F1～F13 已全部合併進去
 
 這份文件說明這一輪後端修正**改了什麼、為什麼改、前端要配合什麼**。給前端（Flutter）看，也可以當後端的修改紀錄。
 
 > 重點先看第 1 節的「前端待辦」與「錯誤碼總表」。想知道某一項的來龍去脈，再看第 2 節對應的小節。
+>
+> **F8～F13 對前端幾乎沒有影響**（API 的格式與欄位都沒變），只有 F11（日期值）與 F13（AI 文字可能改成固定句型）值得知道。看 [F8～F13 一覽](#f8f13-給前端的總結)即可。
 
 ---
 
@@ -19,9 +21,15 @@
 | F5 | 日記照片與錄音是永久公開網址 | 高 | ⚠️ 網址變成有時效，不可永久儲存 | [#91](https://github.com/LightMemory-Team/LightMemory-Backend/pull/91) |
 | F6 | 刪除帳號後，雲端檔案沒有被刪 | 中 | 不用（可選：刪帳號後清本機快取） | [#92](https://github.com/LightMemory-Team/LightMemory-Backend/pull/92) |
 | F7 | 回覆日記時 `round_index` 不合法或重複會 500；寫入沒有 transaction | 中 | ⚠️ 要處理 400／409 | [#93](https://github.com/LightMemory-Team/LightMemory-Backend/pull/93) |
+| F8 | 遊戲歷史紀錄載入全站場次、查詢過多（慢） | 中 | 不用（回應不變） | [#97](https://github.com/LightMemory-Team/LightMemory-Backend/pull/97) |
+| F9 | 儀表板重複掃描全站日記（慢） | 中 | 不用（回應不變） | [#98](https://github.com/LightMemory-Team/LightMemory-Backend/pull/98) |
+| F10 | 週報每次點開都呼叫 AI 並寫資料庫 | 中 | 不用（第二次之後變快） | [#100](https://github.com/LightMemory-Team/LightMemory-Backend/pull/100)、[#101](https://github.com/LightMemory-Team/LightMemory-Backend/pull/101) |
+| F11 | 台灣凌晨的日期用 UTC 算，少一天 | 低 | 👀 `played_date`、`joined_at` 值變正確，不要自己再轉 | [#99](https://github.com/LightMemory-Team/LightMemory-Backend/pull/99) |
+| F12 | 移除後台的失智篩檢與警示等級模型 | 中 | 不用（從沒有對外 API） | [#102](https://github.com/LightMemory-Team/LightMemory-Backend/pull/102) |
+| F13 | 日記 AI 輸出沒有用語檢查與驗證 | 高 | 👀 AI 文字可能是固定句型；欄位長度有上限 | [#96](https://github.com/LightMemory-Team/LightMemory-Backend/pull/96) |
 
-- 測試：原本 764 個，現在 **835 個全部通過**（另有 1 個原本就預期失敗），新增 71 個測試。
-- 這一輪**沒有修改資料表**，不需要 migration。
+- 測試：原本 764 個，現在 **926 個全部通過**（另有 1 個原本就預期失敗），新增 162 個測試。
+- F1～F11、F13 **沒有修改資料表**；只有 F12 刪除了兩張沒在用的資料表（後端部署時要跑 migration，前端無感）。
 - 每一項都有驗證過「把修正拿掉，新測試就會失敗」，確認測試真的有在保護。
 
 ---
@@ -39,6 +47,8 @@
 - [ ] 回覆日記（`replies`）要處理 **400 `INVALID_ROUND_INDEX`** 與 **409 `ROUND_ALREADY_ANSWERED`**（F7）
 - [ ] 收到 `401 NOT_AUTHENTICATED` 時，用 refresh token 換新 token 並重送；失敗再導回登入頁
 - [ ] 以 `error.code` 判斷錯誤，**不要比對 `error.message` 文字**
+- [ ] （F11）冰箱檢查歷史的 `played_date`、會員統計的 `joined_at` **直接顯示後端給的日期**，不要自己再用 `completed_at` 去切字串或換算（F11）
+- [ ] （F13）日記的 AI 問題、回應不要假設每次都不同；AI 不合格時會是固定句型（F13）
 
 ### 1.2 錯誤碼總表（這一輪新增或變更的）
 
@@ -327,6 +337,67 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 
 ---
 
+### F8～F13 給前端的總結
+
+這六項是效能、時區、資料清理與內容安全，**API 路徑、欄位、錯誤碼都沒有變**。逐項說明：
+
+#### F8 — 遊戲歷史紀錄變快（#97）
+
+- 影響的端點：`fridge-check/history/`、`market-shopping/history/`，以及 `market-sort/submit/` 回應裡附的歷史。
+- 原本會把全站所有人的場次都讀進來再挑自己的，現在資料庫直接只取自己的。**回應內容與格式完全不變**。
+- 前端：不用改。
+
+#### F9 — 儀表板變快（#98）
+
+- 影響的端點：`GET /api/dashboard/`、`GET /api/dashboard/weekly-report/`。
+- 一次請求內重複計算的「日記語言 z」現在只算一次，**數值與以前完全相同**。
+- 前端：不用改。
+
+#### F10 — 週報重複點開不再重複呼叫 AI（#100、#101）
+
+- 影響的端點：`GET /api/dashboard/weekly-report/`。
+- 同一週重複點開，只要週報的事實沒變，就**沿用上次的 AI 總結**，不會每次都換一句話，也不會每次都寫資料庫；第二次之後回應更快。事實變了（多玩了幾天…）才會重新產生總結。
+- 如果上次 AI 失敗、顯示的是固定句型，**下次點開會自動重試**。
+- `GET` 的回應內容與格式不變；快照裡的內部欄位不會出現在回應。
+- 前端：不用改。首次點開仍會記一次 `viewed_at`（首頁「看看上週回顧」任務依此判斷完成），這個行為沒變。
+
+#### F11 — 日期改用台灣時間（#99）👀
+
+資料庫存 UTC（台灣是 UTC+8），以前直接切 UTC 日期，台灣 **00:00～08:00** 發生的事會少一天。現在後端先換成台灣日期：
+
+| 欄位 | 端點 | 變化 |
+|---|---|---|
+| `played_date` | 冰箱檢查歷史 | 台灣凌晨玩的場次，日期比以前多一天（變成正確的台灣日期） |
+| `joined_at` | 會員統計 | 凌晨註冊的人，加入日期比以前多一天 |
+| 生日驗證 | 註冊、更新個人資料 | 「不能選未來日期」改以台灣的今天為準 |
+
+- `completed_at`、`played_at` 等完整時間字串**原樣不變**（仍是 UTC 的 ISO 字串，例如 `2026-11-09T17:30:00+00:00`）。
+- 前端：`played_date`、`joined_at` **直接顯示**。如果前端自己曾經從 `completed_at` 切前 10 個字當日期，請改用後端給的 `played_date`，或把完整時間字串轉成裝置的本地時間再取日期。
+- `market_shopping`、`market_sort`、`memory_recall` 後端不取日期，前端用完整時間字串，不受影響。
+
+#### F12 — 移除診斷性模型（#102）
+
+- 移除了兩個**沒有任何 API** 的後台模型（失智篩檢量表 AD-8、健康儀表板的腦年齡與警示等級）。
+- 前端：完全無感。順帶一提，App 內也不應出現這類字眼，這是產品定位（輔助維持認知活躍度，不做診斷）。
+
+#### F13 — 日記 AI 內容加上用語檢查與驗證（#96）👀
+
+影響日記的三個 AI 產出：首問、追問、完成日記內容（`DiaryFinalizeView`）；以及週報總結、首頁問候語。
+
+| 項目 | 規則 |
+|---|---|
+| 首問、追問 | 空白或含醫療／負面／專有名詞（例如「診斷」「風險」「退化」「分數」）→ 改成固定句型：首問 `這張照片是在哪裡拍的呢？`、追問 `還有什麼想跟我分享的嗎？` |
+| 完成日記的 `title`、`ai_response`、`post_text`、`invite_text` | 某一欄含禁用詞或不是字串 → **只有那一欄**改用預設值，其他欄保留 |
+| `title` | 最多 **50** 字（超過會被截短） |
+| `invite_text` | 最多 **100** 字（超過會被截短） |
+| `category` | 只會是這六種之一：`food`、`clothing`、`housing`、`transport`、`education`、`entertainment`；其他值改用預設 |
+| `hashtags`、`suggested_replies` | 過濾掉含禁用詞或空白的項目，**最多 5 個**；全被濾掉就用預設 |
+
+- 前端：欄位與回應格式不變。需要知道的是 AI 的文字**有時會是固定句型**（和 AI 服務失敗時一樣），文字顯示區請不要假設每次都不同；`title` 的 UI 可以預期 ≤ 50 字、`invite_text` ≤ 100 字。
+- **不會**檢查長者自己說的話（錄音轉文字、預設標題取自長者原話）。
+
+---
+
 ## 3. 還沒做的事（前端可以先知道方向）
 
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。
@@ -334,6 +405,7 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 ### 屬於這一輪（`fix/features`）但還沒完成
 - **忘記密碼的身分驗證**（F4 的後續）：預計加「生日＋手機號碼」。上線時前端要在重設密碼流程加兩個輸入欄位。
 - **舊的公開檔案改成私有**（F5 的後續）：一次性腳本，前端無感，但舊網址會失效。
+- **週報改成純讀取**（F10 的後續）：目前首次點開 `GET` 仍會寫入一次（記 `viewed_at`）。之後可能新增一個「標記已讀」端點，到時前端要在看完週報時多呼叫一次。
 
 ### 屬於共通問題（`fix/global` 分支，規劃中）
 | 項目 | 前端影響 |
@@ -342,7 +414,6 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 | 登入、註冊、改密碼加入次數限制 | 會有 429，同 F4 |
 | 縮短 access token 有效期、refresh token 輪替、改密碼後舊 token 失效 | 必須實作「過期 → 用 refresh 換新 → 重送」；若啟用輪替，refresh 時要存新的 refresh token |
 | 統一回應格式 `{ success, data, error }`（日記、社群、首頁、部分使用者端點目前不一致） | 建議現在就把解析回應集中在一處，並相容有／沒有 `success` 欄位兩種格式。登入、註冊的格式改動影響最大，會先和前端確認 |
-| 遊戲完成時間改用台灣時間日期 | `played_date` 等日期在台灣 00:00–08:00 不再少一天 |
 
 ---
 
@@ -353,6 +424,8 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 - **被鎖住的是帳號名稱**（F4）：知道對方帳號的人可以故意把它鎖一小時。這是次數限制的取捨。
 - **同步刪除檔案**（F6）：檔案很多的帳號，刪除請求會比較久；之後可改成背景處理。
 - **資料庫鎖**（F7）需要 PostgreSQL 才有實際效果。
+- **F12 的 migration 會永久刪除兩張資料表**（`assessments_ad8record`、`dashboard_healthdashboardrecord`）。部署前請先查筆數並備份（本機兩張都是 0 筆，正式環境未知）；migration 可倒退，但只會重建空表。
+- **測試檔路徑改了**（#103）：測試都搬進各 app 的 `tests/` 資料夾，指令例如 `python manage.py test diary.tests.test_media --settings=config.settings_test`。
 
 ---
 
@@ -367,7 +440,15 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 | F5 | #91 | `fix(diary): 日記照片與錄音改用簽名網址，不再公開` |
 | F6 | #92 | `fix(users): 刪除帳號時一併清除雲端與本機檔案` |
 | F7 | #93 | `fix(diary): 回覆日記驗證 round_index，寫入改用 transaction` |
+| F13 | #96 | `fix(ai_service): 補齊禁用詞，並對日記 AI 輸出加上過濾與驗證` |
+| F8 | #97 | `perf(games): 歷史紀錄改在資料庫篩選使用者的場次，消除 N+1` |
+| F9 | #98 | `perf(dashboard): 日記語言 z 一次請求只掃一次全站日記` |
+| F11 | #99 | `fix(games): 遊戲與會員中心的日期改用台灣時間` |
+| F10 | #100、#101 | `fix(dashboard): 週報重複點開不再重複呼叫 AI 與寫資料庫` |
+| F12 | #102 | `refactor(assessments): 移除未使用的 AD-8 與健康儀表板診斷性模型` |
 
-> 只有 F1 的 commit 有 `!`（破壞性變更）。F2～F7 對「正常使用」的前端流程不造成破壞，但上面第 1.1 節列的項目仍需要確認。
+> 只有 F1 的 commit 有 `!`（破壞性變更）。F2～F13 對「正常使用」的前端流程不造成破壞，但上面第 1.1 節列的項目仍需要確認。
+>
+> 更詳細的技術紀錄（程式怎麼改、測試、限制）見 [fix_features_changelog.md](fix_features_changelog.md)。
 
-新增的測試檔：`games/tests/test_anonymous.py`、`games/tests/test_session_owner.py`、`games/market_sort/tests/test_owner.py`、`users/tests/test_password_reset_throttle.py`、`diary/tests/test_media.py`、`users/tests/test_delete_account_files.py`、`diary/tests/test_reply_validation.py`。
+新增的測試檔：`games/tests/test_anonymous.py`、`games/tests/test_session_owner.py`、`games/market_sort/tests/test_owner.py`、`users/tests/test_password_reset_throttle.py`、`diary/tests/test_media.py`、`users/tests/test_delete_account_files.py`、`diary/tests/test_reply_validation.py`。F8～F13 的測試檔見 [fix_features_changelog.md](fix_features_changelog.md) 第 8～13 章。
