@@ -159,7 +159,12 @@ class MarketShoppingDemoTests(DemoModeTestCase):
         self.assertTrue(last["is_completed"])
         self.assertEqual(last["total_questions"], DEMO_COUNT)
         self.assertEqual(last["standard_score"], demo_mode.DEMO_SCORE)
+        # 前端結束畫面顯示的是 raw_score
+        self.assertEqual(last["raw_score"], demo_mode.DEMO_SCORE)
         self.assert_demo_session_saved("market_shopping")
+        # 歷史成績也是 80
+        history = self.client.get("/api/games/market-shopping/history/").data["data"]
+        self.assertEqual(history[-1]["score"], demo_mode.DEMO_SCORE)
 
     def test_normal_user_still_gets_ten_questions(self):
         self.use_normal_user()

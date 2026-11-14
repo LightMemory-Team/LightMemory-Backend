@@ -20,7 +20,8 @@ SCORE_KEYS = {
     "market_route": ["total_score"],
     "memory_recall": ["total_score"],
     "fridge_check": ["final_score", "standard_score"],
-    "market_shopping": ["standard_score"],
+    # 前端結束畫面、歷史成績顯示的是 raw_score
+    "market_shopping": ["standard_score", "raw_score"],
     "market_sort": ["cognitive_flexibility_score"],
 }
 
