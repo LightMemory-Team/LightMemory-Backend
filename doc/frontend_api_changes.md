@@ -1,6 +1,6 @@
-# 後端安全與穩定性修正總覽（F1～F14、G3、G4）
+# 後端安全與穩定性修正總覽（F1～F14、G1、G3、G4、G9、日記上傳限制）
 
-更新日期：2026-11-10 · 範圍：`fix/features` 分支（個別功能問題），F1～F14 已全部合併進去
+更新日期：2026-11-14 · 範圍：`fix/features`（個別功能問題，F1～F14）與 `fix/global`（共通問題：G1、G3、G4、G9、日記上傳限制），都已合併
 
 這份文件說明這一輪後端修正**改了什麼、為什麼改、前端要配合什麼**。給前端（Flutter）看，也可以當後端的修改紀錄。
 
@@ -34,6 +34,11 @@
 | F12 | 移除後台的失智篩檢與警示等級模型 | 中 | 不用（從沒有對外 API） | [#102](https://github.com/LightMemory-Team/LightMemory-Backend/pull/102) |
 | F13 | 日記 AI 輸出沒有用語檢查與驗證 | 高 | 👀 AI 文字可能是固定句型；欄位長度有上限 | [#96](https://github.com/LightMemory-Team/LightMemory-Backend/pull/96) |
 | F14 | 點數與成就（rewards）納入，與 F1～F13 整合 | 新功能 | ⚠️ 3 支新 API、`rewards` 區塊、遊戲名稱、錯誤格式 | [#106](https://github.com/LightMemory-Team/LightMemory-Backend/pull/106)、[#107](https://github.com/LightMemory-Team/LightMemory-Backend/pull/107)（rewards 本體）、[#108](https://github.com/LightMemory-Team/LightMemory-Backend/pull/108)（合併） |
+| G1 | `SECRET_KEY`、`DEBUG`、CORS 寫死在程式碼 | 高 | 👀 Flutter Web 的網址要由後端列進 CORS 白名單；手機 App 不受影響；部署後舊 token 失效，要重新登入 | [#109](https://github.com/LightMemory-Team/LightMemory-Backend/pull/109)、[#110](https://github.com/LightMemory-Team/LightMemory-Backend/pull/110) |
+| G3 | 登入、註冊、改密碼、刪帳號沒有次數限制 | 高 | ⚠️ 要處理 429 | [#110](https://github.com/LightMemory-Team/LightMemory-Backend/pull/110) |
+| G4 | 改密碼後舊的登入 token 還能用最久 30 天 | 高 | ⚠️ 換 token／API 回 401 要導回登入頁；改密碼成功後要換掉本機 token | [#112](https://github.com/LightMemory-Team/LightMemory-Backend/pull/112) |
+| G9 | OpenAI 沒設 timeout，AI 一卡住請求就卡住 | 中 | 不用（超時沿用原本的固定內容） | [#111](https://github.com/LightMemory-Team/LightMemory-Backend/pull/111) |
+| 上傳限制 | 日記照片、錄音沒有大小與類型限制 | 中 | ⚠️ 新錯誤碼 `IMAGE_TOO_LARGE`、`AUDIO_TOO_LARGE`；Flutter Web 照片要帶 `contentType` | [#113](https://github.com/LightMemory-Team/LightMemory-Backend/pull/113) |
 
 - 測試：原本 764 個，現在 **982 個全部通過**（另有 1 個原本就預期失敗），新增 218 個測試。
 - F1～F11、F13 **沒有修改資料表**；F12 刪除了兩張沒在用的資料表，F14 新增 `rewards` 的兩張資料表（後端部署時要跑 migration，前端無感）。
@@ -52,7 +57,9 @@
 - [ ] 日記的 `photo_url`、`audio_url` **不要永久儲存**，也不要用完整網址當圖片快取 key；用 `diary_id` 當 key（F5）
 - [ ] `photo_url`、`audio_url` 可能是 **`null`**（簽名失敗），要有預設圖／隱藏播放鈕（F5）
 - [ ] 回覆日記（`replies`）要處理 **400 `INVALID_ROUND_INDEX`** 與 **409 `ROUND_ALREADY_ANSWERED`**（F7）
-- [ ] 收到 `401 NOT_AUTHENTICATED` 時，用 refresh token 換新 token 並重送；失敗再導回登入頁
+- [ ] 收到 `401` 時，清掉本機 token 並導回登入頁，不要無限重試（G4：改密碼後舊 token 會 401；換 token 的端點也會 401）。若日後前端有存 refresh token，才改成「先用 refresh token 換新、重送，失敗再導回登入頁」
+- [ ] （G4）修改密碼成功後，用回應的 `data.access`、`data.refresh` 換掉本機舊 token（目前前端沒有改密碼功能，之後做才需要）
+- [ ] （上傳限制）日記照片超過 10MB、錄音超過 25MB 會回 400 `IMAGE_TOO_LARGE`／`AUDIO_TOO_LARGE`，直接顯示 `error.message`；Flutter Web 送照片要帶 `contentType`
 - [ ] 以 `error.code` 判斷錯誤，**不要比對 `error.message` 文字**
 - [ ] （F11）冰箱檢查歷史的 `played_date`、會員統計的 `joined_at` **直接顯示後端給的日期**，不要自己再用 `completed_at` 去切字串或換算（F11）
 - [ ] （F13）日記的 AI 問題、回應不要假設每次都不同；AI 不合格時會是固定句型（F13）
@@ -67,7 +74,8 @@
 
 | HTTP | `error.code` | 何時出現 | 建議處理 |
 |---|---|---|---|
-| 401 | `NOT_AUTHENTICATED` | token 過期或無效（本來就有） | 用 refresh token 換新 token，重送請求 |
+| 401 | `NOT_AUTHENTICATED` | token 過期、無效，或密碼改過後的舊 token（G4）。換 token 的端點 `login/refresh/` 也會回 401 | 清掉本機 token，導回登入頁（有存 refresh token 才先嘗試換新） |
+| 400 | `IMAGE_TOO_LARGE`、`AUDIO_TOO_LARGE` | 日記照片超過 10MB、錄音超過 25MB（上傳限制） | 直接顯示 `error.message` |
 | 404 | `USER_NOT_FOUND` | 遊戲開場／歷史端點**沒帶 token**（F1） | 視為 bug：檢查是否漏帶標頭；使用者端導回登入頁 |
 | 403 | `FORBIDDEN` | 這場遊戲不屬於目前登入的人，或沒帶 token（F1、F2、F3） | 不要重試；回首頁或重新開始一場 |
 | 404 | `SESSION_NOT_FOUND` | `session_id` 不存在（本來就有） | 重新開始一場 |
@@ -85,7 +93,7 @@
 }
 ```
 
-> 注意：`diary` 相關端點的錯誤格式是 `{"error": {"code", "message"}}`，**沒有** `success` 與 `data` 欄位（這是既有的不一致，之後會統一，見第 3 節）。前端請先看 `error.code` 即可，兩種格式都適用。
+> 注意：日記的**錯誤**回應已統一成 `{success: false, data: null, error}`（F7、F14），**只有「上傳照片」`POST /api/diary/` 這一支**還是舊格式 `{"error": {"code", "message"}}`（沒有 `success`、`data`）。日記的成功回應有些也還沒統一（有的只有 `data`）。前端請看 `error.code` 判斷，兩種格式都適用。
 
 ### 1.3 Flutter 範例（攔截器）
 
@@ -102,7 +110,7 @@ dio.interceptors.add(InterceptorsWrapper(
     final status = error.response?.statusCode;
     final code = error.response?.data?['error']?['code'];
     if (status == 401 && code == 'NOT_AUTHENTICATED') {
-      // 用 refresh token 換新 access token 後重送；失敗則導回登入頁
+      // 清掉本機 token 並導回登入頁（若有存 refresh token，可先換新再重送）
     } else if (status == 429) {
       final wait = error.response?.headers.value('retry-after'); // 秒
       // 顯示「操作太頻繁，請稍後再試」
@@ -620,16 +628,19 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。
 
 ### 屬於這一輪（`fix/features`）但還沒完成
-- **忘記密碼的身分驗證**（F4 的後續）：預計加「生日＋手機號碼」。上線時前端要在重設密碼流程加兩個輸入欄位。
+- **忘記密碼的身分驗證**（F4 的後續）：**已決定維持現狀，不做**（目前只有次數限制，重設只需要帳號名稱）。前端不用準備額外欄位。
 - **舊的公開檔案改成私有**（F5 的後續）：一次性腳本，前端無感，但舊網址會失效。
 - **週報改成純讀取**（F10 的後續）：目前首次點開 `GET` 仍會寫入一次（記 `viewed_at`）。之後可能新增一個「標記已讀」端點，到時前端要在看完週報時多呼叫一次。
 
-### 屬於共通問題（`fix/global` 分支，規劃中）
-| 項目 | 前端影響 |
+### 屬於共通問題（`fix/global`）：這一輪**不做**
+
+2026-11-14 決定「後端先處理嚴重問題」，以下都**沒有排程**，前端不用準備；真的要做時會先通知並更新本文件。
+
+| 項目 | 若日後要做，前端會受到的影響 |
 |---|---|
-| 預設所有 API 都需要登入，只有註冊、登入、token 刷新、忘記密碼、分享頁等公開 | 除公開端點外，每個請求都要帶 token |
-| 縮短 access token 有效期、refresh token 輪替、改密碼後舊 token 失效 | 必須實作「過期 → 用 refresh 換新 → 重送」；若啟用輪替，refresh 時要存新的 refresh token |
-| 統一回應格式 `{ success, data, error }`（日記、社群、首頁、部分使用者端點目前不一致） | 建議現在就把解析回應集中在一處，並相容有／沒有 `success` 欄位兩種格式。登入、註冊的格式改動影響最大，會先和前端確認 |
+| 預設所有 API 都需要登入（G2） | 現況每個端點都已在程式裡檢查登入，沒有漏洞，只是預防；做的話只影響新端點，前端無感 |
+| 縮短 access token 有效期、refresh token 輪替、登出時作廢 token（JWT blacklist） | 目前 access 有效 1 天、refresh 30 天。要縮短前，前端必須先實作「401 → 用 refresh token 換新 → 重送」並**保存 refresh token**（前端目前只存 access token），所以會**先通知前端**、排時間再改 |
+| 統一回應格式 `{ success, data, error }`（日記成功回應、社群、首頁、部分使用者端點目前不一致） | 建議前端把解析回應集中在一處，並相容有／沒有 `success` 欄位兩種格式；登入、註冊的格式改動影響最大，會先和前端確認 |
 
 ---
 
