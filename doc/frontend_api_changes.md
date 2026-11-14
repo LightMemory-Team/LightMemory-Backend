@@ -29,7 +29,7 @@
 | F11 | 台灣凌晨的日期用 UTC 算，少一天 | 低 | 👀 `played_date`、`joined_at` 值變正確，不要自己再轉 | [#99](https://github.com/LightMemory-Team/LightMemory-Backend/pull/99) |
 | F12 | 移除後台的失智篩檢與警示等級模型 | 中 | 不用（從沒有對外 API） | [#102](https://github.com/LightMemory-Team/LightMemory-Backend/pull/102) |
 | F13 | 日記 AI 輸出沒有用語檢查與驗證 | 高 | 👀 AI 文字可能是固定句型；欄位長度有上限 | [#96](https://github.com/LightMemory-Team/LightMemory-Backend/pull/96) |
-| F14 | 點數與成就（rewards）納入，與 F1～F13 整合 | 新功能 | ⚠️ 3 支新 API、`rewards` 區塊、遊戲名稱、錯誤格式 | [#106](https://github.com/LightMemory-Team/LightMemory-Backend/pull/106)、[#107](https://github.com/LightMemory-Team/LightMemory-Backend/pull/107)（rewards 本體）＋ F14 合併 PR |
+| F14 | 點數與成就（rewards）納入，與 F1～F13 整合 | 新功能 | ⚠️ 3 支新 API、`rewards` 區塊、遊戲名稱、錯誤格式 | [#106](https://github.com/LightMemory-Team/LightMemory-Backend/pull/106)、[#107](https://github.com/LightMemory-Team/LightMemory-Backend/pull/107)（rewards 本體）、[#108](https://github.com/LightMemory-Team/LightMemory-Backend/pull/108)（合併） |
 
 - 測試：原本 764 個，現在 **982 個全部通過**（另有 1 個原本就預期失敗），新增 218 個測試。
 - F1～F11、F13 **沒有修改資料表**；F12 刪除了兩張沒在用的資料表，F14 新增 `rewards` 的兩張資料表（後端部署時要跑 migration，前端無感）。
@@ -570,7 +570,7 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 | F11 | #99 | `fix(games): 遊戲與會員中心的日期改用台灣時間` |
 | F10 | #100、#101 | `fix(dashboard): 週報重複點開不再重複呼叫 AI 與寫資料庫` |
 | F12 | #102 | `refactor(assessments): 移除未使用的 AD-8 與健康儀表板診斷性模型` |
-| F14 | #106、#107＋合併 PR | `feat(rewards): 新增點數與成就系統…`、`feat(rewards): 9 支 API 串接 grant() 並回傳 rewards`＋`feat(rewards): 合併 rewards 點數與成就系統，並與 F1～F13 整合` |
+| F14 | #106、#107、#108 | `feat(rewards): 新增點數與成就系統…`、`feat(rewards): 9 支 API 串接 grant() 並回傳 rewards`＋`feat(rewards): 合併 rewards 點數與成就系統，並與 F1～F13 整合` |
 
 > 只有 F1 的 commit 有 `!`（破壞性變更）。F2～F13 對「正常使用」的前端流程不造成破壞，但上面第 1.1 節列的項目仍需要確認。
 >

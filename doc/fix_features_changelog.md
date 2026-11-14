@@ -1,6 +1,6 @@
 # F1～F14 後端修改紀錄（詳細版）
 
-更新日期：2026-11-14 · 分支：`fix/features`（F1～F14 已全部合併） · PR：#87～#93、#96～#103、F14 合併 PR（見附錄 A）
+更新日期：2026-11-14 · 分支：`fix/features`（F1～F14 已全部合併） · PR：#87～#93、#96～#103、#106～#108
 
 ## 這份文件是什麼
 
@@ -40,7 +40,7 @@
 | F11 | 台灣凌晨的日期用 UTC 計算，少一天 | 時區 | 低 | #99 | games、users |
 | F12 | 後台留著失智篩檢與警示等級的診斷性模型 | 產品定位／資料清理 | 中 | #102 | assessments、dashboard |
 | F13 | 日記 AI 輸出完全沒檢查；禁用詞不全且誤殺字母 z | 內容安全＋輸入驗證 | 高 | #96 | ai_service、diary |
-| F14 | 把 rewards（點數與成就）納入；與 F1～F13 合併後的掃描次數、發點時機問題 | 新功能整合 | 中 | #106、#107＋F14 合併 PR | rewards、diary、dashboard、games、home |
+| F14 | 把 rewards（點數與成就）納入；與 F1～F13 合併後的掃描次數、發點時機問題 | 新功能整合 | 中 | #106、#107、#108 | rewards、diary、dashboard、games、home |
 | （整理） | 測試檔散在各 app 根目錄 | 專案結構 | — | #103 | 全部 |
 
 ### 0.2 規模與測試
@@ -74,7 +74,7 @@ F8 起各 PR 的規模（`gh pr view` 的新增／刪除行數，**含測試與�
 | F10 修正 | #101 | +2／−1 | 1 | 0 | 920 全過 |
 | F12 | #102 | +115／−93 | 9 | 6 | 926 |
 | 測試搬移 | #103 | +90／−99 | 66 | 0 | 926 |
-| F14 | （合併 PR） | 見 15.7 | — | 16（stage3 另帶 40） | 982 |
+| F14 | #108 | 見 15.7 | — | 16（stage3 另帶 40） | 982 |
 | **F8～F14 合計** | | | | **147** | **982（另 1 個原本就預期失敗）** |
 
 - 實際合併順序是 F13 → F8 → F9 → F11 → F10 → F12，不是編號順序。
@@ -1455,7 +1455,7 @@ ruff check <改到的檔案>
 | F12 | #102 | `refactor/remove-diagnostic-models` | `refactor(assessments): 移除未使用的 AD-8 與健康儀表板診斷性模型` |
 | 整理 | #103 | `test/move-tests-into-app-packages` | `test: 測試檔搬到各 app 的 tests/ 資料夾` |
 | F14 | #106、#107 | `feat/rewards-system`、`feat/rewards-integration`（合進 `feat/stage3`） | `feat(rewards): 新增點數與成就系統（資料表、成就清單、grant()、查詢 API）` 等 |
-| F14 | PR_F14 | `merge/rewards-into-fix-features` | `feat(rewards): 合併 rewards 點數與成就系統，並與 F1～F13 整合` |
+| F14 | #108 | `merge/rewards-into-fix-features` | `feat(rewards): 合併 rewards 點數與成就系統，並與 F1～F13 整合` |
 
 只有 F1 帶 `!`（Conventional Commits 的破壞性變更標記）；其餘對正常使用的前端流程不造成破壞。F12 雖然動到資料表，但這兩個模型從來沒有對外 API，所以沒有 `!`。
 
