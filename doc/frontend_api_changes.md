@@ -705,6 +705,37 @@ F14 曾把 `memory_recall` 命名為「記憶配對」，與前端遊戲內的�
 
 ---
 
+### 儀表板：新增「小提醒」欄位 alerts（feature/dashboard-outlier-alert-1114）
+
+`GET /api/dashboard/` 的 `data` 多一個 `alerts` 陣列：近 14 天內，某款遊戲有一場表現明顯比自己平常低（`z_score ≤ -1.5`）時列出來。只有**新增**欄位，原本的欄位不變。
+
+- `alerts` **一定存在**，沒有提醒時是空陣列 `[]`，前端不用判斷欄位在不在
+- 每款遊戲只列最近一場符合的，新到舊，最多 5 筆
+- 只提示偏低、不提示偏高；熟悉場、算不出 z 的場次不算；聲影日記不納入
+- `message` 由後端產生，前端**直接顯示**，不要自己組字
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `game_id` | string | 遊戲 id，「去玩一次」按鈕用它開遊戲 |
+| `game_title` | string | 遊戲名稱 |
+| `dimension` / `dimension_label` | string | 對應的認知維度，例如 `math` / 數學 |
+| `played_at` | string（ISO 8601，+08:00） | 那一場結束的時間 |
+| `display_score` | int | 那一場換算成 1～100 的分數 |
+| `message` | string | 給長者看的提醒文字 |
+
+```json
+"alerts": [
+  {"game_id": "market_shopping", "game_title": "市場買菜",
+   "dimension": "math", "dimension_label": "數學",
+   "played_at": "2026-11-12T15:30:00+08:00", "display_score": 12,
+   "message": "11/12 玩「市場買菜」的表現比平常低一些，可能當天比較累，建議多注意一下，休息後再玩一次看看。"}
+]
+```
+
+**檔案**：`dashboard/alerts.py`（新增）、`dashboard/views.py`、`dashboard/tests/test_alerts.py`
+
+---
+
 ## 3. 還沒做的事（前端可以先知道方向）
 
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。
