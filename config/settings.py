@@ -223,4 +223,9 @@ CORS_ALLOWED_ORIGINS = config("DJANGO_CORS_ALLOWED_ORIGINS", default="", cast=Cs
 OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
 OPENAI_MODEL = config("OPENAI_MODEL", default="gpt-4.1-mini")
 OPENAI_BASE_URL = config("OPENAI_BASE_URL", default="https://api.openai.com/v1")
+# AI 呼叫最多等幾秒、失敗最多重試幾次（SDK 預設是等 600 秒、重試 2 次，AI 一卡住
+# 使用者的請求就跟著卡住）。最壞情況約 timeout × (重試次數 + 1) 秒，之後各處會
+# 退回固定內容。見 ai_service/client.py。
+OPENAI_TIMEOUT_SECONDS = config("OPENAI_TIMEOUT_SECONDS", default=15, cast=float)
+OPENAI_MAX_RETRIES = config("OPENAI_MAX_RETRIES", default=1, cast=int)
 SHARE_BASE_URL = config("SHARE_BASE_URL", default="http://localhost:8000")
