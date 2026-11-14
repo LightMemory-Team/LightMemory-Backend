@@ -13,7 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from datetime import timedelta
 from pathlib import Path
 
-from decouple import config
+from decouple import Csv, config
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,16 +22,46 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
+# 安全相關設定一律從環境變數（.env）讀，不寫死在程式碼裡。
+# 預設值選「安全的那一邊」：沒設定 DJANGO_DEBUG 就是正式環境（DEBUG 關閉）。
+
+# 開發時在 .env 加上 DJANGO_DEBUG=True；正式環境不要設，或設成 False。
+DEBUG = config("DJANGO_DEBUG", default=False, cast=bool)
+
+# 只有開發用（DEBUG 開啟）的備用金鑰。這個字串是公開的，絕對不能用在正式環境，
+# 所以 DEBUG 關閉時一定要自己設定 DJANGO_SECRET_KEY，沒設會直接報錯、服務起不來。
+_DEV_ONLY_SECRET_KEY = "django-insecure-dev-only-do-not-use-in-production"
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-ils*(wye_q#y7@6z_68x^t^*q@#*o_b^zl+@%*h*b=-_x#w^%z"
+SECRET_KEY = (
+    config("DJANGO_SECRET_KEY", default=_DEV_ONLY_SECRET_KEY)
+    if DEBUG
+    else config("DJANGO_SECRET_KEY")
+)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# 正式環境不准用 "django-insecure-" 開頭的金鑰：Django 專案建立時產生的金鑰
+# 都是這個開頭，包含曾經寫進這個專案程式碼（已公開在 Git 歷史裡）的那一把。
+if not DEBUG and SECRET_KEY.startswith("django-insecure-"):
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY 不能使用 'django-insecure-' 開頭的金鑰（那是公開的開發用金鑰）。"
+        "請產生新的：python -c "
+        '"from django.core.management.utils import get_random_secret_key; '
+        'print(get_random_secret_key())"'
+    )
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver", ".trycloudflare.com"]
+# 以逗號分隔，例如 DJANGO_ALLOWED_HOSTS=api.example.com,localhost
+ALLOWED_HOSTS = config(
+    "DJANGO_ALLOWED_HOSTS",
+    default="localhost,127.0.0.1,testserver,.trycloudflare.com",
+    cast=Csv(),
+)
 
 # 透過 Cloudflare Tunnel（HTTPS）登入 admin 時，Django 會檢查表單來源網址
-CSRF_TRUSTED_ORIGINS = ["https://*.trycloudflare.com"]
+CSRF_TRUSTED_ORIGINS = config(
+    "DJANGO_CSRF_TRUSTED_ORIGINS",
+    default="https://*.trycloudflare.com",
+    cast=Csv(),
+)
 
 # Application definition
 
@@ -164,8 +195,12 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
 }
 
-# 開發階段允許 Flutter 或其他前端連線
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS（跨來源請求）只影響「瀏覽器」：Flutter 手機 App 不受影響，Flutter Web 才會用到。
+# 開發（DEBUG 開啟）預設允許所有來源；正式環境預設一個都不允許，
+# 要用 DJANGO_CORS_ALLOWED_ORIGINS 明確列出，例如
+# DJANGO_CORS_ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
+CORS_ALLOW_ALL_ORIGINS = config("DJANGO_CORS_ALLOW_ALL", default=DEBUG, cast=bool)
+CORS_ALLOWED_ORIGINS = config("DJANGO_CORS_ALLOWED_ORIGINS", default="", cast=Csv())
 
 OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
 OPENAI_MODEL = config("OPENAI_MODEL", default="gpt-4.1-mini")
