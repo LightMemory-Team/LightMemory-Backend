@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
   <link rel="stylesheet" href="{% static 'public_share/share.css' %}">
 </head>
-<body data-share-token="{{ share_token }}">
+<body data-share-token="{{ share_token }}" data-author-name="{{ author_name }}">
 
   <header class="top-bar">
     <span class="top-bar-title">憶智防線</span>
@@ -39,9 +39,21 @@
   <!-- 第 2 步：看日記、留言 -->
   <main id="post-step" class="page" hidden>
     <article class="post-card">
-      {% if photo_url %}
-      <img class="post-photo" src="{{ photo_url }}" alt="{{ title }}" onerror="this.remove()">
-      {% endif %}
+      <!-- 照片＋彈幕：之前的人留下的話從右往左飄過照片；沒有照片時是一條淺綠色帶子，
+           還沒有人留言時整條收起，送出第一則後才出現 -->
+      <div id="post-media" class="post-media{% if not photo_url %} no-photo{% endif %}"
+           {% if not photo_url and not danmaku_items %}hidden{% endif %}>
+        {% if photo_url %}
+        <img class="post-photo" src="{{ photo_url }}" alt="{{ title }}"
+             onerror="this.remove(); document.getElementById('post-media').classList.add('no-photo')">
+        {% endif %}
+        <div id="danmaku-layer" class="danmaku-layer" aria-hidden="true"></div>
+        <button type="button" id="danmaku-toggle" class="danmaku-toggle"
+                aria-pressed="true" {% if not danmaku_items %}hidden{% endif %}>
+          <span class="material-symbols-outlined" aria-hidden="true">subtitles</span>
+          <span class="danmaku-toggle-text">彈幕</span>
+        </button>
+      </div>
 
       <div class="post-body">
         <div class="author-row">
@@ -65,8 +77,6 @@
       <!-- 留言區：打字留言，或按麥克風錄一段語音加油（最多 10 秒，照比賽版 futureQ）。
            語音只上傳，作者在 App 按「轉文字」才轉成文字 -->
       <div class="comment-area">
-        <ul id="sent-list" class="sent-list" hidden></ul>
-
         <p class="as-line">
           以「<span id="nickname-display"></span>」留言
           <button type="button" id="change-nickname" class="btn-link">修改</button>
@@ -126,6 +136,20 @@
     </article>
   </main>
 
+  <!-- 留言或語音送出成功的彈窗 -->
+  <div id="success-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true"
+         aria-labelledby="success-title" aria-describedby="success-text">
+      <div class="modal-icon" aria-hidden="true">
+        <span class="material-symbols-outlined icon-fill">favorite</span>
+      </div>
+      <h2 id="success-title" class="modal-title">成功送出</h2>
+      <p id="success-text" class="modal-text"></p>
+      <button type="button" id="success-again" class="btn-primary btn-block modal-btn">再留言一篇</button>
+    </div>
+  </div>
+
+  {{ danmaku_items|json_script:"danmaku-data" }}
   <script src="{% static 'public_share/share.js' %}"></script>
 </body>
 </html>

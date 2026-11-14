@@ -1,4 +1,5 @@
-// 親友分享頁：填暱稱 → 看日記 → 打字留言或錄語音加油
+// 親友分享頁：填暱稱 → 看日記（之前的人留下的話用彈幕飄過照片）→ 打字留言或錄語音加油
+// → 送出成功跳出「成功送出」彈窗，按「再留言一篇」回到留言框
 // 留言 API：POST /api/share/<share_token>/comments/  body: { nickname, content }
 // 語音加油 API：POST /api/share/<share_token>/voice-replies/
 //   multipart：nickname、audio_file、duration_sec（最多 10 秒）
@@ -7,6 +8,7 @@
   const NICKNAME_KEY = 'lightmemory_share_nickname';
   const MAX_LENGTH = 200;
   const shareToken = document.body.dataset.shareToken;
+  const authorName = document.body.dataset.authorName || '作者';
 
   // 用檔案直接打開預覽時（file://）沒有後端，送出改成假裝成功
   const isPreview = window.location.protocol === 'file:';
@@ -23,7 +25,6 @@
   const commentInput = document.getElementById('comment-input');
   const commentError = document.getElementById('comment-error');
   const commentSubmit = document.getElementById('comment-submit');
-  const sentList = document.getElementById('sent-list');
 
   // 有些瀏覽器（例如無痕模式）不能用 localStorage，讀寫失敗就當作沒存過
   function loadNickname() {
@@ -98,22 +99,197 @@
     }
   });
 
-  function addSentItem(name, content) {
-    const li = document.createElement('li');
-    const nameEl = document.createElement('span');
-    nameEl.className = 'sent-name';
-    nameEl.textContent = name;
-    const textEl = document.createElement('span');
-    textEl.textContent = content;
-    const markEl = document.createElement('span');
-    markEl.className = 'sent-mark';
-    markEl.textContent = '已送出';
-    li.appendChild(nameEl);
-    li.appendChild(textEl);
-    li.appendChild(markEl);
-    sentList.appendChild(li);
-    sentList.hidden = false;
+  // ============================================================
+  // 送出成功彈窗：「成功送出」＋暖心副標題＋「再留言一篇」
+  // ============================================================
+
+  const successModal = document.getElementById('success-modal');
+  const successText = document.getElementById('success-text');
+  const successAgainBtn = document.getElementById('success-again');
+
+  const SUCCESS_MESSAGES = {
+    comment: '你的心意已經送到' + authorName + '手上了，有你的陪伴，每一天都更溫暖 💛',
+    voice: authorName + '聽到你的聲音一定會很開心，有你的陪伴，每一天都更溫暖 💛',
+  };
+
+  function showSuccess(kind) {
+    successText.textContent = SUCCESS_MESSAGES[kind] || SUCCESS_MESSAGES.comment;
+    successModal.hidden = false;
+    document.body.classList.add('modal-open');
+    successAgainBtn.focus();
   }
+
+  function closeSuccess() {
+    if (successModal.hidden) return;
+    successModal.hidden = true;
+    document.body.classList.remove('modal-open');
+    commentInput.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    commentInput.focus({ preventScroll: true });
+  }
+
+  successAgainBtn.addEventListener('click', closeSuccess);
+  successModal.addEventListener('click', function (event) {
+    if (event.target === successModal) closeSuccess(); // 點彈窗外面也能關
+  });
+  document.addEventListener('keydown', function (event) {
+    if (successModal.hidden) return;
+    if (event.key === 'Escape') {
+      closeSuccess();
+    } else if (event.key === 'Tab') {
+      // 彈窗只有一顆按鈕，焦點留在按鈕上
+      event.preventDefault();
+      successAgainBtn.focus();
+    }
+  });
+
+  // ============================================================
+  // 彈幕：之前的人留下的話從右往左飄過照片，三條軌道輪流播，播完從頭再來。
+  // 自己剛送出的會插隊先飄、用綠底標示。系統設定「減少動態效果」時改成靜態顯示
+  // ============================================================
+
+  const DANMAKU_LANES = 3;
+  const DANMAKU_SPEED = 70; // 每秒移動幾 px
+  const DANMAKU_GAP = 40; // 同一條軌道前後兩則的最小距離（px）
+  const DANMAKU_MIN_INTERVAL = 900; // 兩則之間至少隔多久出場（ms）
+  const DANMAKU_MAX_CHARS = 30;
+
+  const postMedia = document.getElementById('post-media');
+  const danmakuLayer = document.getElementById('danmaku-layer');
+  const danmakuToggle = document.getElementById('danmaku-toggle');
+  const danmakuToggleIcon = danmakuToggle.querySelector('.material-symbols-outlined');
+  const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const canAnimate = typeof Element.prototype.animate === 'function' && !reduceMotion;
+
+  let danmakuItems = [];
+  try {
+    const parsed = JSON.parse(document.getElementById('danmaku-data').textContent);
+    if (Array.isArray(parsed)) danmakuItems = parsed;
+  } catch (e) {
+    // 資料壞了就不播彈幕，頁面其他功能照常
+  }
+
+  let danmakuOn = true;
+  let danmakuIndex = 0;
+  let lastSpawnAt = 0;
+  const ownQueue = []; // 自己剛送出、等著插隊的
+  const laneFreeAt = new Array(DANMAKU_LANES).fill(0);
+
+  function buildDanmakuEl(item, own) {
+    const el = document.createElement('div');
+    el.className = 'danmaku-item' + (own ? ' is-own' : '') + (item.kind === 'voice' ? ' is-voice' : '');
+    if (item.kind === 'voice') {
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined icon-fill danmaku-icon';
+      icon.textContent = 'mic';
+      el.appendChild(icon);
+    }
+    if (item.name) {
+      const nameEl = document.createElement('span');
+      nameEl.className = 'danmaku-name';
+      nameEl.textContent = item.name;
+      el.appendChild(nameEl);
+    }
+    const textEl = document.createElement('span');
+    textEl.textContent = item.text;
+    el.appendChild(textEl);
+    return el;
+  }
+
+  function laneTop(lane) {
+    return 10 + lane * 46;
+  }
+
+  // 放一則到空著的軌道；軌道都還沒空出來就回傳 false，等下一輪
+  function spawnDanmaku(item, own) {
+    const now = performance.now();
+    const free = [];
+    for (let i = 0; i < DANMAKU_LANES; i++) {
+      if (laneFreeAt[i] <= now) free.push(i);
+    }
+    if (!free.length) return false;
+    const lane = free[Math.floor(Math.random() * free.length)];
+
+    const width = danmakuLayer.clientWidth;
+    const el = buildDanmakuEl(item, own);
+    el.style.top = laneTop(lane) + 'px';
+    el.style.transform = 'translateX(' + width + 'px)';
+    danmakuLayer.appendChild(el);
+    const itemWidth = el.offsetWidth;
+
+    const duration = ((width + itemWidth) / DANMAKU_SPEED) * 1000;
+    const anim = el.animate(
+      [
+        { transform: 'translateX(' + width + 'px)' },
+        { transform: 'translateX(' + -itemWidth + 'px)' },
+      ],
+      { duration: duration, easing: 'linear' }
+    );
+    anim.onfinish = function () { el.remove(); };
+    laneFreeAt[lane] = now + ((itemWidth + DANMAKU_GAP) / DANMAKU_SPEED) * 1000;
+    lastSpawnAt = now;
+    return true;
+  }
+
+  function danmakuTick() {
+    if (!danmakuOn || document.hidden || postStep.hidden) return;
+    if (!danmakuLayer.clientWidth) return;
+    if (performance.now() - lastSpawnAt < DANMAKU_MIN_INTERVAL) return;
+
+    if (ownQueue.length) {
+      if (spawnDanmaku(ownQueue[0], true)) ownQueue.shift();
+      return;
+    }
+    if (!danmakuItems.length) return;
+    const item = danmakuItems[danmakuIndex % danmakuItems.length];
+    if (spawnDanmaku(item, false)) danmakuIndex += 1;
+  }
+
+  // 減少動態效果：不飄，最新的幾則靜靜排在照片上
+  function renderStaticDanmaku() {
+    danmakuLayer.textContent = '';
+    if (!danmakuOn) return;
+    const own = ownQueue.slice(-DANMAKU_LANES).reverse();
+    const shown = own.concat(danmakuItems).slice(0, DANMAKU_LANES);
+    shown.forEach(function (item, lane) {
+      const el = buildDanmakuEl(item, lane < own.length);
+      el.classList.add('is-static');
+      el.style.top = laneTop(lane) + 'px';
+      danmakuLayer.appendChild(el);
+    });
+  }
+
+  function setDanmakuOn(on) {
+    danmakuOn = on;
+    danmakuToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+    danmakuToggle.setAttribute('aria-label', on ? '關閉彈幕' : '打開彈幕');
+    danmakuToggleIcon.textContent = on ? 'subtitles' : 'subtitles_off';
+    danmakuLayer.hidden = !on;
+    if (!on) {
+      danmakuLayer.textContent = '';
+      laneFreeAt.fill(0);
+    } else if (!canAnimate) {
+      renderStaticDanmaku();
+    }
+  }
+
+  // 剛送出的留言／語音也加進彈幕（插隊先飄，之後跟著輪播）
+  function addOwnDanmaku(kind, text) {
+    let content = kind === 'voice' ? '送了一段語音加油' : text.split(/\s+/).join(' ');
+    if (content.length > DANMAKU_MAX_CHARS) content = content.slice(0, DANMAKU_MAX_CHARS) + '…';
+    const item = { name: nickname, text: content, kind: kind };
+    danmakuItems.unshift(item);
+    danmakuIndex += 1; // 輪播順序不受影響
+    ownQueue.push(item);
+    postMedia.hidden = false;
+    danmakuToggle.hidden = false;
+    if (!canAnimate) renderStaticDanmaku();
+  }
+
+  danmakuToggle.addEventListener('click', function () {
+    setDanmakuOn(!danmakuOn);
+  });
+  setDanmakuOn(true);
+  if (canAnimate) setInterval(danmakuTick, 250);
 
   async function postComment(content) {
     if (isPreview) {
@@ -164,9 +340,11 @@
     commentSubmit.disabled = false;
 
     if (result.ok) {
-      addSentItem(result.data.nickname, result.data.content);
+      addOwnDanmaku('comment', result.data.content || content);
       commentInput.value = '';
       commentInput.style.height = '';
+      hideError(commentError);
+      showSuccess('comment');
       return;
     }
 
@@ -423,14 +601,14 @@
       redoBtn.disabled = false;
 
       if (result.ok) {
-        const sec = (result.data && result.data.duration_sec) || recordedSec;
-        addSentItem(nickname, '🎤 語音加油（' + sec + ' 秒）');
+        addOwnDanmaku('voice', '');
         clearRecording();
         cueText = '';
         document.querySelectorAll('.suggest-chip').forEach(function (chip) {
           chip.classList.remove('is-selected');
         });
         showVoiceState('idle');
+        showSuccess('voice');
         return;
       }
 

@@ -12,6 +12,57 @@ from social.models import Comment, Notification, Post, VoiceReply
 from social.utils import get_display_name
 
 
+# 分享頁彈幕：最多帶幾則之前的留言／語音加油、每則最多顯示幾個字
+DANMAKU_LIMIT = 30
+DANMAKU_MAX_CHARS = 30
+
+
+def build_danmaku_items(post):
+    """分享頁彈幕的資料：之前的人留下的文字留言與語音加油，新的在前。
+
+    語音只顯示「送了一段語音加油」，不放音檔、也不放轉出來的文字
+    （音檔與轉文字只給作者在 App 裡看）。
+    """
+    items = []
+    comments = (
+        Comment.objects.filter(post=post)
+        .select_related('user')
+        .order_by('-created_at')[:DANMAKU_LIMIT]
+    )
+    for comment in comments:
+        content = ' '.join(comment.content.split())
+        if not content:
+            continue
+        if len(content) > DANMAKU_MAX_CHARS:
+            content = content[:DANMAKU_MAX_CHARS] + '…'
+        author = get_display_name(comment.user) if comment.user else ''
+        name = comment.nickname or author
+        items.append({
+            'name': name,
+            'text': content,
+            'kind': 'comment',
+            'created_at': comment.created_at,
+        })
+
+    voice_replies = (
+        VoiceReply.objects.filter(post=post)
+        .order_by('-created_at')[:DANMAKU_LIMIT]
+    )
+    for reply in voice_replies:
+        items.append({
+            'name': reply.nickname,
+            'text': '送了一段語音加油',
+            'kind': 'voice',
+            'created_at': reply.created_at,
+        })
+
+    items.sort(key=lambda item: item['created_at'], reverse=True)
+    return [
+        {'name': item['name'], 'text': item['text'], 'kind': item['kind']}
+        for item in items[:DANMAKU_LIMIT]
+    ]
+
+
 def get_client_ip(request):
     """取得請求端的真實 IP，支援反向代理 / Cloudflare Tunnel (HTTP_X_FORWARDED_FOR)"""
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
@@ -61,6 +112,8 @@ class SharePageView(View):
             'post_text': post.content,
             'hashtags': hashtags,
             'suggested_replies': suggested_replies,
+            # 之前的人留下的內容，在照片上用彈幕飄過去（share.js 讀 json_script）
+            'danmaku_items': build_danmaku_items(post),
         }
 
         return render(request, 'public_share/share.html', context)

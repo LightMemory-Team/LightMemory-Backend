@@ -184,6 +184,99 @@ body {
   overflow: hidden;
 }
 
+/* 照片＋彈幕 */
+.post-media {
+  position: relative;
+  overflow: hidden;
+  background: var(--green-pale);
+}
+
+/* 沒有照片（或照片載入失敗）時，彈幕飄在一條淺綠色帶子上 */
+.post-media.no-photo {
+  min-height: 208px; /* 三條彈幕＋底下的開關，不互相壓到 */
+}
+
+.danmaku-layer {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 160px;
+  pointer-events: none;
+}
+
+.danmaku-item {
+  position: absolute;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  max-width: none;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.no-photo .danmaku-item {
+  background: rgba(46, 99, 66, 0.82);
+}
+
+.danmaku-name {
+  font-weight: 700;
+}
+
+.danmaku-name::after {
+  content: "：";
+}
+
+.danmaku-icon {
+  margin-right: 4px;
+  font-size: 1.1rem;
+}
+
+/* 自己剛送出的：白底綠字＋綠框，一眼認得出來 */
+.danmaku-item.is-own {
+  background: #fff;
+  color: var(--green-dark);
+  box-shadow: 0 0 0 2px var(--green);
+}
+
+/* 減少動態效果時：靜態排在左邊 */
+.danmaku-item.is-static {
+  left: 12px;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.danmaku-toggle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 4px 14px 4px 10px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.danmaku-toggle[aria-pressed="false"] {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.danmaku-toggle .material-symbols-outlined {
+  font-size: 1.2rem;
+}
+
 .post-photo {
   display: block;
   width: 100%;
@@ -429,28 +522,6 @@ body {
   margin-top: 8px;
 }
 
-.sent-list {
-  list-style: none;
-  margin: 4px 0 14px;
-  padding: 0;
-}
-
-.sent-list li {
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--line);
-}
-
-.sent-name {
-  font-weight: 700;
-  margin-right: 8px;
-}
-
-.sent-mark {
-  display: block;
-  color: var(--text-sub);
-  font-size: 0.8rem;
-}
-
 .as-line {
   margin: 4px 0 10px 4px;
   color: var(--text-sub);
@@ -491,4 +562,81 @@ body {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* 送出成功彈窗 */
+body.modal-open {
+  overflow: hidden;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(0, 0, 0, 0.5);
+  animation: modal-fade 0.2s ease-out;
+}
+
+.modal {
+  width: 100%;
+  max-width: 360px;
+  padding: 28px 24px 24px;
+  border-radius: 24px;
+  background: var(--card);
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  animation: modal-pop 0.25s ease-out;
+}
+
+.modal-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: var(--green-pale);
+  color: var(--green);
+}
+
+.modal-icon .material-symbols-outlined {
+  font-size: 40px;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.modal-text {
+  margin: 10px 0 0;
+  color: var(--text-sub);
+  line-height: 1.7;
+}
+
+.modal-btn {
+  width: 100%;
+}
+
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal {
+    animation: none;
+  }
 }
