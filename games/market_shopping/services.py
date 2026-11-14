@@ -518,12 +518,10 @@ def complete_session(session):
 
 def get_history(user_id):
     """取得使用者的最近 10 場歷史紀錄（舊到新排序）。"""
-    all_sessions = session_service.list_sessions(GAME_TYPE)
-    finished_sessions = [
-        s
-        for s in all_sessions
-        if s["status"] == "finished" and s["state"].get("user_id") == user_id
-    ]
+    # 在資料庫就篩選出「這位使用者、已完成」的場次，不載入全站資料
+    finished_sessions = session_service.list_user_sessions(
+        GAME_TYPE, user_id, status="finished"
+    )
 
     finished_sessions.sort(
         key=lambda s: s["result"]["completed_at"], reverse=True

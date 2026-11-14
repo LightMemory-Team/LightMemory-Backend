@@ -13,7 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from datetime import timedelta
 from pathlib import Path
 
-from decouple import config
+from decouple import Csv, config
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,16 +22,51 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
+# 安全相關設定一律從環境變數（.env）讀，不寫死在程式碼裡。
+# 預設值選「安全的那一邊」：沒設定 DJANGO_DEBUG 就是正式環境（DEBUG 關閉）。
+
+# 開發時在 .env 加上 DJANGO_DEBUG=True；正式環境不要設，或設成 False。
+DEBUG = config("DJANGO_DEBUG", default=False, cast=bool)
+
+# 只有開發用（DEBUG 開啟）的備用金鑰。這個字串是公開的，絕對不能用在正式環境，
+# 所以 DEBUG 關閉時一定要自己設定 DJANGO_SECRET_KEY，沒設會直接報錯、服務起不來。
+_DEV_ONLY_SECRET_KEY = "django-insecure-dev-only-do-not-use-in-production"
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-ils*(wye_q#y7@6z_68x^t^*q@#*o_b^zl+@%*h*b=-_x#w^%z"
+# 空字串（例如 .env 留著「DJANGO_SECRET_KEY=」但沒填值）視同沒設定。
+SECRET_KEY = config("DJANGO_SECRET_KEY", default="").strip()
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "正式環境（DJANGO_DEBUG 沒開）一定要設定 DJANGO_SECRET_KEY，"
+            "請在 .env 加上一行 DJANGO_SECRET_KEY=（後面接新產生的金鑰）。產生方式：python -c "
+            '"import secrets; print(secrets.token_urlsafe(50))"'
+        )
+    SECRET_KEY = _DEV_ONLY_SECRET_KEY
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# 正式環境不准用 "django-insecure-" 開頭的金鑰：Django 專案建立時產生的金鑰
+# 都是這個開頭，包含曾經寫進這個專案程式碼（已公開在 Git 歷史裡）的那一把。
+if not DEBUG and SECRET_KEY.startswith("django-insecure-"):
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY 不能使用 'django-insecure-' 開頭的金鑰（那是公開的開發用金鑰）。"
+        "請產生新的：python -c "
+        '"from django.core.management.utils import get_random_secret_key; '
+        'print(get_random_secret_key())"'
+    )
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver", ".trycloudflare.com"]
+# 以逗號分隔，例如 DJANGO_ALLOWED_HOSTS=api.example.com,localhost
+ALLOWED_HOSTS = config(
+    "DJANGO_ALLOWED_HOSTS",
+    default="localhost,127.0.0.1,testserver,.trycloudflare.com",
+    cast=Csv(),
+)
 
 # 透過 Cloudflare Tunnel（HTTPS）登入 admin 時，Django 會檢查表單來源網址
-CSRF_TRUSTED_ORIGINS = ["https://*.trycloudflare.com"]
+CSRF_TRUSTED_ORIGINS = config(
+    "DJANGO_CSRF_TRUSTED_ORIGINS",
+    default="https://*.trycloudflare.com",
+    cast=Csv(),
+)
 
 # Application definition
 
@@ -155,6 +191,19 @@ REST_FRAMEWORK = {
     ),
     # 所有錯誤統一成 {"success": false, "error": {"code", "message", "fields"}}
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
+    # 請求次數限制（users/throttles.py）。格式「次數/期間」，期間可用 hour、min、day。
+    # 這些只是「次數」；套用在哪些 API 由各個 View 的 throttle_classes 決定。
+    "DEFAULT_THROTTLE_RATES": {
+        "login_ip": "60/hour",  # 同一個來源登入「失敗」的次數
+        "login_username": "10/hour",  # 同一個帳號登入「失敗」的次數
+        "register_ip": "30/hour",  # 同一個來源註冊的次數（成功失敗都算）
+        "password_confirm_user": "10/hour",  # 同一位使用者改密碼＋刪帳號的次數
+    },
+    # 判斷「來源 IP」要信任前面幾層代理。正式環境走 Cloudflare Tunnel 時，
+    # 後端看到的連線都來自 cloudflared（本機），真正的來源在 X-Forwarded-For
+    # 最後一個值（Cloudflare 會把來源接在最後；使用者自己加的假值會排在前面，
+    # 取最後一個就騙不了）。沒有代理、直接對外時要設 0（忽略 X-Forwarded-For）。
+    "NUM_PROXIES": config("DJANGO_NUM_PROXIES", default=1, cast=int),
 }
 
 # JWT token 有效時間（simplejwt 預設 access 只有 5 分鐘，長者玩到一半就會過期被擋 401）
@@ -162,12 +211,26 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    # 改密碼（或忘記密碼重設）後，舊的 token 全部作廢：
+    # token 裡記一份「當時密碼的雜湊」，驗證時跟目前的密碼比對，對不上就拒絕（401）。
+    # 不需要資料表。
+    # 換 token 的端點也有同樣檢查，見 users/views.py 的 RefreshView。
+    "CHECK_REVOKE_TOKEN": True,
 }
 
-# 開發階段允許 Flutter 或其他前端連線
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS（跨來源請求）只影響「瀏覽器」：Flutter 手機 App 不受影響，Flutter Web 才會用到。
+# 開發（DEBUG 開啟）預設允許所有來源；正式環境預設一個都不允許，
+# 要用 DJANGO_CORS_ALLOWED_ORIGINS 明確列出，例如
+# DJANGO_CORS_ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
+CORS_ALLOW_ALL_ORIGINS = config("DJANGO_CORS_ALLOW_ALL", default=DEBUG, cast=bool)
+CORS_ALLOWED_ORIGINS = config("DJANGO_CORS_ALLOWED_ORIGINS", default="", cast=Csv())
 
 OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
 OPENAI_MODEL = config("OPENAI_MODEL", default="gpt-4.1-mini")
 OPENAI_BASE_URL = config("OPENAI_BASE_URL", default="https://api.openai.com/v1")
+# AI 呼叫最多等幾秒、失敗最多重試幾次（SDK 預設是等 600 秒、重試 2 次，AI 一卡住
+# 使用者的請求就跟著卡住）。最壞情況約 timeout × (重試次數 + 1) 秒，之後各處會
+# 退回固定內容。見 ai_service/client.py。
+OPENAI_TIMEOUT_SECONDS = config("OPENAI_TIMEOUT_SECONDS", default=15, cast=float)
+OPENAI_MAX_RETRIES = config("OPENAI_MAX_RETRIES", default=1, cast=int)
 SHARE_BASE_URL = config("SHARE_BASE_URL", default="http://localhost:8000")

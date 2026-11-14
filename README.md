@@ -83,7 +83,7 @@ LightMemory/
 | dashboard | 健康儀表板與認知趨勢 |
 | activities | 資訊加油站與活動推薦 |
 | social | 社群分享、留言與互動 |
-| assessments | AD-8 及其他認知評估 |
+| assessments | 已停用（原 AD-8 量表模型已移除，保留空 app 供 migration 使用） |
 | ai_service | OpenAI、Whisper、AI 分析服務 |
 | home | 首頁整合 API |
 
@@ -107,8 +107,6 @@ erDiagram
     USER ||--o{ FAMILYCONTACT : "有家屬聯絡人"
     USER ||--o{ DIARY : "撰寫"
     USER ||--o{ GAMERECORD : "遊玩"
-    USER ||--o{ AD8RECORD : "填寫"
-    USER ||--o{ HEALTHDASHBOARDRECORD : "擁有"
     USER ||--o{ ACTIVITYRECORD : "報名"
     USER ||--o{ POST : "發布"
 
@@ -174,25 +172,6 @@ erDiagram
         string difficulty
         datetime played_at
         date played_date
-    }
-
-    AD8RECORD {
-        int total_score
-        string result_description
-        datetime completed_at
-    }
-
-    HEALTHDASHBOARDRECORD {
-        decimal attention_score
-        decimal executive_function_score
-        decimal language_score
-        decimal working_memory_score
-        decimal math_score
-        decimal visual_spatial_score
-        int brain_age
-        string trend_alert_level
-        string report_type
-        datetime generated_at
     }
 
     HEALTHINFORMATION {
@@ -289,6 +268,21 @@ pip install -r requirements.txt
 ```
 
 並填入 PostgreSQL 與 Firebase 相關設定。
+
+安全相關設定（`DJANGO_DEBUG`、`DJANGO_SECRET_KEY`、CORS 等）也從 `.env` 讀取：
+
+| 變數 | 開發 | 正式環境 |
+|---|---|---|
+| `DJANGO_DEBUG` | 設 `True` | 不設或設 `False`（**沒設就是 `False`**） |
+| `DJANGO_SECRET_KEY` | 不用設（會用開發專用的備用金鑰） | **一定要設**，沒設服務會起不來；不能用 `django-insecure-` 開頭的金鑰 |
+| `DJANGO_ALLOWED_HOSTS`、`DJANGO_CSRF_TRUSTED_ORIGINS` | 不用設（有預設） | 以逗號分隔，填實際網域 |
+| `DJANGO_CORS_ALLOWED_ORIGINS` | 不用設（開發預設允許所有來源） | 填 Flutter Web 的網址；Flutter 手機 App 不受 CORS 影響 |
+
+產生 `DJANGO_SECRET_KEY`：
+
+```bash
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
 
 > `.env` 不會上傳至 GitHub。
 

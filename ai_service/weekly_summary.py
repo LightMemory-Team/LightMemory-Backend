@@ -9,27 +9,14 @@ import logging
 
 from django.conf import settings
 
+from .client import get_client
+from .wording import BANNED_WORDS, contains_banned_word  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 MAX_SUMMARY_LENGTH = 40
 
-# 不能出現在給長者看的句子裡：醫療療效宣稱、專有名詞、負面字眼
-BANNED_WORDS = [
-    "失智",
-    "診斷",
-    "治療",
-    "疾病",
-    "退步",
-    "變差",
-    "分數",
-    "z",
-    "Z",
-    "標準差",
-    "百分位",
-    "認知彈性",
-    # 語言是寫日記練的，不是遊戲
-    "玩語言",
-]
+# 禁用詞清單與檢查放在 wording.py，週報、首頁問候語、日記共用
 
 SYSTEM_PROMPT = (
     "你是陪伴長輩的溫暖小幫手。根據提供的本週事實，用繁體中文寫一句"
@@ -90,16 +77,14 @@ def _facts_to_text(facts):
 
 
 def _client():
-    from openai import OpenAI
-
-    return OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
+    return get_client()
 
 
 def _is_acceptable(summary):
     return (
         bool(summary)
         and len(summary) <= MAX_SUMMARY_LENGTH
-        and not any(word in summary for word in BANNED_WORDS)
+        and not contains_banned_word(summary)
     )
 
 

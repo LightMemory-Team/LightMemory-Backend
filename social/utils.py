@@ -4,6 +4,8 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.utils.urls import replace_query_param
 
+from diary.media import media_url
+
 from .models import Post
 
 
@@ -63,11 +65,14 @@ def paginate(request, queryset, serialize, default_size=10, max_size=50):
 
 
 def post_queryset(user):
-    """只回傳自己的貼文(帳號隔離),並附上留言數。"""
+    """只回傳自己的貼文(帳號隔離),並附上留言數、語音加油數。"""
     return (
         Post.objects.filter(is_enabled=True, user=user)
         .select_related("user", "diary")
-        .annotate(comment_total=Count("comments", distinct=True))
+        .annotate(
+            comment_total=Count("comments", distinct=True),
+            voice_reply_total=Count("voice_replies", distinct=True),
+        )
     )
 
 
@@ -87,14 +92,14 @@ def serialize_post(post, viewer):
         "author": author_dict(post.user),
         "is_mine": is_mine,
         "title": diary.title if diary else "",
-        "photo_url": post.image_path,
+        "photo_url": media_url(post.image_path),
         "post_text": post.content,
         "hashtags": diary.hashtags if diary else [],
         "category": diary.category if diary else "",
         "date": timezone.localtime(base_time).date().isoformat(),
         "posted_at": timezone.localtime(post.created_at).isoformat(),
         "comment_count": post.comment_total,
-        "voice_reply_count": 0,
+        "voice_reply_count": post.voice_reply_total,
         "share_url": share_url if is_mine else None,
         "is_share_enabled": post.is_share_enabled if is_mine else None,
         "invite_text": (diary.invite_text if diary else "") if is_mine else "",

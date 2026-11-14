@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from ai_service.greeting import get_daily_greeting
+from dashboard.services import dimension_for_source
 from games.catalog import GAMES
 from social.models import Notification
 from social.utils import get_display_name
@@ -53,17 +54,27 @@ def daily_suggetion(request):
     return Response({"daily_suggestion": daily_suggestion})
 
 
-# 遊戲卡片列表：所有已開發的遊戲，並標示本週（週一到今天）有沒有玩過
+# 遊戲卡片列表：所有已開發的遊戲，並標示本週（週一到今天）有沒有玩過、
+# 對應的認知維度（dimension／dimension_label）
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def games_list(request):
     today = timezone.localdate()
     played = service.played_game_ids(request.user, service.week_start(today), today)
-    games = [
-        {**game, "played_this_week": game["id"] in played}
-        for game in GAMES
-        if game["is_developed"]
-    ]
+    games = []
+    for game in GAMES:
+        if not game["is_developed"]:
+            continue
+        # 卡片上的認知維度標籤（跟儀表板雷達圖同一份對應）
+        dimension = dimension_for_source(game["id"])
+        games.append(
+            {
+                **game,
+                "played_this_week": game["id"] in played,
+                "dimension": dimension["dimension"] if dimension else None,
+                "dimension_label": dimension["label"] if dimension else None,
+            }
+        )
     return Response({"games": games})
 
 

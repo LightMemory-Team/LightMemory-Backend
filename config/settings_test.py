@@ -16,7 +16,13 @@ Django 跑測試時會建立 test_<DB_NAME> 資料庫，若 .env 裡的 DB_USER
     python manage.py test
 """
 
-from .settings import *  # noqa: F401,F403
+import os
+
+# 測試不依賴 .env 裡有沒有金鑰：settings 在 DEBUG 關閉時一定要有 DJANGO_SECRET_KEY，
+# 這裡先補一把測試專用的（沒有 "django-insecure-" 開頭，不會被正式環境檢查擋掉）。
+os.environ.setdefault("DJANGO_SECRET_KEY", "test-only-secret-key-not-for-real-use")
+
+from .settings import *  # noqa: E402,F401,F403
 
 # 測試資料庫改用 SQLite in-memory，免 CREATEDB 權限
 DATABASES = {
@@ -24,6 +30,17 @@ DATABASES = {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': ':memory:',
     }
+}
+
+# 請求次數限制：測試之間共用同一份記憶體快取，把上限調得很高，免得別的測試
+# 不小心累積到上限。要測限速行為的測試自己用 patch 套上真正的次數
+# （見 users/tests/test_auth_throttle.py）。
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,  # noqa: F405
+    "DEFAULT_THROTTLE_RATES": {
+        scope: "100000/hour"
+        for scope in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]  # noqa: F405
+    },
 }
 
 # 專案的 ALLOWED_HOSTS 是空的，測試客戶端會用 testserver 這個 host
