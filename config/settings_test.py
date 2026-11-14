@@ -32,6 +32,17 @@ DATABASES = {
     }
 }
 
+# 請求次數限制：測試之間共用同一份記憶體快取，把上限調得很高，免得別的測試
+# 不小心累積到上限。要測限速行為的測試自己用 patch 套上真正的次數
+# （見 users/tests/test_auth_throttle.py）。
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,  # noqa: F405
+    "DEFAULT_THROTTLE_RATES": {
+        scope: "100000/hour"
+        for scope in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]  # noqa: F405
+    },
+}
+
 # 專案的 ALLOWED_HOSTS 是空的，測試客戶端會用 testserver 這個 host
 ALLOWED_HOSTS = ['testserver', 'localhost', '127.0.0.1']
 

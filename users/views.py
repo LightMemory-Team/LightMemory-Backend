@@ -8,9 +8,11 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from config.exceptions import ApiError
 from diary.external import delete_from_firebase
@@ -28,7 +30,14 @@ from .serializers import (
     RegisterSerializer,
     validate_new_password,
 )
-from .throttles import PasswordResetIPThrottle, PasswordResetUsernameThrottle
+from .throttles import (
+    LoginIPThrottle,
+    LoginUsernameThrottle,
+    PasswordConfirmUserThrottle,
+    PasswordResetIPThrottle,
+    PasswordResetUsernameThrottle,
+    RegisterIPThrottle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,10 +172,36 @@ def calculate_user_stats(user, today=None):
     }
 
 
+class LoginView(TokenObtainPairView):
+    """登入：POST /api/users/login/
+
+    simplejwt 原本的登入，加上「登入失敗次數限制」：
+    - 同一個帳號失敗太多次、或同一個來源失敗太多次，就回 429
+    - 只有「帳密錯誤」才算失敗；成功登入、欄位沒填（400）都不算
+    - 登入成功會把這個帳號的失敗次數歸零
+    次數見 settings 的 login_username、login_ip。
+    """
+
+    throttle_classes = [LoginIPThrottle, LoginUsernameThrottle]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            response = super().post(request, *args, **kwargs)
+        except AuthenticationFailed:
+            for throttle in self.get_throttles():
+                throttle.record_failure(request, self)
+            raise
+        for throttle in self.get_throttles():
+            if isinstance(throttle, LoginUsernameThrottle):
+                throttle.clear(request, self)
+        return response
+
+
 # Create your views here.
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]  # 註冊時還沒有帳號，必須開放
+    throttle_classes = [RegisterIPThrottle]
 
 
 class MeView(generics.RetrieveUpdateAPIView):
@@ -180,6 +215,12 @@ class MeView(generics.RetrieveUpdateAPIView):
     serializer_class = MeSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ["get", "patch", "delete", "head", "options"]
+
+    def get_throttles(self):
+        # 只有刪除帳號要輸入密碼確認，才限制次數；查看、修改資料不限
+        if self.request.method == "DELETE":
+            return [PasswordConfirmUserThrottle()]
+        return super().get_throttles()
 
     def get_object(self):
         return self.request.user
@@ -216,9 +257,11 @@ class PasswordChangeView(APIView):
     """修改密碼：POST /api/users/me/password/
 
     驗證舊密碼與新密碼強度，成功後更新密碼並回發新的 access / refresh token。
+    要輸入舊密碼，所以限制次數（與刪除帳號共用），避免偷到 token 的人一直猜密碼。
     """
 
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [PasswordConfirmUserThrottle]
 
     def post(self, request):
         serializer = PasswordChangeSerializer(
