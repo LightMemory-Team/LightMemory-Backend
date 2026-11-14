@@ -15,7 +15,13 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .services import get_trend, get_unlock_progress, is_unlocked, overall_score
+from .services import (
+    diary_z_scores,
+    get_trend,
+    get_unlock_progress,
+    is_unlocked,
+    overall_score,
+)
 from .weekly_report import get_weekly_scores_history
 
 # 每往前一週，權重乘上這個數：基準週 1、前一週 0.8、再前一週 0.64…
@@ -39,18 +45,23 @@ def weighted_overall_score(weekly_scores, base_week):
     return round(sum(score * weight for score, weight in pairs) / total_weight)
 
 
-def get_encouragement(user):
+def get_encouragement(user, diary_scores=None):
     """回傳 {trend, overall_score, previous_overall_score}；6 個能力沒解鎖時回傳 None。
 
     trend 是 up（進步）／steady（持平）／practice（多練習）；只有一週資料時是 None。
+    diary_scores：事先算好的 diary_z_scores(user)，傳進來就不會重新掃全站日記。
     """
-    if not is_unlocked(get_unlock_progress(user)):
+    if diary_scores is None:
+        diary_scores = diary_z_scores(user)
+    if not is_unlocked(get_unlock_progress(user, diary_scores=diary_scores)):
         return None
 
     today = timezone.localdate()
     this_monday = today - timedelta(days=today.weekday())
     weekly_scores = {}
-    for week, scores in get_weekly_scores_history(user, this_monday).items():
+    for week, scores in get_weekly_scores_history(
+        user, this_monday, diary_scores=diary_scores
+    ).items():
         score = overall_score(scores)
         if score is not None:
             weekly_scores[week] = score

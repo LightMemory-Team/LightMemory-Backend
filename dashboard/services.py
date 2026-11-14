@@ -7,11 +7,15 @@
   （跟更早的有效日記比，見 diary_zscore.py），只算有效的日記。
 """
 
+import contextvars
+import functools
 import statistics
+from contextlib import contextmanager
 from datetime import timedelta
 from itertools import groupby
 from operator import itemgetter
 
+from django.db.models import Max
 from django.utils import timezone
 
 from diary.models import DiaryAnalysis
@@ -90,21 +94,28 @@ def _counts_for_population(row):
     return not row["diary__user__is_staff"] and not is_seed
 
 
-def diary_z_scores(user, start=None, end=None):
-    """期間內這位使用者每篇有效日記的 (建立時間, 語言 z)。
+def _compute_diary_z_scores(user):
+    """這位使用者「全部」有效日記的 (建立時間, 語言 z)，依建立時間排序。
 
-    以日記建立時間（Diary.created_at）判斷是否在期間內；
-    無效日記（錄音太短、疑似辨識錯誤）沒有小分數，不算。
+    這是整段計算裡最花時間的一步：每篇要跟「更早建立」的有效日記比，自己的
+    當個人歷史，其他使用者的依使用者分組當全體基準（排除測試帳號、demo 日記），
+    基準資料少時偏向全體、越多越偏向自己（見 games/zscore.py）。所以別人的日記
+    也要拿來當歷史。一次查出全部有效日記、依建立時間掃過去，避免每篇各查一次
+    資料庫。歷史不足、算不出 z 的日記不列入。
 
-    每篇跟「更早建立」的有效日記比：自己的當個人歷史，其他使用者的依使用者
-    分組當全體基準（排除測試帳號、demo 日記），基準資料少時偏向全體、越多
-    越偏向自己（見 games/zscore.py）。所以期間以前的日記、別人的日記也要
-    拿來當歷史。一次查出 end 以前全部的有效日記、依建立時間掃過去，避免每篇
-    各查一次資料庫。歷史不足、算不出 z 的日記不列入。
+    兩個不影響結果的省時做法：
+    - 這位使用者沒有任何有效日記 → 不可能有結果，不掃全站
+    - 每篇日記的 z 只取決於「更早」的日記，所以只掃到他最新一篇為止
     """
-    analyses = DiaryAnalysis.objects.filter(is_valid=True)
-    if end is not None:
-        analyses = analyses.filter(diary__created_at__lt=end)
+    last_created_at = DiaryAnalysis.objects.filter(
+        is_valid=True, diary__user=user
+    ).aggregate(last=Max("diary__created_at"))["last"]
+    if last_created_at is None:
+        return []
+
+    analyses = DiaryAnalysis.objects.filter(
+        is_valid=True, diary__created_at__lte=last_created_at
+    )
     rows = analyses.order_by("diary__created_at").values(
         "diary__user_id",
         "diary__created_at",
@@ -119,9 +130,8 @@ def diary_z_scores(user, start=None, end=None):
         rows, key=itemgetter("diary__created_at")
     ):
         same_time_rows = list(same_time_rows)
-        in_period = start is None or created_at >= start
         for row in same_time_rows:
-            if in_period and row["diary__user_id"] == user.id:
+            if row["diary__user_id"] == user.id:
                 z_score = calculate_language_z_score(
                     row, personal_history, population_by_user
                 )
@@ -136,18 +146,86 @@ def diary_z_scores(user, start=None, end=None):
     return results
 
 
-def average_diary_z_score(user, start=None, end=None):
+# 「同一個範圍內只掃一次」的共用結果：範圍外是 None（每次都現算）。
+_shared_scan = contextvars.ContextVar("diary_scan_scope", default=None)
+
+
+@contextmanager
+def shared_diary_scan():
+    """範圍內，同一位使用者的 diary_z_scores 只掃一次全站日記。
+
+    一次請求裡，儀表板、發點數（rewards）、首頁任務各自都會用到日記的語言 z，
+    每個都重新掃一遍全站日記很浪費。用法：把整段處理包在 with 裡，
+    範圍內的呼叫自動共用結果，不必把 scores 一路傳過好幾個 app。
+
+    - 只在範圍內有效，離開就丟掉，所以不會有跨請求的過期資料
+    - 範圍可以巢狀：內層直接沿用外層的結果
+    - 範圍內如果又寫入了日記，結果不會更新；要的人請在寫入「之後」才進入範圍
+    """
+    if _shared_scan.get() is not None:
+        yield
+        return
+    token = _shared_scan.set({})
+    try:
+        yield
+    finally:
+        _shared_scan.reset(token)
+
+
+def with_shared_diary_scan(view):
+    """把整個 view 包進 shared_diary_scan()。"""
+
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        with shared_diary_scan():
+            return view(*args, **kwargs)
+
+    return wrapper
+
+
+def _scores_for(user):
+    """這位使用者的完整日記語言 z；在 shared_diary_scan() 範圍內會共用。"""
+    cache = _shared_scan.get()
+    if cache is None:
+        return _compute_diary_z_scores(user)
+    if user.id not in cache:
+        cache[user.id] = _compute_diary_z_scores(user)
+    return cache[user.id]
+
+
+def diary_z_scores(user, start=None, end=None, scores=None):
+    """期間內這位使用者每篇有效日記的 (建立時間, 語言 z)。
+
+    以日記建立時間（Diary.created_at）判斷期間：start <= 建立時間 < end。
+    無效日記（錄音太短、疑似辨識錯誤）沒有小分數，不算。
+
+    scores：事先算好的完整結果（diary_z_scores(user) 的回傳值）。同一次請求
+    要用到好幾次時先算一次再傳進來，就不會每次都重新掃一遍全站日記。
+    不傳就現算。不管有沒有傳，結果都一樣。
+    """
+    if scores is None:
+        scores = _scores_for(user)
+    return [
+        (created_at, z)
+        for created_at, z in scores
+        if (start is None or created_at >= start)
+        and (end is None or created_at < end)
+    ]
+
+
+def average_diary_z_score(user, start=None, end=None, scores=None):
     """期間內有效日記的語言 z 平均，回傳 (平均 z 或 None, 篇數)。"""
-    z_scores = [z for _, z in diary_z_scores(user, start, end)]
+    z_scores = [z for _, z in diary_z_scores(user, start, end, scores)]
     if not z_scores:
         return None, 0
     return round(statistics.mean(z_scores), 3), len(z_scores)
 
 
-def get_unlock_progress(user, end=None):
+def get_unlock_progress(user, end=None, diary_scores=None):
     """各遊戲、聲影日記累計有 z_score 的場次（篇）數，給各維度的解鎖判斷用。
 
     end 有給就只算那個時間點以前的（週報看「到報告週結束為止」）。
+    diary_scores：事先算好的 diary_z_scores(user)，見 diary_z_scores。
 
     日記要算得出語言 z 才算：更早的日記不滿 3 篇（自己的和全體的都不夠）時，
     那篇沒有 z，不算進去。
@@ -165,7 +243,7 @@ def get_unlock_progress(user, end=None):
         {
             "source": DIARY_SOURCE,
             "label": DIARY_LABEL,
-            "session_count": len(diary_z_scores(user, end=end)),
+            "session_count": len(diary_z_scores(user, end=end, scores=diary_scores)),
         }
     )
     return progress
@@ -203,7 +281,7 @@ def get_personal_session_counts(user):
     return counts
 
 
-def get_dashboard_dimensions(user, days=PERIOD_DAYS):
+def get_dashboard_dimensions(user, days=PERIOD_DAYS, diary_scores=None):
     """雷達圖每個軸（固定 6 個）：近 days 天的 z 平均、分數與解鎖狀態。
 
     各維度分開解鎖：valid_count（累計有 z 的場次／篇數）滿 REQUIRED_SESSIONS 才
@@ -217,11 +295,17 @@ def get_dashboard_dimensions(user, days=PERIOD_DAYS):
       不滿 k）表示還在「參考期」，基準偏向其他使用者的表現
     """
     start = timezone.now() - timedelta(days=days)
+    if diary_scores is None:
+        # 語言軸與解鎖進度都要用日記的 z，只算一次
+        diary_scores = diary_z_scores(user)
     averages = average_z_scores(user, start=start)
     # 語言軸：近 days 天有效日記的語言 z 平均；session_count 是日記篇數
-    averages[DIARY_SOURCE] = average_diary_z_score(user, start=start)
+    averages[DIARY_SOURCE] = average_diary_z_score(
+        user, start=start, scores=diary_scores
+    )
     progress = {
-        item["source"]: item["session_count"] for item in get_unlock_progress(user)
+        item["source"]: item["session_count"]
+        for item in get_unlock_progress(user, diary_scores=diary_scores)
     }
     personal_counts = get_personal_session_counts(user)
 

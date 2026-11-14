@@ -41,8 +41,33 @@ class SessionNotFound(Exception):
     """找不到指定的 session_id 時拋出。"""
 
 
-def _to_dict(session):
-    """將 GameSession ORM instance 轉換為外部呼叫者預期的 dict 結構。"""
+class SessionOwnerMismatch(Exception):
+    """session_id 已經存在，但屬於另一位使用者時拋出。"""
+
+
+def _step_records_of(session):
+    """這場的作答紀錄（依 step_number 排序）。
+
+    用 .all() 而不是 .order_by()：呼叫端有 prefetch_related("step_logs") 時
+    直接用已經載入的資料，不會每場再查一次資料庫。
+    """
+    logs = sorted(session.step_logs.all(), key=lambda log: log.step_number)
+    return [
+        {
+            "step_number": log.step_number,
+            "is_correct": log.is_correct,
+            "response_time_ms": log.response_time_ms,
+            "detail": log.detail,
+        }
+        for log in logs
+    ]
+
+
+def _to_dict(session, with_steps=True):
+    """將 GameSession ORM instance 轉換為外部呼叫者預期的 dict 結構。
+
+    with_steps=False 時不查作答紀錄，step_records 固定是空 list（列表／歷史用）。
+    """
     return {
         "session_id": session.client_session_id or str(session.id),
         "game_type": session.game.code,
@@ -51,11 +76,7 @@ def _to_dict(session):
         "status": session.status,
         "question_number": session.question_number,
         "current_question": session.current_question,
-        "step_records": list(
-            session.step_logs.order_by("step_number").values(
-                "step_number", "is_correct", "response_time_ms", "detail"
-            )
-        ),
+        "step_records": _step_records_of(session) if with_steps else [],
         "result": session.result,
         "state": session.state,
         "is_pretest": session.is_pretest,
@@ -138,10 +159,18 @@ def get_or_create_session(
     對應到 GameSession.client_session_id，不是資料庫的主鍵。
 
     回傳 (session_dict, created)，created 是 bool，告訴呼叫端這是不是剛建立的。
+
+    session_id 已經存在、但屬於另一位使用者時，拋出 SessionOwnerMismatch，
+    不會回傳（或修改）別人的 session。呼叫端要自己決定怎麼回應（通常是 403）。
     """
     game = _get_game(game_type)
     try:
         session = GameSession.objects.get(game=game, client_session_id=str(session_id))
+        requester_id = (
+            user.id if user is not None else (initial_state or {}).get("user_id")
+        )
+        if requester_id is not None and session.user_id != requester_id:
+            raise SessionOwnerMismatch(session_id)
         return _to_dict(session), False
     except GameSession.DoesNotExist:
         owner = _resolve_user(user, initial_state)
@@ -169,9 +198,39 @@ def is_first_session(game_type, user):
 
 
 def list_sessions(game_type):
-    """列出某個遊戲類型底下所有 session 的完整內容（未排序、未過濾）。"""
+    """列出某個遊戲類型底下所有 session 的完整內容（未排序、未過濾）。
+
+    會載入「所有使用者」的所有場次，資料量隨全站成長。要查某位使用者的
+    場次請用 list_user_sessions，不要在 Python 裡再自己篩選。
+    """
     game = _get_game(game_type)
-    return [_to_dict(s) for s in GameSession.objects.filter(game=game)]
+    sessions = (
+        GameSession.objects.filter(game=game)
+        .select_related("game")
+        .prefetch_related("step_logs")
+    )
+    return [_to_dict(s) for s in sessions]
+
+
+def list_user_sessions(game_type, user_id, status=None, with_steps=False):
+    """列出某位使用者在某個遊戲的場次（歷史紀錄用）。
+
+    在資料庫就篩選，只讀這位使用者自己的場次，不會把全站資料載入記憶體。
+    以資料庫外鍵 user 為準（不依賴各遊戲塞在 state 裡的 user_id）。
+    status 有給就只取該狀態（例如 "finished"）。
+    with_steps 預設 False：歷史紀錄不需要逐題作答紀錄，step_records 會是空 list；
+    需要時傳 True（會一次載入，不會每場各查一次）。
+    不保證排序，呼叫端自己依需要排序。
+    """
+    game = _get_game(game_type)
+    sessions = GameSession.objects.filter(game=game, user_id=user_id).select_related(
+        "game"
+    )
+    if status is not None:
+        sessions = sessions.filter(status=status)
+    if with_steps:
+        sessions = sessions.prefetch_related("step_logs")
+    return [_to_dict(s, with_steps=with_steps) for s in sessions]
 
 
 def update_session(game_type, session_id, state=None, **fields):
@@ -231,8 +290,9 @@ def grant_rewards(game_type, session_id):
     """遊戲結算後呼叫：發放這場的點數與成就，回傳 rewards 區塊。
 
     各遊戲 view 手上只有 dict，這裡負責查出 GameSession 物件交給
-    rewards.services.grant()。點數發給這場遊戲的主人（session.user），
-    不用 request.user，因為多數遊戲 API 允許未登入呼叫。
+    rewards.services.grant()。點數發給這場遊戲的主人（session.user）。
+    遊戲 API 現在都要登入，而且作答、結算前會先檢查場次屬於目前的使用者
+    （forbidden_unless_owner），所以主人就是請求者；他人的場次不會走到這裡。
     重複呼叫是安全的：同一場只會入帳一次，之後回 0 點的空區塊。
     """
     from rewards import services as rewards_services

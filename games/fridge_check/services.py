@@ -1,6 +1,7 @@
 from django.utils import timezone
 
 from games import session_service
+from games.utils import local_date_from_iso
 from games.dda import DDAConfig, NoOpStrategy, apply_answer
 from games.zscore import composite_z_score, z_score_to_display_score
 
@@ -560,19 +561,15 @@ def get_history(user_id):
     3. 有 result 的 session
     """
 
-    sessions = session_service.list_sessions(GAME_TYPE)
+    # 在資料庫就篩選出「這位使用者、已完成」的場次，不載入全站資料
+    sessions = session_service.list_user_sessions(
+        GAME_TYPE, user_id, status="finished"
+    )
 
     history = []
 
     for session in sessions:
-        state = session.get("state", {})
         result = session.get("result")
-
-        if state.get("user_id") != user_id:
-            continue
-
-        if session.get("status") != "finished":
-            continue
 
         if not result:
             continue
@@ -592,7 +589,7 @@ def get_history(user_id):
                 ),
                 "final_difficulty": result["final_difficulty"],
                 "played_at": completed_at,
-                "played_date": completed_at[:10],
+                "played_date": local_date_from_iso(completed_at),
 
                 # 新版完整資料
                 "session_id": session["session_id"],

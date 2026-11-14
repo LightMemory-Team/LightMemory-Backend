@@ -83,7 +83,7 @@ LightMemory/
 | dashboard | 健康儀表板與認知趨勢 |
 | activities | 資訊加油站與活動推薦 |
 | social | 社群分享、留言與互動 |
-| assessments | AD-8 及其他認知評估 |
+| assessments | 已停用（原 AD-8 量表模型已移除，保留空 app 供 migration 使用） |
 | ai_service | OpenAI、Whisper、AI 分析服務 |
 | home | 首頁整合 API |
 
@@ -107,8 +107,6 @@ erDiagram
     USER ||--o{ FAMILYCONTACT : "有家屬聯絡人"
     USER ||--o{ DIARY : "撰寫"
     USER ||--o{ GAMERECORD : "遊玩"
-    USER ||--o{ AD8RECORD : "填寫"
-    USER ||--o{ HEALTHDASHBOARDRECORD : "擁有"
     USER ||--o{ ACTIVITYRECORD : "報名"
     USER ||--o{ POST : "發布"
 
@@ -174,25 +172,6 @@ erDiagram
         string difficulty
         datetime played_at
         date played_date
-    }
-
-    AD8RECORD {
-        int total_score
-        string result_description
-        datetime completed_at
-    }
-
-    HEALTHDASHBOARDRECORD {
-        decimal attention_score
-        decimal executive_function_score
-        decimal language_score
-        decimal working_memory_score
-        decimal math_score
-        decimal visual_spatial_score
-        int brain_age
-        string trend_alert_level
-        string report_type
-        datetime generated_at
     }
 
     HEALTHINFORMATION {

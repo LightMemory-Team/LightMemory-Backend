@@ -319,7 +319,11 @@ def _unlock_achievements(user, event):
 def grant(user, event, ref=None):
     """處理一個事件，回傳 rewards 區塊。任何例外都不往外丟。"""
     try:
-        with transaction.atomic():
+        # 判斷成就、今日任務都會用到日記的語言 z（要掃全站日記），
+        # 範圍內只掃一次；呼叫端已經在範圍內（儀表板、週報）就直接沿用
+        from dashboard.services import shared_diary_scan
+
+        with transaction.atomic(), shared_diary_scan():
             return _grant(user, event, ref)
     except Exception:  # noqa: BLE001
         logger.exception("發放點數失敗：user=%s event=%s ref=%s", user, event, ref)

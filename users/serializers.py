@@ -1,11 +1,11 @@
 # 資料轉換json
 
-from datetime import date
 import re
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework import serializers
 
 User = get_user_model()
@@ -76,7 +76,7 @@ class ProfileFieldsSerializer(serializers.ModelSerializer):
         return value
 
     def validate_birth_date(self, value):
-        if value and value > date.today():
+        if value and value > timezone.localdate():
             raise serializers.ValidationError("生日不能是未來的日期")
         return value
 
