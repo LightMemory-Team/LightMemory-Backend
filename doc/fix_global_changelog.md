@@ -1,0 +1,234 @@
+# fix/global 後端修改紀錄（詳細版）
+
+更新日期：2026-11-14 · 分支：`fix/global`（合併目標） · 已完成：G1、G3
+
+## 這份文件是什麼
+
+`fix/global` 處理**跨 app 的共同性問題**（設定、安全、工具、流程）。每個編號一個小分支、一個 PR，合併進 `fix/global`。和 `fix/features` 的分工：
+
+| 分支 | 內容 | 紀錄 |
+|---|---|---|
+| `fix/features` | 單一功能的問題（F1～F14） | [fix_features_changelog.md](fix_features_changelog.md) |
+| `fix/global` | 共同性問題（G1～G14） | **本文件** |
+
+給前端看的是 [frontend_api_changes.md](frontend_api_changes.md)；本文件給後端開發者，寫「為什麼這樣改、怎麼驗證、有什麼限制」。
+
+`fix/global` 一開始就是 `fix/features`（含 rewards）的最新狀態，之後只多出 G 系列的修改。
+
+## 0. 總覽
+
+| 編號 | 問題（一句話） | 類型 | PR | 前端要改嗎 |
+|---|---|---|---|---|
+| G1 | `SECRET_KEY`、`DEBUG`、CORS 寫死在程式碼裡 | 安全設定 | #109（另有補強，見 G1.5） | Flutter Web 的網址要列進 CORS；手機 App 不受影響 |
+| G3 | 登入、註冊、改密碼、刪帳號沒有次數限制 | 暴力破解防護 | #110 | ⚠️ 要處理 429 |
+
+尚未開始：G2、G4～G14（見計畫檔）。
+
+### 共同的做法
+1. 一個編號 = 一個小分支 = 一個 PR，base 是 `fix/global`；commit 用 Conventional Commits，會破壞既有行為的加 `!`。
+2. 測試與程式放同一個 commit；驗證「**把修正拿掉，新測試會失敗**」。
+3. **全部測試通過才 commit**（用測試的結束代碼把關，不接 `tail`）。
+4. ruff 只對自己改的檔案跑；**格式化後要檢查有沒有動到無關的舊程式碼**（G3 就遇到，見 G3.7）。
+
+---
+
+## 1. G1 — 安全設定改讀環境變數（PR #109）
+
+### 1.1 問題與風險
+
+`config/settings.py` 的安全設定寫死在程式碼裡：
+
+| 設定 | 原本 | 風險 |
+|---|---|---|
+| `SECRET_KEY` | 固定字串，**已經公開在 Git 歷史裡** | 能偽造 session、重設密碼連結、JWT 簽章 |
+| `DEBUG` | 固定 `True` | 出錯時把程式碼、設定、環境變數顯示給任何人 |
+| `CORS_ALLOW_ALL_ORIGINS` | 固定 `True` | 任何網站的瀏覽器程式都能呼叫 API |
+
+### 1.2 修改
+
+全部改讀 `.env`（用 `python-decouple`），**預設值選安全的那一邊**：
+
+| 變數 | 開發 | 正式環境 |
+|---|---|---|
+| `DJANGO_DEBUG` | 設 `True` | 沒設就是 `False` |
+| `DJANGO_SECRET_KEY` | 不用設，用開發專用備用金鑰 | **一定要設**，沒設啟動就報錯；不能用 `django-insecure-` 開頭 |
+| `DJANGO_CORS_ALLOW_ALL` | 預設跟著 `DEBUG`（開發允許全部） | 預設不允許 |
+| `DJANGO_CORS_ALLOWED_ORIGINS` | — | 逗號分隔，明確列出（例如 Flutter Web 的網址） |
+| `DJANGO_ALLOWED_HOSTS`、`DJANGO_CSRF_TRUSTED_ORIGINS` | 不設用原本預設值 | 逗號分隔 |
+
+`settings_test.py` 先用 `os.environ.setdefault` 補一把測試用金鑰，所以測試與日後的 CI 不需要 `.env` 裡有金鑰。`.env.example`、`README.md`、`doc/cloudfare.md` 同步更新。
+
+### 1.3 設計決策
+
+- **為什麼拒絕 `django-insecure-` 開頭的金鑰？** Django 的 `startproject` 產生的金鑰都是這個開頭，包含曾經寫進這個專案、已經外洩的那一把。正式環境用到它就等於沒換。
+- **為什麼 DEBUG 開啟時給備用金鑰？** 開發者不該為了跑本機服務去設定金鑰；備用金鑰是公開字串，所以 DEBUG 關閉時絕對不會被採用。
+- **為什麼 CORS 預設跟著 DEBUG？** CORS 只影響瀏覽器（Flutter Web），手機 App 不受影響。開發時全開省事，正式環境預設全關才安全。
+
+### 1.4 測試（`config/tests/test_settings.py`）
+
+每個測試都「**全新載入 `settings.py`＋只看指定的環境變數**」（用 `importlib` 重新執行檔案，並把 `decouple.config` 換成只讀環境變數的版本），不受本機 `.env` 影響：DEBUG 預設關閉與各種寫法、正式環境沒金鑰／用 `django-insecure-` 金鑰會失敗、開發沒金鑰可以跑、外洩的金鑰不在原始碼裡、CORS 與 `ALLOWED_HOSTS` 的預設與覆蓋。
+
+### 1.5 補強：金鑰設成空字串（commit `ca2c7fa`，併在 #110）
+
+**問題**：`.env` 留著 `DJANGO_SECRET_KEY=` 卻沒填值時，`python-decouple` 讀成「有設定、值是空字串」，**不會用備用金鑰**，Django 報 `The SECRET_KEY setting must not be empty`，連本機開發都起不來。這是測試與演練都沒想到的情況，是使用者把金鑰「拿掉」時（清掉值、留下那一行）實際遇到的。
+
+**修改**：空字串（含只有空白）視同沒設定。DEBUG 開啟用備用金鑰；DEBUG 關閉丟出 `ImproperlyConfigured`，訊息說明要在 `.env` 加哪一行、怎麼產生金鑰（取代原本 decouple 的 `UndefinedValueError`）。
+
+**測試**：正式環境空字串與只有空白會失敗、開發空字串用備用金鑰、錯誤訊息提到 `DJANGO_SECRET_KEY`。
+
+**驗證**：只把 `SECRET_KEY` 那段退回舊寫法，4 個失敗＋2 個錯誤；還原後 19 個全過。
+
+> 驗證時我第一次用了不含 G3 設定的整份 `settings.py` 當「舊版」，結果 `settings_test.py` 需要的 `DEFAULT_THROTTLE_RATES` 不存在，整個載入就壞了——那不是在驗證測試。改成只退回 `SECRET_KEY` 那一段才是對的。**「拿掉修正」要只拿掉那一個修正。**
+
+### 1.6 部署前注意（重要）
+
+- **正式環境必須先在 `.env` 設新產生的 `DJANGO_SECRET_KEY`**，否則服務起不來。產生方式：`python -c "import secrets; print(secrets.token_urlsafe(50))"`。
+- **舊金鑰已公開在 Git 歷史，只能靠換金鑰解決**（不改寫歷史）。換金鑰會讓所有人的登入 token 失效（JWT 用這把金鑰簽）、管理後台 session 失效，需要重新登入；資料庫資料不受影響。
+- Flutter Web 的正式網址要列在 `DJANGO_CORS_ALLOWED_ORIGINS`。
+- 開發環境不受影響（`.env` 已有 `DJANGO_DEBUG=True`）。
+
+### 1.7 已知限制
+
+- 正式環境的金鑰品質（長度、隨機性）只擋了 `django-insecure-` 開頭，沒有檢查長度；文件建議用 `secrets.token_urlsafe(50)`。
+- `SIMPLE_JWT` 的效期與黑名單是 G4；部署文件是 G13。
+
+---
+
+## 2. G3 — 登入、註冊、改密碼／刪帳號的次數限制（PR #110）
+
+### 2.1 問題與風險
+
+只有忘記密碼有次數限制（F4）。其他要輸入密碼，或可以大量建立資料的 API 都沒有：
+
+| API | 風險 |
+|---|---|
+| 登入 | 無限次猜密碼；用「帳號不存在」與「密碼錯誤」探測哪些帳號存在 |
+| 註冊 | 無限次建帳號；用「帳號已被註冊」探測帳號 |
+| 修改密碼、刪除帳號 | 要輸入密碼確認身分；偷到 access token 的人可以一直猜密碼 |
+
+### 2.2 修改
+
+**次數**寫在 `config/settings.py` 的 `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]`（F4 的兩個類別是寫在類別裡，沒有搬動）：
+
+| scope | 次數 | 套用在 | 怎麼算 |
+|---|---|---|---|
+| `login_username` | 10／小時 | `POST users/login/` | **只算失敗**，成功歸零 |
+| `login_ip` | 60／小時 | `POST users/login/` | **只算失敗** |
+| `register_ip` | 30／小時 | `POST users/register/` | 每個請求都算 |
+| `password_confirm_user` | 10／小時 | `POST users/me/password/`、`DELETE users/me/` | 每個請求都算，兩個動作共用 |
+
+**`users/throttles.py`** 新增：
+
+- `FailureCountThrottle`（基底）：請求進來時只「檢查」失敗次數有沒有超過，**不記錄**；由 View 在確定失敗時呼叫 `record_failure()` 才記一次；`clear()` 可歸零。
+- `LoginIPThrottle`、`LoginUsernameThrottle`：登入用。帳號名稱 `strip().lower()` 後做 SHA-256 當 cache key（避免特殊字元或過長）。
+- `RegisterIPThrottle`、`PasswordConfirmUserThrottle`：一般的 DRF 計數限速（後者以 `user.pk` 當 key）。
+
+**`users/views.py`**
+
+- 新增 `LoginView(TokenObtainPairView)`：覆寫 `post()`，包住 simplejwt 原本的流程。收到 `AuthenticationFailed`（帳密錯誤、帳號不存在、帳號停用）→ 對每個限速記一次失敗再重新丟出；成功 → 只把「帳號」那個限速歸零（**來源的失敗次數不歸零**）。
+- `RegisterView.throttle_classes = [RegisterIPThrottle]`。
+- `PasswordChangeView.throttle_classes = [PasswordConfirmUserThrottle]`。
+- `MeView.get_throttles()`：只有 `DELETE` 回傳限速，`GET`、`PATCH` 不限制。
+- `users/urls.py`：`login/` 改指向 `LoginView`（路由名稱不變）。
+
+### 2.3 設計決策
+
+- **為什麼登入只算失敗？** 一般 DRF 限速每個請求都算。登入如果這樣算，正常使用者一小時內登入幾次（例如手機、平板、重開 App）就被擋了。只算失敗，正常使用幾乎碰不到上限。
+- **為什麼成功登入要把帳號的失敗次數歸零？** 使用者前幾次打錯、第 9 次打對，之後不該再因為舊的失敗被鎖。**來源的次數不歸零**，否則攻擊者用自己的帳號登入成功就能洗掉來源的失敗紀錄。
+- **為什麼「帳號不存在」也算失敗？** 否則攻擊者可以靠「有沒有被擋」猜出帳號存不存在。
+- **為什麼沒填帳號或密碼（400）不算？** 這是前端的格式錯誤，不是猜密碼；而且沒有帳號名稱就算不出 key。
+- **為什麼註冊每個請求都算？** 註冊沒有「成功才不算」的道理：成功建帳號本身就是被限制的行為（防垃圾帳號）。
+- **為什麼改密碼與刪帳號以「使用者」而不是 IP 計算？** 這兩個 API 需要登入，使用者身分已知；以 IP 算反而讓共用網路的人互相影響。兩個動作共用同一份，因為它們都在「猜密碼」。
+- **為什麼 `GET /me/`、`PATCH /me/` 不限？** 它們不輸入密碼，限制只會影響正常使用。
+
+### 2.4 `NUM_PROXIES`：來源 IP 怎麼判斷（重要）
+
+DRF 的 `get_ident()` 在沒設 `NUM_PROXIES` 時，會把**整串** `X-Forwarded-For` 當成來源。使用者可以自己在請求裡加這個標頭，每次加不同的假值，每個請求就得到不同的「來源」——**來源限制形同虛設**。F4 的來源限制也有這個漏洞。
+
+**修改**：`REST_FRAMEWORK["NUM_PROXIES"] = config("DJANGO_NUM_PROXIES", default=1, cast=int)`。
+
+- 設 `1`（預設）：只信 `X-Forwarded-For` 的**最後一個值**。部署文件寫的是 Cloudflare Tunnel：後端看到的連線都來自 cloudflared（本機），真正的來源由 Cloudflare 接在標頭**最後**，使用者自己加的假值排在前面，取最後一個就騙不了。沒有這個標頭（本機直連）就用連線來源。
+- 設 `0`：完全忽略 `X-Forwarded-For`。**沒有代理、直接對外的部署必須設 0**，否則標頭可被假造。
+- **為什麼不設 0 當預設？** 走 Tunnel 時所有連線的 `REMOTE_ADDR` 都是 `127.0.0.1`，設 0 會讓**全部使用者共用同一個來源**，來源限制（60 次／小時）等於全站共用，幾個人打錯密碼就全站被鎖。
+
+> **我沒有在真的 Cloudflare Tunnel 上驗證過** Cloudflare 附加 `X-Forwarded-For` 的行為，是依 Cloudflare 文件。部署後請用兩個不同網路各試一次登入失敗，確認來源有被分開計算。
+
+### 2.5 測試（`users/tests/test_auth_throttle.py`，32 個）
+
+測試環境的上限調得很高（`settings_test.py`，避免別的測試累積到上限），所以這裡用 `patch.dict(SimpleRateThrottle.THROTTLE_RATES, …)` 套上正式的次數；每個測試 `cache.clear()`。
+
+| 類別 | 驗證什麼 |
+|---|---|
+| 登入（14） | 未達上限仍是一般 401；達上限 429 且有 `Retry-After`；**正確密碼被鎖時也被擋**；帳號不存在也算；其他帳號不受影響；帳號大小寫與空白視為同一個；成功登入不計（連續 30 次成功都 200）；成功歸零後又可以失敗 10 次；沒填欄位不計；停用帳號算失敗；一個來源試很多帳號 60 次後被擋；另一個來源不受影響；`Retry-After` 在 3500～3600 秒；一小時後解鎖 |
+| 註冊（3） | 30 次後 429 且**不會建立帳號**；失敗（帳號已被註冊）也算；另一來源不受影響 |
+| 改密碼／刪帳號（9） | 錯誤舊密碼 10 次後 429；**正確密碼被鎖時也被擋，而且密碼沒被改**；正常改密碼不受影響；刪帳號 10 次錯誤後 429 且**帳號還在**；兩者共用同一份；正常刪帳號仍 204；查看與修改個人資料不限；各使用者獨立；未登入是 401 不是 429 |
+| 來源判斷（3） | 假造前綴繞不過來源限制；`NUM_PROXIES=1` 時不同的真實來源分開計算；`NUM_PROXIES` 為 0／1 與沒有標頭時各取哪個位址 |
+| 設定（3） | 正式環境的次數與測試所假設的一致（載入真正的 `settings.py` 比對）；測試設定也有每個 scope；`NUM_PROXIES` 預設 1、環境變數可改 |
+
+**拿掉修正會失敗的驗證**：
+
+| 還原的內容 | 結果 |
+|---|---|
+| `LoginView`、各 View 的限速與路由（全部不限速） | 17 個失敗＋1 個錯誤 |
+| 只拿掉「登入成功就歸零」 | 1 個失敗 |
+| 只拿掉 `NUM_PROXIES` | 1 個失敗（假 IP 繞過）＋1 個錯誤（預設值） |
+
+### 2.6 開發過程發現的問題
+
+- **被鎖時回 500（我自己寫的 bug）**：`FailureCountThrottle.allow_request` 一開始沒有設 `self.now` 與 `self.history`，而 DRF 在回 429 前會呼叫 `wait()`（算「請多久後再試」），它需要這兩個屬性，結果 `AttributeError` → 500。新測試第一次跑就有 9 個失敗，發現並修正。若沒有測試，使用者被鎖時看到的會是「系統正在休息」而不是「操作太頻繁」。
+- **`ruff format` 順手改了舊程式碼**：我對 5 個檔案跑 `ruff format`，`users/views.py`（+89 行）、`config/settings_test.py` 的差異比預期大——它把舊的 `Response({...})` 排版、引號全改了，這會讓 PR 混進無關差異。我檢查 `git diff` 發現後，手動還原那些無關的行，`users/views.py` 只剩 G3 的 +45／−1。**對舊檔案跑格式化後，一定要看 diff。**
+- **本機 `.env` 的空金鑰**：見 G1.5。
+
+### 2.7 部署前注意
+
+- **確認 `DJANGO_NUM_PROXIES`**：走 Cloudflare Tunnel 用預設 1；**沒有代理、直接對外必須設 0**。
+- **多個 worker 時次數會變寬鬆**：計數存在各 process 自己的記憶體快取（專案沒有設定 `CACHES`）。正式環境要換共用快取（Redis），限速才精準。
+- 部署後試一次：連續輸錯密碼 10 次，第 11 次應回 429。
+
+### 2.8 已知限制
+
+- **帳號鎖定可被濫用**：知道別人帳號名稱的人，可以故意連續輸錯 10 次，把對方鎖一小時（F4 同樣）。這是「針對帳號限制」的固有取捨；來源限制放寬到 60 次，帳號限制維持 10 次當主要防線。
+- `POST users/login/refresh/`（換 token）沒有限制：需要持有 refresh token，不是猜密碼。
+- `public_share/views.py` 的留言限速自己取 `X-Forwarded-For` 的**第一個**值（`get_client_ip`），可被假造，不在這個 PR 範圍；建議之後改用同一套來源判斷。
+- 快取的讀取與寫入不是原子的（先讀、再寫），並行請求可能少算一兩次；對限速來說可接受。
+- 登入被鎖時沒有「還剩幾次」的提示。
+
+---
+
+## 3. 尚未處理（`fix/global` 後續）
+
+| 編號 | 項目 | 備註 |
+|---|---|---|
+| G2 | 預設權限改成 `IsAuthenticated` | 影響前端，等前端處理完 F1～F14、G3 |
+| G4 | JWT blacklist、rotation、縮短 token 效期 | 需要 migration，先確認 |
+| G5～G6 | 統一回應格式 `common/responses.py` | 重複 helper 有 5 處（含 `rewards/views.py`） |
+| G7 | 時區與週界線共用工具 | |
+| G8 | 遊戲 session 加 transaction／鎖 | 需要 migration，先確認 |
+| G9 | OpenAI 加 timeout 與 retry | |
+| G10 | 補常用索引 | 需要 migration，先確認 |
+| G11～G14 | CI、pre-commit、部署文件、外部服務單元測試 | |
+
+---
+
+## 附錄：PR 與 commit 對照
+
+| 編號 | PR | 分支 | commit 標題 |
+|---|---|---|---|
+| G1 | #109 | `fix/config-env-secrets` | `fix(config)!: SECRET_KEY、DEBUG、CORS 改讀環境變數` |
+| G1 補強 | #110 | `fix/users-auth-throttle` | `fix(config): DJANGO_SECRET_KEY 設成空字串時視同沒設定` |
+| G3 | #110 | `fix/users-auth-throttle` | `feat(users): 登入、註冊、改密碼與刪帳號加入請求次數限制` |
+
+## 附錄：名詞小辭典
+
+| 名詞 | 白話說明 |
+|---|---|
+| **throttle（限流）** | 限制同一個對象在一段時間內能做幾次，擋暴力破解與濫用 |
+| **暴力破解** | 用程式一直試（密碼、帳號），靠次數撞對 |
+| **`Retry-After`** | 429 回應的標頭，告訴前端「還要等幾秒才能再試」 |
+| **`X-Forwarded-For`** | 經過代理時，代理加上的「原始來源 IP」標頭。使用者也能自己加，所以只能信「自己的代理加的那一個」 |
+| **`NUM_PROXIES`** | 告訴 DRF 前面有幾層自己的代理，據此從 `X-Forwarded-For` 取出可信的來源 |
+| **Cloudflare Tunnel** | 讓外部網路連到本機後端的通道；後端看到的連線都來自 cloudflared，真正來源在標頭裡 |
+| **cache（快取）** | 暫存資料的地方，限流的「已經用了幾次」記在這裡；預設存在程式記憶體，多個 worker 時不共用 |
+| **worker** | 正式環境同時開多個程式行程一起處理請求，每個就是一個 worker |
+| **`python-decouple`** | 讀 `.env` 與環境變數的套件；`.env` 留著空值的那一行會被讀成「空字串」，不等於沒設 |
+| **mutation（突變驗證）** | 故意把修正拿掉，確認測試會失敗，證明測試真的在保護這個修正 |
