@@ -1,20 +1,19 @@
-from datetime import timedelta
 import logging
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import generics, permissions, status
-from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.utils import get_md5_hash_password
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -83,41 +82,21 @@ def collect_user_media(user):
 
 
 def remove_user_media(values):
-    """刪除收集到的檔案：雲端（Firebase）的檔案，以及存在本機 media 的頭像。
+    """刪除收集到的檔案（都在 Firebase 上）。
 
     盡力而為：任何一個檔案刪不掉都只記錄，不會影響其他檔案，也不會丟例外。
     """
-    from django.conf import settings
-
-    local = {v for v in values if v.startswith(settings.MEDIA_URL)}
-    delete_from_firebase(values - local)
-    for value in local:
-        try:
-            default_storage.delete(value[len(settings.MEDIA_URL) :])
-        except Exception as exc:
-            logger.warning("本機檔案刪除失敗（%s）: %s", value, exc)
+    delete_from_firebase(values)
 
 
 def save_avatar_file(avatar_file):
-    """上傳頭像檔案，優先上傳至 Firebase Storage，若未設定則存至本機 media。"""
-    try:
-        from diary.external import upload_to_firebase
+    """上傳頭像到 Firebase Storage，回傳公開網址；失敗回傳 None。
 
-        url = upload_to_firebase(avatar_file, "avatars", public=True)
-        if url:
-            return url
-    except Exception as exc:
-        logger.warning("Firebase avatar upload failed: %s", exc)
+    不存本機 media：本機檔案只有 DEBUG 模式才看得到，正式環境頭像會壞掉。
+    """
+    from diary.external import upload_to_firebase
 
-    import os
-    import uuid
-    from django.conf import settings
-    from django.core.files.storage import default_storage
-
-    ext = os.path.splitext(avatar_file.name)[1] or ".jpg"
-    filename = f"avatars/{uuid.uuid4().hex}{ext}"
-    path = default_storage.save(filename, avatar_file)
-    return f"{settings.MEDIA_URL}{path}"
+    return upload_to_firebase(avatar_file, "avatars", public=True)
 
 
 def calculate_user_stats(user, today=None):
@@ -313,15 +292,17 @@ class PasswordChangeView(APIView):
         user.save(update_fields=["password"])
 
         refresh = RefreshToken.for_user(user)
-        return Response({
-            "success": True,
-            "data": {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "message": "密碼已更新",
-            },
-            "error": None,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
+                    "message": "密碼已更新",
+                },
+                "error": None,
+            }
+        )
 
 
 class AvatarView(APIView):
@@ -351,11 +332,13 @@ class AvatarView(APIView):
         user.avatar_url = url
         user.save(update_fields=["avatar_url"])
 
-        return Response({
-            "success": True,
-            "data": {"avatar_url": user.avatar_url},
-            "error": None,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": {"avatar_url": user.avatar_url},
+                "error": None,
+            }
+        )
 
     def delete(self, request):
         user = request.user
@@ -371,11 +354,13 @@ class UserStatsView(APIView):
 
     def get(self, request):
         stats = calculate_user_stats(request.user)
-        return Response({
-            "success": True,
-            "data": stats,
-            "error": None,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": stats,
+                "error": None,
+            }
+        )
 
 
 class PasswordResetCheckView(APIView):

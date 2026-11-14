@@ -1,4 +1,5 @@
 from unittest.mock import patch
+
 """GET／PATCH／DELETE /api/users/me/ 及會員中心相關 API 的端到端測試。
 
 執行：
@@ -159,7 +160,11 @@ class PatchMeTests(MeApiTestCase):
     def test_optional_fields_can_be_cleared(self):
         response = self.client.patch(
             ME_URL,
-            {"region": None, "emergency_contact_name": "", "emergency_contact_phone": ""},
+            {
+                "region": None,
+                "emergency_contact_name": "",
+                "emergency_contact_phone": "",
+            },
             format="json",
         )
 
@@ -330,21 +335,48 @@ class AccountDeleteTests(MeApiTestCase):
 
 
 class AvatarTests(MeApiTestCase):
-    @patch("diary.external.upload_to_firebase", return_value="https://fake-firebase-url.com/avatars/avatar.jpg")
+    @patch(
+        "diary.external.upload_to_firebase",
+        return_value="https://fake-firebase-url.com/avatars/avatar.jpg",
+    )
     def test_upload_avatar_success(self, mock_upload):
-        avatar = SimpleUploadedFile("avatar.jpg", b"fake-jpg-binary", content_type="image/jpeg")
+        avatar = SimpleUploadedFile(
+            "avatar.jpg", b"fake-jpg-binary", content_type="image/jpeg"
+        )
         response = self.client.post(AVATAR_URL, {"avatar": avatar}, format="multipart")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["success"])
-        self.assertEqual(response.data["data"]["avatar_url"], "https://fake-firebase-url.com/avatars/avatar.jpg")
+        self.assertEqual(
+            response.data["data"]["avatar_url"],
+            "https://fake-firebase-url.com/avatars/avatar.jpg",
+        )
 
         self.user.refresh_from_db()
-        self.assertEqual(self.user.avatar_url, "https://fake-firebase-url.com/avatars/avatar.jpg")
+        self.assertEqual(
+            self.user.avatar_url, "https://fake-firebase-url.com/avatars/avatar.jpg"
+        )
+
+    @patch("diary.external.upload_to_firebase", return_value=None)
+    def test_upload_failure_does_not_save_locally(self, mock_upload):
+        # Firebase 失敗就回錯誤，不會改存本機 media（本機檔案只有 DEBUG 模式看得到）
+        avatar = SimpleUploadedFile(
+            "avatar.jpg", b"fake-jpg-binary", content_type="image/jpeg"
+        )
+        response = self.client.post(AVATAR_URL, {"avatar": avatar}, format="multipart")
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(response.data["error"]["code"], "UPLOAD_FAILED")
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.avatar_url)
 
     def test_upload_invalid_format_returns_400(self):
-        text_file = SimpleUploadedFile("doc.txt", b"hello world", content_type="text/plain")
-        response = self.client.post(AVATAR_URL, {"avatar": text_file}, format="multipart")
+        text_file = SimpleUploadedFile(
+            "doc.txt", b"hello world", content_type="text/plain"
+        )
+        response = self.client.post(
+            AVATAR_URL, {"avatar": text_file}, format="multipart"
+        )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"]["code"], "VALIDATION_ERROR")
@@ -370,7 +402,9 @@ class UserStatsTests(MeApiTestCase):
     def setUp(self):
         super().setUp()
         category = GameCategory.objects.create(category_name="認知訓練")
-        self.game = Game.objects.create(name="菜市場找路", code="market_route", category=category)
+        self.game = Game.objects.create(
+            name="菜市場找路", code="market_route", category=category
+        )
 
     def test_user_stats_empty(self):
         response = self.client.get(STATS_URL)
