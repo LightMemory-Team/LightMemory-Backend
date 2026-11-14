@@ -22,6 +22,10 @@
         {% endfor %}
         <tr><th scope="row">聲影日記</th><td>{{ status.diary_count }} 篇</td></tr>
         <tr><th scope="row">分享頁留言</th><td>{{ status.comment_count }} 則</td></tr>
+        <tr>
+          <th scope="row">儀表板小提醒</th>
+          <td>{% if status.alert_games %}{{ status.alert_games|length }} 則：{{ status.alert_games|join:"、" }}{% else %}沒有{% endif %}</td>
+        </tr>
         <tr><th scope="row">點數</th><td>{{ status.total_points }} 點（成就 {{ status.achievement_count }} 個）</td></tr>
         <tr>
           <th scope="row">分享頁</th>
@@ -47,6 +51,13 @@
             <form method="post">
               {% csrf_token %}
               <input type="hidden" name="task" value="{{ task.key }}">
+              {% if task.choices %}
+                <select name="choice" aria-label="選擇遊戲" style="margin-bottom: 4px;">
+                  {% for value, label in task.choices %}
+                    <option value="{{ value }}">{{ label }}</option>
+                  {% endfor %}
+                </select><br>
+              {% endif %}
               <input type="submit" value="{{ task.label }}"
                 {% if task.danger %}class="deletelink" style="cursor: pointer;"
                 onclick="return confirm('確定要清除 {{ demo_user.username }} 的所有資料嗎？');"{% else %}class="default"{% endif %}>

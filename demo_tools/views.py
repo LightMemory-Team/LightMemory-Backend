@@ -23,8 +23,10 @@ def demo_page(request):
             messages.error(request, "找不到這個任務")
         else:
             try:
+                # 有下拉選單的任務（例如分數極端值），把選到的值一起傳進去
+                args = [request.POST.get("choice")] if task.get("choices") else []
                 with transaction.atomic():
-                    message = task["run"](user)
+                    message = task["run"](user, *args)
             except services.DemoTaskError as error:
                 messages.warning(request, str(error))
             else:

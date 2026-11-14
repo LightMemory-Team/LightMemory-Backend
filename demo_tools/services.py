@@ -9,11 +9,19 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
 
-from dashboard.management.commands.seed_demo import seed_demo_data
+from dashboard.alerts import get_score_alerts
+from dashboard.management.commands.seed_demo import (
+    QUESTION_COUNTS,
+    RESULT_BUILDERS,
+    SEED_PREFIX,
+    ensure_games,
+    seed_demo_data,
+)
 from dashboard.models import WeeklyReport
 from dashboard.services import GAME_SOURCES, GAME_TITLES
 from diary.models import Diary
 from games.models import GameRecord, GameSession
+from games.zscore import z_score_to_display_score
 from home.models import DailyTask
 from rewards import services as rewards_services
 from rewards.models import PointTransaction, UserAchievement
@@ -162,7 +170,55 @@ def seed_rewards(user):
     return f"目前共 {points} 點、已解鎖 {achievements} 個成就"
 
 
-# ── 按鈕 4：全部清除 ─────────────────────────────────────
+# ── 按鈕 4：分數極端值（儀表板小提醒） ─────────────────────
+
+# 比小提醒的門檻（dashboard/alerts.py 的 ALERT_Z_THRESHOLD = -1.5）再低一點，
+# 一定會觸發；換算成顯示分數是 5 分
+ALERT_Z = -1.8
+
+
+def alert_session_id(user, game_code):
+    # seed- 開頭：不會被拿去當其他人的比較基準，重算分數指令也不會動它
+    return f"{SEED_PREFIX}-alert-{user.id}-{game_code}"
+
+
+def seed_score_alert(user, game_code):
+    """在選的遊戲補一場「昨天、比平常低很多」的場次，儀表板就會出現小提醒。
+
+    小提醒只看近 14 天，所以放在昨天；同一款遊戲重按只會留一場。
+    """
+    if game_code not in GAME_SOURCES:
+        raise DemoTaskError("請先選擇要產生極端值的遊戲")
+
+    game = ensure_games()[game_code]
+    client_session_id = alert_session_id(user, game_code)
+    GameSession.objects.filter(user=user, client_session_id=client_session_id).delete()
+
+    finished_at = timezone.now() - timedelta(days=1)
+    session = GameSession.objects.create(
+        game=game,
+        user=user,
+        client_session_id=client_session_id,
+        status="finished",
+        question_number=QUESTION_COUNTS[game_code],
+        # 結算結果的格式照各遊戲真正存的（跟 seed_demo 共用）
+        result=RESULT_BUILDERS[game_code](ALERT_Z, finished_at),
+        state={"user_id": user.id, "is_pretest": False},
+        finished_at=finished_at,
+    )
+    # created_at 是 auto_now_add，只能建立後再改（每場玩 4 分鐘）
+    GameSession.objects.filter(pk=session.pk).update(
+        created_at=finished_at - timedelta(minutes=4)
+    )
+
+    score = z_score_to_display_score(ALERT_Z)
+    return (
+        f"已在「{GAME_TITLES[game_code]}」補一場昨天的低分（{score} 分），"
+        "儀表板會出現小提醒"
+    )
+
+
+# ── 按鈕 5：全部清除 ─────────────────────────────────────
 
 
 def clear_all(user):
@@ -201,6 +257,8 @@ def get_status(user):
         "comment_count": Comment.objects.filter(post__user=user).count(),
         "total_points": rewards_services.total_points(user),
         "achievement_count": UserAchievement.objects.filter(user=user).count(),
+        # 儀表板現在會顯示的小提醒（遊戲名稱）
+        "alert_games": [alert["game_title"] for alert in get_score_alerts(user)],
         "share_url": share_url(post) if post else None,
     }
 
@@ -221,6 +279,14 @@ TASKS = {
         "label": "產生點數與成就",
         "help": "用最近的遊戲與日記發點數、解鎖成就。",
         "run": seed_rewards,
+    },
+    "seed_score_alert": {
+        "label": "產生分數極端值（小提醒）",
+        "help": "選一款遊戲，補一場昨天比平常低很多的紀錄，儀表板會出現「建議多注意」"
+        "的小提醒。想要多則就換一款再按。",
+        "run": seed_score_alert,
+        # 頁面上多一個下拉選單，選到的值會傳給 run 的第二個參數
+        "choices": [(code, GAME_TITLES[code]) for code in GAME_SOURCES],
     },
     "clear_all": {
         "label": "清除 admin_demo 所有資料",

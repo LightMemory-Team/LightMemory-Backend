@@ -317,7 +317,7 @@ python manage.py runserver
 python manage.py setup_admin_demo
 ```
 
-建立（或重設密碼）`admin_demo`／`admin`（superuser，暱稱 demo）。用它登入後台，首頁的「維護任務」（`/admin/demo/`）可以一鍵產生展示資料：遊戲＋日記紀錄（儀表板、週報）、分享頁留言、點數與成就，或全部清除。每個按鈕只動 admin_demo 的資料，可以重複按。
+建立（或重設密碼）`admin_demo`／`admin`（superuser，暱稱 demo）。用它登入後台，首頁的「維護任務」（`/admin/demo/`）可以一鍵產生展示資料：遊戲＋日記紀錄（儀表板、週報）、分享頁留言、點數與成就、分數極端值（選一款遊戲，儀表板會出現「建議多注意」的小提醒），或全部清除。每個按鈕只動 admin_demo 的資料，可以重複按。
 
 > ⚠️ 密碼很簡單又是 superuser，demo 結束後請到後台改密碼或停用帳號。
 
