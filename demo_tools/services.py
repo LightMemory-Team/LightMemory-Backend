@@ -233,7 +233,35 @@ def seed_rewards(user):
     return f"目前共 {points} 點、已解鎖 {achievements} 個成就"
 
 
-# ── 按鈕 5：分數極端值（儀表板小提醒） ─────────────────────
+# ── 按鈕 5：點數更新至 500 點 ─────────────────────────────
+
+DEMO_POINTS = 500
+# 調整用的那一筆點數紀錄：(user, reason, source_id) 唯一，重按時靠它找到舊的
+POINTS_ADJUST_SOURCE_ID = "demo-points-adjust"
+# 借用「解鎖成就」：不算進每日 100 點上限（demo 時玩遊戲照樣加點），
+# 也不用為了新增類別多一個 migration
+POINTS_ADJUST_REASON = "achievement_unlock"
+
+
+def set_points(user, target=DEMO_POINTS):
+    """補一筆差額，讓總點數剛好是 target（目前比較多就補負數）。"""
+    PointTransaction.objects.filter(
+        user=user, reason=POINTS_ADJUST_REASON, source_id=POINTS_ADJUST_SOURCE_ID
+    ).delete()
+    difference = target - rewards_services.total_points(user)
+    if difference:
+        PointTransaction.objects.create(
+            user=user,
+            reason=POINTS_ADJUST_REASON,
+            source_id=POINTS_ADJUST_SOURCE_ID,
+            amount=difference,
+            label="Demo 點數調整",
+        )
+    total = rewards_services.total_points(user)
+    return f"總點數已更新為 {total} 點（補了 {difference:+d} 點）"
+
+
+# ── 按鈕 6：分數極端值（儀表板小提醒） ─────────────────────
 
 # 比小提醒的門檻（dashboard/alerts.py 的 ALERT_Z_THRESHOLD = -1.5）再低一點，
 # 一定會觸發；換算成顯示分數是 5 分
@@ -281,7 +309,7 @@ def seed_score_alert(user, game_code):
     )
 
 
-# ── 按鈕 6：全部清除 ─────────────────────────────────────
+# ── 按鈕 7：全部清除 ─────────────────────────────────────
 
 
 def clear_all(user):
@@ -350,6 +378,12 @@ TASKS = {
         "label": "產生點數與成就",
         "help": "用最近的遊戲與日記發點數、解鎖成就。",
         "run": seed_rewards,
+    },
+    "set_points": {
+        "label": "點數更新至 500 點",
+        "help": "補一筆差額讓總點數剛好 500 點，重按也一樣。"
+        "注意：「產生點數與成就」會重算點數，要按的話請先按它再按這個。",
+        "run": set_points,
     },
     "seed_score_alert": {
         "label": "產生分數極端值（小提醒）",
