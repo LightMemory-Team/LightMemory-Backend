@@ -224,3 +224,68 @@ class ScoreAlertTaskTests(TestCase):
 
         self.assertContains(response, "請先選擇")
         self.assertFalse(GameSession.objects.filter(user=self.demo).exists())
+
+
+class FeedPostTaskTests(TestCase):
+    """產生動態牆日記：/api/social/posts/ 要真的看得到這篇。"""
+
+    def setUp(self):
+        call_command("setup_admin_demo", stdout=StringIO())
+        self.demo = User.objects.get(username=DEMO_USERNAME)
+        self.client.force_login(self.demo)
+
+    def press(self, theme):
+        return self.client.post(
+            URL, {"task": "seed_feed_post", "choice": theme}, follow=True
+        )
+
+    def feed(self):
+        api = APIClient()
+        api.force_authenticate(user=self.demo)
+        return api.get("/api/social/posts/").data["data"]
+
+    def feed_posts(self):
+        data = self.feed()
+        return data["results"] if isinstance(data, dict) else data
+
+    def test_works_without_other_data_and_shows_in_feed(self):
+        response = self.press("0")
+
+        self.assertContains(response, "已發佈日記")
+        posts = self.feed_posts()
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0]["title"], "🍜 跟孫子吃牛肉麵")
+        self.assertTrue(posts[0]["photo_url"])
+        diary = Diary.objects.get(user=self.demo)
+        self.assertEqual(diary.status, "done")
+        self.assertEqual(diary.replies.count(), 2)
+        self.assertTrue(hasattr(diary, "analysis"))
+        self.assertContains(self.client.get(URL), "1 篇")
+
+    def test_same_theme_twice_keeps_one_post(self):
+        self.press("1")
+        self.press("1")
+
+        self.assertEqual(len(self.feed_posts()), 1)
+        self.assertEqual(Diary.objects.filter(user=self.demo).count(), 1)
+
+    def test_different_themes_add_more_posts(self):
+        self.press("0")
+        self.press("2")
+
+        self.assertEqual(len(self.feed_posts()), 2)
+
+    def test_share_comments_go_to_new_feed_post(self):
+        self.client.post(URL, {"task": "seed_history"})
+        self.press("1")
+
+        self.client.post(URL, {"task": "seed_share_comments"})
+
+        post = Post.objects.get(user=self.demo, diary__title="🌳 公園散步")
+        self.assertEqual(Comment.objects.filter(post=post).count(), 3)
+
+    def test_unknown_theme_shows_hint(self):
+        response = self.press("9")
+
+        self.assertContains(response, "請先選擇日記主題")
+        self.assertFalse(Diary.objects.filter(user=self.demo).exists())
