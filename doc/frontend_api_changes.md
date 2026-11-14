@@ -736,6 +736,59 @@ F14 曾把 `memory_recall` 命名為「記憶配對」，與前端遊戲內的�
 
 ---
 
+### 語音加油：上傳、列表、轉文字（feature/share-voice-reply-1114）
+
+親友在分享頁錄一段最長 10 秒的語音加油，長者在動態牆聽、需要時按「轉文字」。
+
+**動態牆**：貼文的 `voice_reply_count` 改為實際數量（原本固定 0）。新增通知類型 `voice_reply`（「{暱稱} 送給你一段語音加油」，`target_url` 是 `/posts/<id>/`）。
+
+**(1) 訪客上傳（分享頁網頁呼叫，免登入）** `POST /api/share/<share_token>/voice-replies/`
+
+multipart：`nickname`（1–12 字）、`audio_file`（webm／mp4／ogg／m4a，≤ 2MB）、`duration_sec`（1–11 整數）。同 IP 每分鐘 5 則。
+
+```json
+{"success": true,
+ "data": {"voice_reply_id": 12, "nickname": "小玲", "duration_sec": 8,
+          "created_at": "2026-11-14T10:20:00+08:00"},
+ "error": null}
+```
+
+**(2) 長者取得列表（需登入、限作者）** `GET /api/social/posts/<post_id>/voice-replies/`
+
+```json
+{"success": true,
+ "data": {"items": [
+   {"voice_reply_id": 12, "nickname": "小玲", "audio_url": "https://…簽名網址",
+    "duration_sec": 8, "transcribed_text": "", "created_at": "2026-11-14T10:20:00+08:00"}
+ ]},
+ "error": null}
+```
+
+新的在前；`transcribed_text` 空字串代表還沒轉；`audio_url` 是有時效的簽名網址（6 小時）。
+
+**(3) 長者轉文字（需登入、限作者）** `POST /api/social/voice-replies/<voice_reply_id>/transcribe/`
+
+```json
+{"success": true, "data": {"voice_reply_id": 12, "transcribed_text": "阿嬤妳拍得好漂亮，加油！"}, "error": null}
+```
+
+第一次才跑 Whisper（同步，約數秒），結果存起來，之後直接回傳。聽不出內容時回「（聽不太清楚，請直接播放聽聽看）」。
+
+| API | 錯誤碼 | HTTP |
+|---|---|---|
+| 上傳 | `TOO_MANY_REQUESTS` | 429 |
+| 上傳 | `SHARE_NOT_FOUND` | 404 |
+| 上傳 | `INVALID_NICKNAME`、`INVALID_AUDIO`、`AUDIO_TOO_LONG` | 400 |
+| 上傳 | `UPLOAD_FAILED` | 500 |
+| 列表／轉文字 | `NOT_AUTHENTICATED` | 401 |
+| 列表 | `POST_NOT_FOUND` | 404 |
+| 轉文字 | `VOICE_REPLY_NOT_FOUND` | 404 |
+| 轉文字 | `TRANSCRIBE_FAILED` | 502 |
+
+**檔案**：`social/models.py`（`VoiceReply`）、`public_share/views.py`、`social/views.py`、`diary/external.py`（`download_from_firebase`）
+
+---
+
 ## 3. 還沒做的事（前端可以先知道方向）
 
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。

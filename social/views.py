@@ -1,13 +1,19 @@
+import os
+
+from django.core.files import File
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from diary import external
 from diary.external import delete_from_firebase
+from diary.media import media_url
 
-from .models import Comment, Notification
+from .models import Comment, Notification, VoiceReply
 from .serializers import CommentSerializer, NotificationSerializer
 from .utils import (
     error_response,
@@ -126,3 +132,80 @@ class CommentDeleteView(APIView):
             return error_response("COMMENT_NOT_FOUND", "找不到這則留言", 404)
         comment.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# Whisper 聽不出內容時存這句，避免每次按「轉文字」都重跑
+UNCLEAR_TRANSCRIPT = "（聽不太清楚，請直接播放聽聽看）"
+
+
+def serialize_voice_reply(voice_reply):
+    return {
+        "voice_reply_id": voice_reply.id,
+        "nickname": voice_reply.nickname,
+        "audio_url": media_url(voice_reply.audio_path),
+        "duration_sec": voice_reply.duration_sec,
+        # 空字串代表還沒轉文字
+        "transcribed_text": voice_reply.transcribed_text,
+        "created_at": timezone.localtime(voice_reply.created_at).isoformat(),
+    }
+
+
+class PostVoiceRepliesView(APIView):
+    """語音加油列表：GET /api/social/posts/<post_id>/voice-replies/（只限作者）"""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, post_id):
+        post = get_visible_post(request.user, post_id)
+        if not post:
+            return failure_response("POST_NOT_FOUND", "找不到這篇日記", 404)
+        items = [serialize_voice_reply(v) for v in post.voice_replies.all()]
+        return success_response({"items": items})
+
+
+class VoiceReplyTranscribeView(APIView):
+    """語音加油轉文字：POST /api/social/voice-replies/<id>/transcribe/（只限作者）
+
+    長者按「轉文字」才跑 Whisper；轉過的直接回傳存好的結果，不再重跑。
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, voice_reply_id):
+        voice_reply = VoiceReply.objects.filter(
+            pk=voice_reply_id, post__user=request.user, post__is_enabled=True
+        ).first()
+        if not voice_reply:
+            return failure_response("VOICE_REPLY_NOT_FOUND", "找不到這段語音", 404)
+
+        if not voice_reply.transcribed_text:
+            text = self._transcribe(voice_reply.audio_path)
+            if text is None:
+                return failure_response(
+                    "TRANSCRIBE_FAILED",
+                    "這段語音暫時轉不出文字，可以先直接播放聽聽看",
+                    502,
+                )
+            voice_reply.transcribed_text = text or UNCLEAR_TRANSCRIPT
+            voice_reply.save(update_fields=["transcribed_text"])
+
+        return success_response(
+            {
+                "voice_reply_id": voice_reply.id,
+                "transcribed_text": voice_reply.transcribed_text,
+            }
+        )
+
+    @staticmethod
+    def _transcribe(audio_path):
+        """從 Firebase 下載音檔交給 Whisper，回傳文字；下載或轉換失敗回傳 None。"""
+        tmp_path = external.download_from_firebase(audio_path)
+        if tmp_path is None:
+            return None
+        try:
+            with open(tmp_path, "rb") as f:
+                return external.transcribe_audio(
+                    File(f, name=os.path.basename(tmp_path))
+                )
+        finally:
+            os.remove(tmp_path)
