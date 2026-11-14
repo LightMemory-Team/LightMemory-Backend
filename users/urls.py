@@ -1,5 +1,4 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import views
 
@@ -9,7 +8,7 @@ urlpatterns = [
         "login/", views.LoginView.as_view(), name="token_obtain_pair"
     ),  # 檢查帳密（有失敗次數限制）
     path(
-        "login/refresh/", TokenRefreshView.as_view(), name="token_refresh"
+        "login/refresh/", views.RefreshView.as_view(), name="token_refresh"
     ),  # 回傳token key
     # 註冊
     path("register/", views.RegisterView.as_view(), name="register"),

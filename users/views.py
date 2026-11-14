@@ -12,7 +12,11 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
+from rest_framework_simplejwt.utils import get_md5_hash_password
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from config.exceptions import ApiError
 from diary.external import delete_from_firebase
@@ -170,6 +174,37 @@ def calculate_user_stats(user, today=None):
         "diary_count": diary_count,
         "streak_days": streak_days,
     }
+
+
+class PasswordAwareTokenRefreshSerializer(TokenRefreshSerializer):
+    """換 token 時，也檢查「這張 refresh token 是不是在目前的密碼之下簽發的」。
+
+    simplejwt 開了 CHECK_REVOKE_TOKEN 之後，只有「拿 access token 打 API」會檢查密碼有沒有
+    改過，換 token 的端點不檢查。結果是密碼改了之後，舊的 refresh token 還是換得到
+    新的 access token，只是那個 access token 一用就被拒絕（401），前端會一直重試。
+    這裡讓換 token 這一步就失敗（401），前端才知道要回登入頁。
+
+    另外，帳號已經被刪除時，simplejwt 原本會直接丟 DoesNotExist（變成 500），
+    這裡改成一樣回 401。
+    """
+
+    def validate(self, attrs):
+        refresh = self.token_class(attrs["refresh"])  # 不合法或過期 → TokenError
+        user_id = refresh.payload.get(jwt_settings.USER_ID_CLAIM)
+        user = User.objects.filter(**{jwt_settings.USER_ID_FIELD: user_id}).first()
+        if user is None:
+            raise TokenError("找不到這個帳號")
+        if jwt_settings.CHECK_REVOKE_TOKEN and refresh.get(
+            jwt_settings.REVOKE_TOKEN_CLAIM
+        ) != get_md5_hash_password(user.password):
+            raise TokenError("密碼已經變更，請重新登入")
+        return super().validate(attrs)
+
+
+class RefreshView(TokenRefreshView):
+    """換 token：POST /api/users/login/refresh/"""
+
+    serializer_class = PasswordAwareTokenRefreshSerializer
 
 
 class LoginView(TokenObtainPairView):
