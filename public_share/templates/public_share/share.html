@@ -62,74 +62,66 @@
         {% endif %}
       </div>
 
-      <!-- 語音加油：錄一段最多 10 秒的話給作者（照比賽版 futureQ）。
-           音檔只上傳，作者在 App 按「轉文字」才轉成文字 -->
-      <section id="voice-reply" class="voice-reply" aria-labelledby="voice-reply-title">
-        <div class="voice-reply-header">
-          <span class="material-symbols-outlined icon-fill voice-reply-heart" aria-hidden="true">favorite</span>
-          <h2 id="voice-reply-title" class="voice-reply-title">留下語音加油</h2>
-        </div>
-        <p class="voice-reply-sub">點一下麥克風開始錄音，再點一下結束，錄下您想對{{ author_name }}說的話（最多 10 秒）</p>
-
-        {% if suggested_replies %}
-        <!-- 不知道說什麼時的提詞卡：點一句放大顯示在麥克風上方，照著唸即可，不會直接送出文字 -->
-        <div class="reply-suggestions">
-          <p class="suggest-title">💬 不知道說什麼嗎？可以參考：</p>
-          {% for text in suggested_replies %}
-          <button type="button" class="suggest-chip" data-text="{{ text }}">{{ text }}</button>
-          {% endfor %}
-        </div>
-        {% endif %}
-        <p id="cue-card" class="cue-card" hidden></p>
-
-        <!-- 錄音中／待機 -->
-        <div id="vr-record-area" class="vr-record-area">
-          <button type="button" id="vr-mic-btn" class="vr-mic-btn" aria-label="開始錄音">
-            <span id="vr-mic-icon" class="material-symbols-outlined icon-fill" aria-hidden="true">mic</span>
-          </button>
-          <p id="vr-hint" class="vr-hint" aria-live="polite">點一下開始錄音</p>
-          <p id="vr-timer" class="vr-timer" hidden>00:00 / 00:10</p>
-        </div>
-
-        <!-- 錄好了：試聽、送出、重錄 -->
-        <div id="vr-preview" class="vr-preview" hidden>
-          <audio id="vr-audio" class="vr-audio" controls></audio>
-          <button type="button" id="vr-send-btn" class="vr-send-btn">
-            <span class="material-symbols-outlined" aria-hidden="true">send</span>送出語音加油
-          </button>
-          <button type="button" id="vr-redo-btn" class="vr-redo-btn">
-            <span class="material-symbols-outlined" aria-hidden="true">replay</span>重新錄製
-          </button>
-        </div>
-
-        <!-- 送出成功 -->
-        <div id="vr-done" class="vr-done" hidden>
-          <span class="material-symbols-outlined icon-fill vr-done-icon" aria-hidden="true">check_circle</span>
-          <p class="vr-done-text">已送出，謝謝您的加油！</p>
-          <button type="button" id="vr-again-btn" class="vr-redo-btn">
-            <span class="material-symbols-outlined" aria-hidden="true">mic</span>再錄一段
-          </button>
-        </div>
-
-        <p id="vr-error" class="error-text" role="alert" hidden></p>
-      </section>
-
+      <!-- 留言區：打字留言，或按麥克風錄一段語音加油（最多 10 秒，照比賽版 futureQ）。
+           語音只上傳，作者在 App 按「轉文字」才轉成文字 -->
       <div class="comment-area">
         <ul id="sent-list" class="sent-list" hidden></ul>
 
         <p class="as-line">
-          以「<span id="nickname-display"></span>」留言、錄音
+          以「<span id="nickname-display"></span>」留言
           <button type="button" id="change-nickname" class="btn-link">修改</button>
         </p>
 
-        <p class="comment-hint">也可以打字留言</p>
+        {% if suggested_replies %}
+        <!-- 不知道說什麼時的參考句：點一句會在錄音時顯示，照著唸即可，不會直接送出文字 -->
+        <div class="reply-suggestions">
+          <p class="suggest-title">不知道說什麼嗎？點一句，錄音時照著唸：</p>
+          <div class="suggest-chips">
+            {% for text in suggested_replies %}
+            <button type="button" class="suggest-chip" data-text="{{ text }}">{{ text }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
         <form id="comment-form" class="comment-row" novalidate>
           <label for="comment-input" class="sr-only">留言</label>
           <textarea id="comment-input" class="pill-input comment-input" rows="1"
                     maxlength="200" placeholder="留言…"></textarea>
+          <button type="button" id="vr-mic-btn" class="btn-mic" aria-label="錄一段語音加油">
+            <span id="vr-mic-icon" class="material-symbols-outlined icon-fill" aria-hidden="true">mic</span>
+          </button>
           <button type="submit" id="comment-submit" class="btn-primary btn-send">發送</button>
         </form>
         <p id="comment-error" class="error-text" role="alert" hidden></p>
+
+        <!-- 語音加油：按麥克風後在輸入框下方展開 -->
+        <div id="vr-panel" class="vr-panel" hidden>
+          <p id="cue-card" class="cue-card" hidden></p>
+
+          <!-- 錄音中 -->
+          <div id="vr-recording" class="vr-recording-row" aria-live="polite">
+            <span class="vr-rec-dot" aria-hidden="true"></span>
+            <div class="vr-recording-text">
+              <p id="vr-timer" class="vr-timer">00:00 / 00:10</p>
+              <p class="vr-hint">錄音中…說完按上方紅色按鈕結束（最多 10 秒）</p>
+            </div>
+          </div>
+
+          <!-- 錄好了：試聽、重錄、送出 -->
+          <div id="vr-preview" class="vr-preview" hidden>
+            <audio id="vr-audio" class="vr-audio" controls></audio>
+            <div class="vr-actions">
+              <button type="button" id="vr-redo-btn" class="vr-redo-btn">
+                <span class="material-symbols-outlined" aria-hidden="true">replay</span>重錄
+              </button>
+              <button type="button" id="vr-send-btn" class="btn-primary vr-send-btn">
+                <span class="material-symbols-outlined" aria-hidden="true">send</span>送出語音
+              </button>
+            </div>
+          </div>
+        </div>
+        <p id="vr-error" class="error-text" role="alert" hidden></p>
       </div>
     </article>
   </main>

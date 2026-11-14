@@ -1,4 +1,4 @@
-// 親友分享頁：填暱稱 → 看日記 → 錄語音加油／打字留言
+// 親友分享頁：填暱稱 → 看日記 → 打字留言或錄語音加油
 // 留言 API：POST /api/share/<share_token>/comments/  body: { nickname, content }
 // 語音加油 API：POST /api/share/<share_token>/voice-replies/
 //   multipart：nickname、audio_file、duration_sec（最多 10 秒）
@@ -181,35 +181,40 @@
   });
 
   // ============================================================
-  // 語音加油（照比賽版 futureQ 的 share.js）
-  //   待機 → 錄音中（最多 10 秒自動停止）→ 試聽 → 送出 → 完成
+  // 語音加油（照比賽版 futureQ 的 share.js），收在留言區：
+  //   按輸入框旁的麥克風 → 錄音中（最多 10 秒自動停止）→ 試聽 → 送出
+  //   → 跟文字留言一樣列進「已送出」
   // ============================================================
 
   const MAX_VOICE_SEC = 10;
   const micBtn = document.getElementById('vr-mic-btn');
   const micIcon = document.getElementById('vr-mic-icon');
-  const vrHint = document.getElementById('vr-hint');
+  const voicePanel = document.getElementById('vr-panel');
+  const recordingRow = document.getElementById('vr-recording');
   const vrTimer = document.getElementById('vr-timer');
-  const recordArea = document.getElementById('vr-record-area');
   const previewArea = document.getElementById('vr-preview');
   const audioPlayer = document.getElementById('vr-audio');
   const sendBtn = document.getElementById('vr-send-btn');
   const redoBtn = document.getElementById('vr-redo-btn');
-  const doneArea = document.getElementById('vr-done');
-  const againBtn = document.getElementById('vr-again-btn');
   const vrError = document.getElementById('vr-error');
   const cueCard = document.getElementById('cue-card');
 
-  // 建議句：點一句放大顯示在麥克風上方，照著唸（不會直接送出文字）
+  // 參考句：點一句（再點一次取消），錄音時顯示在上方照著唸，不會直接送出文字
+  let cueText = '';
   document.querySelectorAll('.suggest-chip').forEach(function (chip) {
     chip.addEventListener('click', function () {
-      cueCard.textContent = '「' + chip.dataset.text + '」';
-      cueCard.hidden = false;
+      cueText = cueText === chip.dataset.text ? '' : chip.dataset.text;
       document.querySelectorAll('.suggest-chip').forEach(function (other) {
-        other.classList.toggle('is-selected', other === chip);
+        other.classList.toggle('is-selected', !!cueText && other === chip);
       });
+      updateCue();
     });
   });
+
+  function updateCue() {
+    cueCard.textContent = cueText ? '照著唸：「' + cueText + '」' : '';
+    cueCard.hidden = !cueText;
+  }
 
   // 瀏覽器支援的錄音格式：Chrome／Firefox 是 webm 或 ogg，iOS Safari 是 mp4
   const MIME_CANDIDATES = [
@@ -250,19 +255,16 @@
     return '00:' + String(sec).padStart(2, '0');
   }
 
-  function setRecordingLook(recording) {
-    micBtn.classList.toggle('vr-recording', recording);
-    micIcon.textContent = recording ? 'stop' : 'mic';
-    micBtn.setAttribute('aria-label', recording ? '結束錄音' : '開始錄音');
-    vrHint.textContent = recording ? '錄音中…再點一下結束' : '點一下開始錄音';
-    vrTimer.hidden = !recording;
-  }
-
+  // idle：收起；recording：錄音中；preview：試聽
   function showVoiceState(state) {
-    recordArea.hidden = state !== 'idle' && state !== 'recording';
+    voicePanel.hidden = state === 'idle';
+    recordingRow.hidden = state !== 'recording';
     previewArea.hidden = state !== 'preview';
-    doneArea.hidden = state !== 'done';
-    setRecordingLook(state === 'recording');
+    const recording = state === 'recording';
+    micBtn.classList.toggle('is-recording', recording);
+    micIcon.textContent = recording ? 'stop' : 'mic';
+    micBtn.setAttribute('aria-label', recording ? '結束錄音' : '錄一段語音加油');
+    updateCue();
   }
 
   function releaseMic() {
@@ -272,22 +274,21 @@
     }
   }
 
-  function resetRecording() {
+  function clearRecording() {
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = null;
     recordedBlob = null;
     recordedSec = 0;
     audioPlayer.removeAttribute('src');
-    hideError(vrError);
-    showVoiceState('idle');
   }
 
   async function startRecording() {
     hideError(vrError);
+    clearRecording();
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      showError(vrError, '沒有取得麥克風權限，請允許使用麥克風後再試一次，或改用下方文字留言');
+      showError(vrError, '沒有取得麥克風權限，請允許使用麥克風後再試一次，或改用打字留言');
       return;
     }
 
@@ -296,7 +297,7 @@
       recorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
     } catch (e) {
       releaseMic();
-      showError(vrError, '這個瀏覽器無法錄音，可以改用下方文字留言');
+      showError(vrError, '這個瀏覽器無法錄音，可以改用打字留言');
       return;
     }
 
@@ -323,6 +324,10 @@
     if (recorder && recorder.state !== 'inactive') recorder.stop();
   }
 
+  function isRecording() {
+    return !!(recorder && recorder.state === 'recording');
+  }
+
   function onRecordingStopped() {
     releaseMic();
     const elapsed = (Date.now() - startedAt) / 1000;
@@ -336,8 +341,9 @@
     recorder = null;
 
     if (elapsed < 0.8 || recordedBlob.size === 0) {
+      clearRecording();
       showVoiceState('idle');
-      showError(vrError, '錄音太短了，請說一句話再點一下結束');
+      showError(vrError, '錄音太短了，請說一句話再按結束');
       return;
     }
 
@@ -349,7 +355,7 @@
   async function uploadVoice() {
     if (isPreview) {
       await new Promise(function (resolve) { setTimeout(resolve, 600); });
-      return { ok: true };
+      return { ok: true, data: { nickname: nickname, duration_sec: recordedSec } };
     }
 
     const baseType = recordedBlob.type || 'audio/webm';
@@ -388,44 +394,43 @@
   }
 
   if (!canRecord) {
-    // 不支援錄音的瀏覽器：說明後只保留文字留言
-    recordArea.hidden = true;
-    showError(vrError, '這個瀏覽器無法錄音，可以改用下方文字留言');
+    // 不支援錄音的瀏覽器：不顯示麥克風，只保留打字留言
+    micBtn.hidden = true;
+    commentInput.placeholder = '留言…';
   } else {
     micBtn.addEventListener('click', function () {
-      if (recorder && recorder.state === 'recording') {
+      if (isRecording()) {
         stopRecording();
       } else {
         startRecording();
       }
     });
 
-    redoBtn.addEventListener('click', resetRecording);
-    againBtn.addEventListener('click', resetRecording);
+    redoBtn.addEventListener('click', function () {
+      clearRecording();
+      startRecording();
+    });
 
     sendBtn.addEventListener('click', async function () {
       if (!recordedBlob) return;
       hideError(vrError);
       sendBtn.disabled = true;
       redoBtn.disabled = true;
-      sendBtn.lastChild.textContent = '送出中…';
 
       const result = await uploadVoice();
 
       sendBtn.disabled = false;
       redoBtn.disabled = false;
-      sendBtn.lastChild.textContent = '送出語音加油';
 
       if (result.ok) {
-        if (audioUrl) URL.revokeObjectURL(audioUrl);
-        audioUrl = null;
-        recordedBlob = null;
-        audioPlayer.removeAttribute('src');
-        cueCard.hidden = true;
+        const sec = (result.data && result.data.duration_sec) || recordedSec;
+        addSentItem(nickname, '🎤 語音加油（' + sec + ' 秒）');
+        clearRecording();
+        cueText = '';
         document.querySelectorAll('.suggest-chip').forEach(function (chip) {
           chip.classList.remove('is-selected');
         });
-        showVoiceState('done');
+        showVoiceState('idle');
         return;
       }
 

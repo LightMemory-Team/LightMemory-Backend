@@ -1,4 +1,4 @@
-"""分享頁的「語音加油」畫面：建議句、錄音區（C4）。
+"""分享頁的「語音加油」畫面：收在留言區，輸入框旁的麥克風＋參考句（C4）。
 
 實際的錄音、上傳在瀏覽器裡跑（share.js），這裡只檢查頁面有沒有把需要的
 元素和資料放出來；上傳 API 本身見 test_voice_reply_upload.py。
@@ -51,19 +51,26 @@ class SharePageVoiceReplyTests(TestCase):
             ["花好漂亮！", "妳好會照顧植物", "下次帶我去看"],
         )
 
-    def test_page_has_voice_reply_section_and_suggestion_chips(self):
+    def test_voice_reply_lives_in_the_comment_area(self):
         html = self.client.get(self.url).content.decode()
 
-        self.assertIn('id="voice-reply"', html)
-        self.assertIn("留下語音加油", html)
-        self.assertIn('id="vr-mic-btn"', html)
-        self.assertIn('id="vr-send-btn"', html)
-        # 錄音最多 10 秒
-        self.assertIn("00:00 / 00:10", html)
-        self.assertIn('data-text="花好漂亮！"', html)
+        comment_area = html[html.index('class="comment-area"'):]
+        comment_form = comment_area[
+            comment_area.index('id="comment-form"'):comment_area.index("</form>")
+        ]
+        # 麥克風就在留言輸入框旁邊，文字留言照常保留
+        self.assertIn('id="comment-input"', comment_form)
+        self.assertIn('id="vr-mic-btn"', comment_form)
+        self.assertIn('id="comment-submit"', comment_form)
+        # 錄音、試聽、送出在留言區裡展開；最多 10 秒
+        self.assertIn('id="vr-panel"', comment_area)
+        self.assertIn('id="vr-send-btn"', comment_area)
+        self.assertIn("00:00 / 00:10", comment_area)
+        # 參考句也在留言區
+        self.assertIn('data-text="花好漂亮！"', comment_area)
         self.assertIn("Material+Symbols+Outlined", html)
-        # 文字留言照常保留
-        self.assertIn('id="comment-form"', html)
+        # 不再有獨立的大卡片
+        self.assertNotIn("留下語音加油", html)
 
     def test_old_diary_without_suggestions_has_no_chips(self):
         Diary.objects.filter(pk=self.diary.pk).update(suggested_replies=[])
