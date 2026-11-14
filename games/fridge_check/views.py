@@ -305,6 +305,9 @@ def submit_answer(request, session_id):
                         "completed_at": (
                             result["completed_at"]
                         ),
+                        "rewards": session_service.grant_rewards(
+                            services.GAME_TYPE, session_id
+                        ),
                     },
                     "error": None,
                 },
@@ -431,6 +434,9 @@ def submit_answer(request, session_id):
                     ),
                     "completed_at": (
                         result["completed_at"]
+                    ),
+                    "rewards": session_service.grant_rewards(
+                        services.GAME_TYPE, session_id
                     ),
                 },
                 "error": None,

@@ -14,6 +14,8 @@ from dashboard import services as dashboard_services
 from dashboard import weekly_report
 from dashboard.models import WeeklyReport
 from diary.models import Diary
+from rewards.models import PointTransaction
+from rewards.services import POINTS
 
 from . import service
 from .models import DailyTask
@@ -29,12 +31,12 @@ GAME_DIMENSIONS = [
     if item["source"] != dashboard_services.DIARY_SOURCE
 ]
 
-# 任務標題裡的遊戲短名稱（跟 games/catalog.py 的 title 不完全相同）
+# 任務標題裡的遊戲名稱（App 內正式名稱，跟 games/catalog.py 一致）
 GAME_TASK_NAMES = {
-    "market_route": "今天去菜市場",
+    "market_route": "來去菜市場",
     "memory_recall": "記憶配對",
     "market_sort": "整理菜籃",
-    "fridge_check": "冰箱檢查",
+    "fridge_check": "冰箱清點",
     "market_shopping": "市場買菜",
 }
 
@@ -157,6 +159,7 @@ def build_response(user, today):
             "game_id": task.game_id,
             "dimension": task.dimension,
             "done": is_done(task),
+            "points": POINTS["daily_task"],  # 完成這項任務額外加給的點數
         }
         for task in tasks
     ]
@@ -170,4 +173,11 @@ def build_response(user, today):
             "goal": WEEKLY_GOAL,
         },
         "tasks": items,
+        "all_done_bonus": {
+            "points": POINTS["all_tasks_done"],
+            # 以「今天是否已有全部完成加碼的流水帳」判斷，不是用即時完成數
+            "earned": PointTransaction.objects.filter(
+                user=user, reason="all_tasks_done", source_id=str(today)
+            ).exists(),
+        },
     }

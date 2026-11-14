@@ -3,12 +3,14 @@ fridge_check API 視圖與端點整合測試。
 驗證建立 session、送出答案（答對、答錯重試、跳題、第 10 題完成）與歷史紀錄皆正常運作無 404。
 """
 
-from django.test import TestCase
 from django.contrib.auth import get_user_model
-from rest_framework.test import APIClient
+from django.test import TestCase
 from rest_framework import status
+from rest_framework.test import APIClient
 
+from games import session_service
 from games.fridge_check import services
+from games.fridge_check.constants import TOTAL_QUESTIONS
 
 User = get_user_model()
 
@@ -93,3 +95,50 @@ class FridgeCheckApiTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["success"])
         self.assertIn("history", response.data["data"])
+
+
+class FridgeCheckRewardsTests(TestCase):
+    """第 10 題結束（is_completed 為 true）的回應才帶 rewards。"""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="fridge_rewards_user", password="password123"
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post("/api/games/fridge-check/sessions/")
+        self.session_id = response.data["data"]["session_id"]
+        self.url = f"/api/games/fridge-check/sessions/{self.session_id}/answers/"
+
+    def _answer(self, answer):
+        return self.client.post(
+            self.url, {"answer": answer, "reaction_time_ms": 1500}, format="json"
+        )
+
+    def test_full_game_returns_rewards_only_on_last_question(self):
+        for _ in range(TOTAL_QUESTIONS):
+            session = services.get_session(self.session_id)
+            data = self._answer(session["current_question"]["correct_answer"]).data[
+                "data"
+            ]
+            if data["is_completed"]:
+                break
+            # 還沒結束的題目沒有 rewards
+            self.assertNotIn("rewards", data)
+
+        self.assertTrue(data["is_completed"])
+        self.assertGreaterEqual(data["rewards"]["points_earned"], 10)
+
+    def test_skipping_last_question_returns_rewards(self):
+        session_service.update_session(
+            services.GAME_TYPE, self.session_id, question_number=TOTAL_QUESTIONS
+        )
+        wrong = {"food_code": "non_existent_food", "position": [99, 99]}
+
+        for _ in range(3):
+            response = self._answer(wrong)
+
+        data = response.data["data"]
+        self.assertTrue(data["is_completed"])
+        self.assertTrue(data["question_skipped"])
+        self.assertGreaterEqual(data["rewards"]["points_earned"], 10)

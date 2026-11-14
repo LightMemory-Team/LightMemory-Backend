@@ -74,8 +74,15 @@ class WeeklyReportViewTests(APITestCase):
 
         self.assertEqual(generate.call_count, 1)
         self.assertEqual(first.data["data"]["summary"], "AI 寫的總結")
-        self.assertEqual(second.data, first.data)
-        self.assertEqual(third.data, first.data)
+        # 週報內容相同；rewards 只放在這次回應，第一次點開有成就，之後是 0 點
+        contents = [
+            {key: value for key, value in r.data["data"].items() if key != "rewards"}
+            for r in (first, second, third)
+        ]
+        self.assertEqual(contents[1], contents[0])
+        self.assertEqual(contents[2], contents[0])
+        self.assertEqual(second.data["data"]["rewards"]["points_earned"], 0)
+        self.assertEqual(second.data["data"]["rewards"]["new_achievements"], [])
 
     @patch(GENERATE, return_value="AI 寫的總結")
     def test_opening_again_writes_nothing_to_the_database(self, generate):

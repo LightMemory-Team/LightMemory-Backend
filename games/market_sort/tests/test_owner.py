@@ -80,7 +80,14 @@ class MarketSortSessionOwnerTests(APITestCase):
         second = self.owner_client.post(SUBMIT_URL, payload, format="json")
 
         self.assertEqual(second.status_code, 201)
-        self.assertEqual(first.data, second.data)
+        # 內容相同；rewards 只有第一次有點數，重複交卷是 0 點（不會重複入帳）
+        first_data = {**first.data["data"]}
+        second_data = {**second.data["data"]}
+        first_rewards = first_data.pop("rewards")
+        second_rewards = second_data.pop("rewards")
+        self.assertEqual(first_data, second_data)
+        self.assertGreater(first_rewards["points_earned"], 0)
+        self.assertEqual(second_rewards["points_earned"], 0)
 
     def test_other_user_can_use_a_different_session_id(self):
         self.owner_client.post(SUBMIT_URL, self._payload("owner-id"), format="json")

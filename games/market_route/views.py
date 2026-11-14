@@ -382,8 +382,13 @@ def finish(request):
         return error_response
 
     # 冪等性處理：已經結束過的 session 直接回傳既有結果，不重算不覆寫。
+    # rewards 仍要附上（重複呼叫只會是 0 點），但不寫進 GameSession.result
     if session["status"] == "finished":
-        return Response({"success": True, "data": session["result"], "error": None})
+        data = {
+            **session["result"],
+            "rewards": session_service.grant_rewards(GAME_TYPE, session_id),
+        }
+        return Response({"success": True, "data": data, "error": None})
 
     step_records = session["step_records"]
     # 遊戲專屬欄位（question_number、is_timeout…）存在每筆紀錄的 detail 裡
@@ -422,7 +427,8 @@ def finish(request):
         "z_score": round(z_score, 3) if z_score is not None else None,
     }
     session_service.finish_session(GAME_TYPE, session_id, result)
-    return Response({"success": True, "data": result, "error": None})
+    data = {**result, "rewards": session_service.grant_rewards(GAME_TYPE, session_id)}
+    return Response({"success": True, "data": data, "error": None})
 
 
 # 6. 查詢單場結果

@@ -1,6 +1,6 @@
-# F1～F13 後端修改紀錄（詳細版）
+# F1～F14 後端修改紀錄（詳細版）
 
-更新日期：2026-11-10 · 分支：`fix/features`（F1～F13 已全部合併） · PR：#87～#93、#96～#103
+更新日期：2026-11-14 · 分支：`fix/features`（F1～F14 已全部合併） · PR：#87～#93、#96～#103、#106～#108
 
 ## 這份文件是什麼
 
@@ -13,6 +13,8 @@
 | [frontend_api_changes.md](frontend_api_changes.md) | 前端（Flutter） | API 行為變了什麼、前端要做什麼、錯誤碼 |
 | **本文件** | 後端開發者、專題組員 | 程式怎麼改、為什麼這樣改、怎麼驗證、有什麼限制 |
 
+> **F14 是把另一條線（`feat/stage3` 的 rewards）合進來**，與 F1～F13 性質不同，詳見[第 15 章](#15-f14--把-rewards點數與成就納入-fixfeatures)。
+>
 > **關於測試檔的路徑**：#103 把所有測試搬進各 app 的 `tests/` 資料夾（見[第 14 章](#14-測試檔搬進各-app-的-tests-資料夾pr-103)）。本文件一律寫**搬移後**的新路徑。
 
 遇到不熟悉的名詞，請看最後的「[附錄 B：名詞小辭典](#附錄-b名詞小辭典)」。
@@ -38,6 +40,7 @@
 | F11 | 台灣凌晨的日期用 UTC 計算，少一天 | 時區 | 低 | #99 | games、users |
 | F12 | 後台留著失智篩檢與警示等級的診斷性模型 | 產品定位／資料清理 | 中 | #102 | assessments、dashboard |
 | F13 | 日記 AI 輸出完全沒檢查；禁用詞不全且誤殺字母 z | 內容安全＋輸入驗證 | 高 | #96 | ai_service、diary |
+| F14 | 把 rewards（點數與成就）納入；與 F1～F13 合併後的掃描次數、發點時機問題 | 新功能整合 | 中 | #106、#107、#108 | rewards、diary、dashboard、games、home |
 | （整理） | 測試檔散在各 app 根目錄 | 專案結構 | — | #103 | 全部 |
 
 ### 0.2 規模與測試
@@ -71,10 +74,11 @@ F8 起各 PR 的規模（`gh pr view` 的新增／刪除行數，**含測試與�
 | F10 修正 | #101 | +2／−1 | 1 | 0 | 920 全過 |
 | F12 | #102 | +115／−93 | 9 | 6 | 926 |
 | 測試搬移 | #103 | +90／−99 | 66 | 0 | 926 |
-| **F8～F13 合計** | | | | **91** | **926（另 1 個原本就預期失敗）** |
+| F14 | #108 | 見 15.7 | — | 16（stage3 另帶 40） | 982 |
+| **F8～F14 合計** | | | | **147** | **982（另 1 個原本就預期失敗）** |
 
 - 實際合併順序是 F13 → F8 → F9 → F11 → F10 → F12，不是編號順序。
-- **F12 是這一輪唯一修改資料表的項目**（刪除兩張表、兩個 migration）；F8～F11、F13 都沒有動資料表。
+- **F12（刪除兩張表）與 F14（新增 rewards 的兩張表）是這一輪僅有修改資料表的項目**；F8～F11、F13 都沒有動資料表。
 
 ### 0.3 共同的做法
 
@@ -910,7 +914,7 @@ def build_weekly_report_with_facts(user, today, previous_snapshot=None):
 
 #100 合併後，完整測試出現 1 個錯誤：F5 的測試 `test_weekly_report_snapshot_keeps_path_but_response_is_signed` 仍用 `patch` 替換舊函式 `build_weekly_report`，但 View 現在呼叫 `build_weekly_report_with_facts`，替身沒生效，View 建出真實（沒有日記）的週報，測試取 `entries[0]` 時 `IndexError`。**只修測試的替換目標**，程式沒有問題。
 
-這個疏失的原因是我在 #100 合併前把測試輸出接了 `tail`，測試失敗沒有讓流程停下。之後每個 PR 都改成「測試沒有全過就不 commit、不 push」（見 16 的說明）。
+這個疏失的原因是我在 #100 合併前把測試輸出接了 `tail`，測試失敗沒有讓流程停下。之後每個 PR 都改成「測試沒有全過就不 commit、不 push」（見第 17 章的說明）。
 
 ### 10.6 已知限制
 
@@ -1152,14 +1156,136 @@ python manage.py test --settings=config.settings_test
 
 ---
 
-## 15. 驗證方式與結果
+## 15. F14 — 把 rewards（點數與成就）納入 `fix/features`
 
-### 15.1 指令
+### 15.1 背景
+
+`rewards`（完成遊戲、寫日記拿點數，達成條件解鎖成就）是另一條線開發的，合進了 `feat/stage3`（PR #106 本體、#107 把 `grant()` 串到各 API）。F1～F13 則在 `fix/features`。兩條線從同一個起點（`9d87c30`）分開，各自改了同一批檔案（`diary/views.py`、`dashboard/views.py`、`games/`…），要合在一起才能一起上線。
+
+| 分支 | 內容 |
+|---|---|
+| `feat/stage3` | 多 8 個 commit，都是 rewards：新 app、成就清單、`grant()`、3 支查詢 API、遊戲結算／儀表板／週報／日記完成與分享共 10 個既有端點串接發點、首頁任務點數、遊戲名稱統一、日記 `finalize`／`share` 統一回應格式 |
+| `fix/features` | F1～F13 與文件、測試搬移（#103） |
+
+### 15.2 合併做法
+
+使用者的工作目錄正在跑別的東西，所以**不在原本的資料夾切分支**，改用 `git worktree`（同一個 Git 倉庫、另一個資料夾、另一個分支）：
+
+```bash
+git worktree add ../LightMemory-Backend-wt -b merge/rewards-into-fix-features origin/fix/features
+cp .env ../LightMemory-Backend-wt/        # .env 不在版本控制裡
+git merge origin/feat/stage3
+```
+
+事先用 `git merge-tree`（只預測、不改動任何分支）算出會有 3 個檔案衝突，實際合併與預測一致：
+
+| 衝突檔 | 兩邊各改了什麼 | 解法 |
+|---|---|---|
+| `diary/views.py` | F7 新增 `_error(code, message, http_status)`；rewards 也新增一個**同名同簽名**的 `_error`，而且回傳格式多了 `success: false`、`data: null` | 只留**一份**，採統一格式。F7 那份定義在檔案較後面，如果沒刪，它會蓋掉前面的統一格式（Python 後面的同名函式覆蓋前面的），所以必須刪掉。F7 的 400／409 錯誤因此也有了 `success`、`data` 欄位（只多欄位，用 `error.code` 判斷的前端不受影響）。`DiaryFinalizeView` 保留 F7 的 `transaction.atomic`、F13 的清理，**發點放在 atomic 之外**（見 15.4） |
+| `dashboard/views.py` | F9 的 `diary_scores`、F5 的 `with_signed_media`、F10 的 `get_or_create`／「沒變就不寫」 vs. rewards 的 `rewards` 區塊 | 兩邊都保留。儀表板 `data` 加 `rewards`；週報在 `viewed_at` 寫入**之後**才 `grant()`，回應是 `{**簽名網址後的週報, "rewards": …}`，**不存進快照** |
+| `dashboard/tests/test_weekly_report.py` | rewards 改的是搬移前的 `dashboard/tests_weekly_report.py`（#103 搬了它），Git 沒能自動跟上 | 手動把 stage3 的修改（多 import `WeeklyReport`、遊戲名稱、一個新測試）套到新位置 |
+
+其餘檔案（五款遊戲的 `views.py`、`games/session_service.py`、`home/daily_tasks.py`、各測試）Git 自動合併成功。**自動合併成功不代表行為正確**，所以合併後跑了完整測試。
+
+### 15.3 合併後測試發現的問題
+
+第一次跑完整測試：966 個、**5 個失敗**。都是「兩邊各自正確、合在一起就出問題」的地方：
+
+**（1）F9 的「一次請求只掃一次全站日記」被打回去（3 個失敗）**
+
+| 請求 | F9 之後 | 合併 rewards 後 |
+|---|---|---|
+| `GET /api/dashboard/`（有機器人卡片） | 1 次 | 2 次 |
+| `GET /api/dashboard/`（新使用者） | 1 次 | 3 次 |
+| `GET /api/dashboard/weekly-report/` | 1 次 | 3 次 |
+
+原因：`grant()` 會判斷成就。「六項全能」要算雷達圖解鎖了幾個維度，呼叫 `get_dashboard_dimensions`（含全站日記掃描）；發今日任務點數時，`home/daily_tasks` 的 `_rank_game_dimensions` 又呼叫一次。這些各自重掃一遍。
+
+**（2）兩個「連續呼叫兩次、回應應該相同」的測試失敗**
+
+- F10 的 `test_opening_again_does_not_call_the_ai_again`：比較第一次與第二次週報的整個回應
+- F3 的 `test_owner_can_still_resubmit_same_session_id`：比較第一次與第二次交卷的整個回應
+
+合併後回應多了 `rewards`，**第一次本來就會有點數與成就，第二次是 0 點**，兩次不可能完全相同。這是預期的行為改變，不是 bug。
+
+**（3）過時的註解**
+
+`games/session_service.py` 的 `grant_rewards` 註解寫「點數發給 `session.user`，不用 `request.user`，因為多數遊戲 API 允許未登入呼叫」。F1 之後未登入一律 404，F2／F3 之後只有場次擁有者能結算，這句話已經不成立。
+
+### 15.4 修改與設計決策
+
+**① `shared_diary_scan()`：範圍內共用同一次全站日記掃描**（`dashboard/services.py`）
+
+- 用 `contextvars`（Python 的「目前執行環境」變數，每個請求／執行緒各自獨立）放一個暫存。**進入範圍時開一個空暫存、離開時丟掉**。範圍內，`diary_z_scores(user)` 對同一位使用者只算第一次，之後直接用結果。
+- 範圍可以巢狀：內層直接沿用外層的結果。範圍外的呼叫行為完全不變（每次現算）。
+- 三個地方套用：`dashboard` View、`weekly_report_view`（用 `@services.with_shared_diary_scan` 裝飾）、`rewards.services.grant()`（`with transaction.atomic(), shared_diary_scan():`）。
+- **為什麼不沿用 F9 的「把 `scores` 一路傳下去」？** 要從 View 傳進 `grant()`，再傳進成就判斷、`home.daily_tasks.build_response`、`dashboard.services`，跨三個 app、四層函式。範圍式共用不用改這些函式的參數。F9 的 `scores=` 參數仍保留，兩者並存。
+- **為什麼不做跨請求快取？** 同 9.4：任何人寫日記全體基準都會變，多 worker 時會有過期資料。這個範圍只活在**單一請求內**，離開就丟，不可能過期。
+- **限制**：範圍內若又新增了日記，暫存不會更新。所以要在寫入「之後」才進入範圍（`finalize` 先存日記、再 `grant()`，`grant()` 自己開範圍，順序正確）。
+
+**② 日記完成的發點放在 transaction「之外」**（`DiaryFinalizeView`）
+
+- F7 把 `finalize` 整個包進 `transaction.atomic()` 並鎖住日記。如果發點也放在裡面，會**拉長持鎖時間**（發點要查一堆資料），而且發點失敗不該影響日記完成。
+- `grant()` 本來就是「盡力而為」：內部包了 `transaction.atomic()`，任何例外都吞掉，只回 `rewards.error`。所以放在外面最合理：日記先確定寫入，再發點。
+- 因此 atomic 區塊內要記住「是不是已經完成過」（`already_done`），結束後依此回 200 或 201；兩個同時送來的請求，後面那個拿到鎖才看到 `done` 時也走這條路，不會重複分析、重複呼叫 AI，`grant()` 也不會重複入帳。
+
+**③ 統一的 `_error`（diary）**：只留一份，見 15.2。
+
+**④ 兩個測試改成「除了 `rewards` 以外相同」**：第一次 `points_earned > 0`，第二次 `== 0`。這同時是「重複送出不會重複入帳」的驗證。
+
+**⑤ 更新 `grant_rewards` 的過時註解。**
+
+### 15.5 測試（`rewards/tests/test_with_fixes.py`，16 個新增）
+
+| 類別 | 驗證什麼 |
+|---|---|
+| `DiaryFinalizeRewardsTests`（5） | 發點時日記的 transaction 已結束（用 `connection.savepoint_ids` 的層數比較）；發點失敗（模擬 `_grant` 丟例外）日記仍完成、回 201、`rewards.error` 有值；日記完成失敗（AI 壞掉，500）**不會發任何點數**；連續兩次 `finalize` 回 201／200、第二次 0 點、`diary_complete` 只入帳 1 筆；拿到鎖才看到 `done` 的並行情況回 200、不重複產生內容 |
+| `GameRewardsOwnershipTests`（3） | 他人想結算我的場次：403、場次仍是進行中、**沒有任何人拿到點數**；沒登入：403、沒有點數；擁有者拿到點數、別人沒有 |
+| `SharedDiaryScanScopeTests`（7） | 範圍外每次都掃；範圍內同一人只掃一次（含 `average_diary_z_score`）；不同使用者各掃一次；巢狀範圍沿用外層；離開範圍就丟掉；範圍內發生例外後範圍不會卡住；明確傳入 `scores` 完全不掃 |
+| `GrantScansTheSiteOnceTests`（1） | 完成一場遊戲（發點含成就判斷與今日任務）最多掃 1 次 |
+
+**拿掉修正會失敗的驗證**：
+
+| 還原的內容 | 結果 |
+|---|---|
+| 共用掃描範圍（`dashboard/services.py`、`views.py`、`rewards/services.py`） | 10 個失敗：新測試 7 個（範圍相關 6 個、遊戲結算掃描 1 個）＋F9 原本的 3 個掃描測試 |
+| 發點放回 transaction 內（模擬舊寫法） | 2 個失敗（`savepoint` 層數、第二次 `finalize` 的 0 點） |
+
+### 15.6 對 rewards 本體的檢視
+
+| 項目 | 結果 |
+|---|---|
+| 時區 | 用 `timezone.localdate()`，與 F11 一致，沒問題 |
+| 併發重複入帳 | `get_or_create` ＋資料庫唯一約束（`unique_point_per_source`、`unique_user_achievement`），沒問題 |
+| 給長者看的文字 | `catalog.py`、`services.py`、`views.py` 逐一比對 F13 的禁用詞清單，**沒有命中** |
+| migration | `rewards/0001_initial` 只依賴 `AUTH_USER_MODEL`，與 F12 的兩個 migration 不同 app，編號不衝突；`makemigrations --check` 無待建項目 |
+| 遊戲名稱 | `games/catalog.py`、`rewards/catalog.py` 的 `GAME_NAMES`、`home/daily_tasks.py` 的 `GAME_TASK_NAMES` 三處**逐一比對一致**（見下方「前端影響」） |
+| 全站掃描 | 見 15.3（1），已修正 |
+
+**前端影響**（完整說明在 [frontend_api_changes.md](frontend_api_changes.md) 的 F14）：3 支新 API、10 支既有 API 多 `rewards` 區塊、首頁任務的 `points` 與 `all_done_bonus`、**遊戲名稱改回 App 內的正式名稱**（`market_route` 菜市場找路 → 來去菜市場、`memory_recall` 煮菜過程 → 記憶配對、`fridge_check` 冰箱檢查 → 冰箱清點、`market_sort` 的 `title` 整理菜籃遊戲 → 整理菜籃）、日記 `finalize`／`share` 與 F7 錯誤的格式統一。
+
+### 15.7 規模與測試
+
+- 測試：926 → 966（stage3 帶來 40 個，其中 rewards 21 個）→ **982**（F14 新增 16 個），全部通過，另 1 個原本就預期失敗。
+- F14 動到資料表：**新增 `rewards` 的兩張表**（`PointTransaction`、`UserAchievement`），一個 migration。
+
+### 15.8 已知限制
+
+- **`grant()` 吞掉所有例外**：發點失敗只會在 log 與 `rewards.error` 看到，沒有補發機制。使用者那次的點數就是沒了（重送請求可以補，因為每件事只入帳一次）。
+- **共用範圍只在單一請求內有效**；每次發點仍可能掃一次全站日記（原本的設計是每個請求最多 1 次，現在也是）。日記量很大時還需要預先彙總或共用快取（`fix/global`）。
+- **`feat/stage3` 之後若有新 commit，需要再合一次進 `fix/features`**。這次是單向合併。
+- 遊戲名稱改動、日記回應格式改動，**需要前端配合**，已寫在前端文件。
+
+---
+
+## 16. 驗證方式與結果
+
+### 16.1 指令
 
 ```bash
 source venv/bin/activate
 
-# 全部測試（目前 926 個，1 個預期失敗）
+# 全部測試（目前 982 個，1 個預期失敗）
 python manage.py test --settings=config.settings_test
 
 # 單一模組（以 F5 為例；測試搬進 tests/ 之後的路徑）
@@ -1170,7 +1296,7 @@ ruff format <改到的檔案>
 ruff check <改到的檔案>
 ```
 
-### 15.2 「拿掉修正，測試會失敗」的結果
+### 16.2 「拿掉修正，測試會失敗」的結果
 
 | 編號 | 還原的內容 | 結果 |
 |---|---|---|
@@ -1188,23 +1314,30 @@ ruff check <改到的檔案>
 | F11 | 三個使用處 | 5 個失敗 |
 | F12 | 模型與 migration | 4 個失敗 |
 | F13 | `ai_gen.py`、`wording.py` | 約 20 個失敗 |
+| F14 | 共用掃描範圍（`dashboard/services.py`、`views.py`、`rewards/services.py`） | 10 個失敗：新測試 7 個＋F9 原本的 3 個掃描測試 |
+| F14 | 發點放回 transaction 內（模擬舊寫法） | 2 個失敗 |
 
-### 15.3 還沒有做的驗證
+### 16.3 還沒有做的驗證
 
 - 沒有在真的 PostgreSQL＋多 worker＋真的 Firebase 環境實測（F4 的共用快取、F5 的簽名、F6 的刪檔、F7 的鎖）。以上都是用 mock 驗證程式邏輯。**合併到正式環境前，建議在測試環境手動走一遍。**
 - **F12 的 migration 沒有在正式資料庫上演練**。本機兩張表都是 0 筆，但正式環境未知；套用前請先確認筆數並備份（見 12.4）。
 - F8、F9 的效能改善是用「查詢次數」驗證（場次變多時查詢數不增加、掃描次數降低），**沒有在大量資料下量測實際秒數**。
 - F10 的 AI 沿用邏輯用 mock 驗證；沒有用真的 OpenAI 回應測過。
+- **F14 的 rewards 沒有在 PostgreSQL 上實測**：併發重複入帳靠資料庫唯一約束，測試用的 SQLite 也有唯一約束，但並行請求的實際行為（`get_or_create` 撞到唯一約束的重試）建議在 PostgreSQL 用兩個並行請求再驗證一次。
+- F14 的掃描次數是用 spy 計算 `_compute_diary_z_scores` 的呼叫次數驗證，沒有量測實際秒數。
 
 ---
 
-## 16. 開發過程備註
+## 17. 開發過程備註
 
 - **測試的假設錯誤**（F3）：我以為未結束 session 的 `result` 是 `{}`，實際是 `None`。修正的是測試。
 - **指令失誤**（F5）：驗證「拿掉修正會失敗」時，我一個 `git stash push` 指令因為檔名引用錯誤沒有成功，後面的 `git stash pop` 卻照常執行，把你原本 `feat/score_standardization` 的舊 WIP stash（一行文件修改）取出來了。發現後立刻放回原樣，內容完全一致。之後所有還原驗證改用 `git diff > patch` ＋ `git apply -R`，不再碰 stash。
 - **程式碼多寫一行**（F6）：`collect_user_media` 一度多了一行無意義的程式，馬上自己發現並刪掉，之後有測試保護。
 - **合併方式**：#87 依你的指示「直接 merge」；#88～#93 在你詢問「為什麼還沒 merge」之後，我以同樣方式用 merge commit 合併；之後的 PR 也照這個做法。
 - **F10 帶著失敗的測試被合併**（#100，已由 #101 修正）：我把完整測試的輸出接 `tail`，管線的結束代碼是 `tail` 的（永遠成功），測試失敗沒有讓流程停下。**修正**：之後每個 PR 的指令都改成 `if ! python manage.py test … > 輸出檔; then exit 1; fi`，測試沒有全過就不 commit、不 push。這件事我當時就在 PR #101 的說明裡寫明了。
+- **F14：預測衝突的方式**：合併前用 `git merge-tree` 預測衝突檔案（只讀、不改動分支），預測的 3 個檔案與實際完全一致。第一次比較 `stage3` 與 `fix/features` 的差異時，我把 `git diff` 的方向看反了（把 `fix/features` 的內容當成 `stage3` 的），之後重新抓遠端並確認分支關係才發現，沒有造成任何修改。
+- **F14：worktree 的追蹤分支**：`git worktree add … -b merge/rewards-into-fix-features origin/fix/features` 會讓新分支預設「追蹤」`origin/fix/features`，直接 `git push` 會推到合併目標。我立刻用 `git branch --unset-upstream` 解除，之後都用明確的 `git push -u origin <分支>`。
+- **F14：測試把潛在問題抓出來**：合併後第一次跑完整測試有 5 個失敗，其中 3 個（掃描次數）是 F9 的保護網抓到 rewards 帶來的重複掃描；這是 F9 當初寫「掃描次數」測試的目的。
 - **整檔重寫 `diary/ai_gen.py`**（F13）：我第一次用取代腳本改這個檔案，結果把檔案弄壞了，所以改成整份重寫。重寫後有測試保護。
 - **測試類別被重複執行**（F9）：`test_diary_z_scan.py` 想借用 `DashboardApiTests` 的 helper，一開始用 `from … import DashboardApiTests`，結果 Django 把它當成這個檔案裡的測試類別又跑一遍（測試數變成 28 而不是 10）。改成只 import **模組**、用 `模組.類別.方法` 取用。
 - **測試的假設錯誤**（F8、F10）：我以為未結束場次的 `result` 是 `{}`、`market_shopping` 歷史的 `data` 是 dict，實際分別是 `None` 與 list，修正的是測試，不是程式。
@@ -1214,9 +1347,9 @@ ruff check <改到的檔案>
 
 ---
 
-## 17. 尚未處理的事與後續建議
+## 18. 尚未處理的事與後續建議
 
-### 17.1 `fix/features` 的後續（建議優先）
+### 18.1 `fix/features` 的後續（建議優先）
 
 | 優先 | 項目 | 說明 |
 |---|---|---|
@@ -1230,9 +1363,12 @@ ruff check <改到的檔案>
 | 中 | 週報改成純讀取 | F10 首次點開仍會寫一次；要與前端新增「標記已讀」端點 |
 | 中 | 日記語言 z 的跨請求快取／預先彙總 | F9 只做到「一次請求只掃一次」；等有共用快取（Redis）再做 |
 | 低 | 日記預設的 `title`／`post_text` 也加用語檢查 | F13 只檢查 AI 產生的句子，不檢查長者原話 |
+| 中 | rewards 在 PostgreSQL 上做並行重複結算的實測 | F14 的限制；唯一約束已保護，但沒實測 |
+| 中 | `feat/stage3` 之後的新 commit 需要再合進 `fix/features` | F14 是單向合併 |
+| 低 | rewards 發點失敗的補發機制 | 目前只回 `rewards.error`，重送請求可以補發 |
 | 低 | `games/` 的 `tests/` 內部再依類型分組 | #103 只把檔案搬進去，沒有再細分 |
 
-### 17.2 `fix/global`（共通問題，規劃中）
+### 18.2 `fix/global`（共通問題，規劃中）
 
 | 編號 | 項目 | 備註 |
 |---|---|---|
@@ -1240,7 +1376,7 @@ ruff check <改到的檔案>
 | G2 | 預設權限改成 `IsAuthenticated` | 會讓前端大改，建議前端處理完 F1～F7 後再做 |
 | G3 | 登入、註冊、改密碼加入限速 | 沿用 F4 的做法；`DEFAULT_THROTTLE_RATES` 屬於這裡 |
 | G4 | JWT blacklist 與 rotation、縮短 token 效期 | 需要 migration，要先確認 |
-| G5～G6 | 統一回應格式 `common/responses.py` | `diary` 目前沒有 `success` 欄位 |
+| G5～G6 | 統一回應格式 `common/responses.py` | F14 之後 `diary` 的 `finalize`／`share` 與錯誤已統一；`rewards/views.py` 也有一份 `_ok`，要一起合併；`diary` 其餘成功回應仍沒有 `success` 欄位 |
 | G8 | 遊戲 session 加 transaction／鎖 | F7 對日記做了，遊戲那邊（`update_session`、`save_step`）還沒 |
 | G10 | 補常用查詢索引 | F8、F9 的查詢會用到 `GameSession(game, user)`、`DiaryAnalysis(is_valid)`、`Diary(created_at)` |
 | G9 | OpenAI 加 timeout 與 retry | F7 的鎖、F10 的週報都會因此受益 |
@@ -1248,14 +1384,14 @@ ruff check <改到的檔案>
 
 ---
 
-## 18. 檔案索引
+## 19. 檔案索引
 
 依檔案列出「哪些編號動過它」，方便日後查「這一行是為什麼寫的」。
 
 | 檔案 | 編號 | 說明 |
 |---|---|---|
 | `games/utils.py` | F1、F2、F11 | `get_current_user` 改回 `None`；新增 `forbidden_unless_owner`、`local_date_from_iso` |
-| `games/session_service.py` | F3、F8 | 新增 `SessionOwnerMismatch`；`get_or_create_session` 檢查擁有者；新增 `list_user_sessions`、`_to_dict(with_steps=)`，`list_sessions` 加 `select_related`／`prefetch_related` |
+| `games/session_service.py` | F3、F8、F14 | 新增 `SessionOwnerMismatch`；`get_or_create_session` 檢查擁有者；新增 `list_user_sessions`、`_to_dict(with_steps=)`，`list_sessions` 加 `select_related`／`prefetch_related`；F14 更新 `grant_rewards` 的過時註解 |
 | `games/fridge_check/views.py` | F2 | `submit_answer` 加擁有者檢查 |
 | `games/market_shopping/views.py` | F2 | `submit_item_answer`、`submit_change_answer` 加擁有者檢查 |
 | `games/market_sort/views.py` | F3、F8 | 接住 `SessionOwnerMismatch` 回 403；歷史改用 `list_user_sessions` |
@@ -1266,12 +1402,14 @@ ruff check <改到的檔案>
 | `users/serializers.py` | F11 | 生日驗證用 `timezone.localdate()` |
 | `diary/media.py`（新） | F5 | `media_url()` |
 | `diary/external.py` | F5、F6 | `upload_to_firebase(public=)`；`blob_name_from_stored`、`delete_from_firebase` |
-| `diary/views.py` | F5、F7 | 讀取點套 `media_url`；回覆驗證與 transaction |
+| `diary/views.py` | F5、F7、F14 | 讀取點套 `media_url`；回覆驗證與 transaction；F14 統一 `_error`／`_ok`、`finalize` 發點放在 atomic 之外 |
 | `social/utils.py` | F5 | `serialize_post` 套 `media_url` |
 | `public_share/views.py` | F5 | 分享頁照片套 `media_url` |
-| `dashboard/weekly_report.py`、`dashboard/views.py` | F5、F9、F10 | `with_signed_media`；快照存路徑；F9 傳遞預先算好的日記分數；F10 `SUMMARY_FACTS_KEY`、`_reusable_summary`、`build_weekly_report_with_facts`、不重複寫入 |
-| `dashboard/services.py` | F9 | `_compute_diary_z_scores`、`diary_z_scores(scores=)`、各函式的 `diary_scores` 選用參數 |
+| `dashboard/weekly_report.py`、`dashboard/views.py` | F5、F9、F10、F14 | `with_signed_media`；快照存路徑；F9 傳遞預先算好的日記分數；F10 `SUMMARY_FACTS_KEY`、`_reusable_summary`、`build_weekly_report_with_facts`、不重複寫入；F14 兩個 View 加 `rewards` 並套用共用掃描範圍 |
+| `dashboard/services.py` | F9、F14 | `_compute_diary_z_scores`、`diary_z_scores(scores=)`、各函式的 `diary_scores` 選用參數；F14 新增 `shared_diary_scan`、`with_shared_diary_scan`、`_scores_for` |
 | `dashboard/encouragement.py` | F9 | `get_encouragement` 接受預先算好的分數 |
+| `rewards/`（新，來自 stage3） | F14 | `models.py`、`services.py`（`grant()`）、`catalog.py`、`views.py`、`urls.py`、`migrations/0001_initial.py`；F14 在 `services.py` 的 `grant()` 套用 `shared_diary_scan()` |
+| `rewards/tests/test_with_fixes.py`（新） | F14 | 16 個合併互動測試 |
 | `ai_service/wording.py`（新） | F13 | 共用禁用詞與 `find_banned_word`、`contains_banned_word` |
 | `ai_service/weekly_summary.py`、`ai_service/greeting.py` | F13 | 改用共用禁用詞 |
 | `diary/ai_gen.py` | F13 | 整檔重寫：安全規則、輸出清理與驗證、長度限制 |
@@ -1292,7 +1430,7 @@ ruff check <改到的檔案>
 | `dashboard/tests/test_removed_models.py` | F12 | 原在 `config/`，#103 搬移 |
 | `ai_service/tests/test_wording.py`、`diary/tests/test_ai_gen.py` | F13 | |
 | 全部 `*/tests/` | 整理 | #103 把所有測試搬進各 app 的 `tests/` |
-| `doc/frontend_api_changes.md` | F1～F7 | 前端對照文件（F8～F13 對前端沒有介面變化，只有 F11 的日期值差異） |
+| `doc/frontend_api_changes.md` | F1～F14 | 前端對照文件（F8～F13 對前端幾乎沒有介面變化；F14 有新 API 與多處變動） |
 
 ---
 
@@ -1316,6 +1454,8 @@ ruff check <改到的檔案>
 | F10 修正 | #101 | `test/diary-media-weekly-report-patch` | `test(diary): 週報簽名網址測試改為替換 build_weekly_report_with_facts` |
 | F12 | #102 | `refactor/remove-diagnostic-models` | `refactor(assessments): 移除未使用的 AD-8 與健康儀表板診斷性模型` |
 | 整理 | #103 | `test/move-tests-into-app-packages` | `test: 測試檔搬到各 app 的 tests/ 資料夾` |
+| F14 | #106、#107 | `feat/rewards-system`、`feat/rewards-integration`（合進 `feat/stage3`） | `feat(rewards): 新增點數與成就系統（資料表、成就清單、grant()、查詢 API）` 等 |
+| F14 | #108 | `merge/rewards-into-fix-features` | `feat(rewards): 合併 rewards 點數與成就系統，並與 F1～F13 整合` |
 
 只有 F1 帶 `!`（Conventional Commits 的破壞性變更標記）；其餘對正常使用的前端流程不造成破壞。F12 雖然動到資料表，但這兩個模型從來沒有對外 API，所以沒有 `!`。
 
@@ -1349,4 +1489,7 @@ ruff check <改到的檔案>
 | **快照（snapshot）** | 把某一刻算出的結果整份存起來。週報用它記下「那一週當時的內容」 |
 | **`DeleteModel` migration** | 刪除一個模型（資料表）的 migration。套用會刪除資料表與全部資料；倒退只會重建空表 |
 | **禁用詞** | 不能出現在給長者看的句子裡的詞，例如醫療與療效宣稱。AI 產生的句子會先過一遍檢查 |
+| **`git worktree`** | 同一個 Git 倉庫、另一個資料夾、另一個分支同時存在。F14 用它在不干擾使用者正在使用的工作目錄的情況下合併 |
+| **`contextvars`** | Python 的「目前執行環境」變數：每個請求／執行緒各自一份。`shared_diary_scan` 用它存「這個範圍內已經掃過的結果」，離開範圍就丟掉 |
+| **rewards／點數與成就** | 完成遊戲、寫日記、做今日任務拿點數（每天上限 100），達成條件解鎖成就（一次性獎勵）。各 API 回應的 `data.rewards` 就是這一次的結果 |
 | **merge target（合併目標）** | 小分支做完要合併進去的分支。這一輪是 `fix/features` |

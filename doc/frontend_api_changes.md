@@ -1,12 +1,14 @@
-# 後端安全與穩定性修正總覽（F1～F13）
+# 後端安全與穩定性修正總覽（F1～F14）
 
-更新日期：2026-11-10 · 範圍：`fix/features` 分支（個別功能問題），F1～F13 已全部合併進去
+更新日期：2026-11-10 · 範圍：`fix/features` 分支（個別功能問題），F1～F14 已全部合併進去
 
 這份文件說明這一輪後端修正**改了什麼、為什麼改、前端要配合什麼**。給前端（Flutter）看，也可以當後端的修改紀錄。
 
 > 重點先看第 1 節的「前端待辦」與「錯誤碼總表」。想知道某一項的來龍去脈，再看第 2 節對應的小節。
 >
 > **F8～F13 對前端幾乎沒有影響**（API 的格式與欄位都沒變），只有 F11（日期值）與 F13（AI 文字可能改成固定句型）值得知道。看 [F8～F13 一覽](#f8f13-給前端的總結)即可。
+>
+> **F14 是新功能「點數與成就」（rewards）**，有 3 支新 API，而且 10 支既有 API 的回應多了一個 `rewards` 區塊，另外遊戲名稱與日記回應格式也有變動，前端要改。看 [F14](#f14--點數與成就rewards)。
 
 ---
 
@@ -27,9 +29,10 @@
 | F11 | 台灣凌晨的日期用 UTC 算，少一天 | 低 | 👀 `played_date`、`joined_at` 值變正確，不要自己再轉 | [#99](https://github.com/LightMemory-Team/LightMemory-Backend/pull/99) |
 | F12 | 移除後台的失智篩檢與警示等級模型 | 中 | 不用（從沒有對外 API） | [#102](https://github.com/LightMemory-Team/LightMemory-Backend/pull/102) |
 | F13 | 日記 AI 輸出沒有用語檢查與驗證 | 高 | 👀 AI 文字可能是固定句型；欄位長度有上限 | [#96](https://github.com/LightMemory-Team/LightMemory-Backend/pull/96) |
+| F14 | 點數與成就（rewards）納入，與 F1～F13 整合 | 新功能 | ⚠️ 3 支新 API、`rewards` 區塊、遊戲名稱、錯誤格式 | [#106](https://github.com/LightMemory-Team/LightMemory-Backend/pull/106)、[#107](https://github.com/LightMemory-Team/LightMemory-Backend/pull/107)（rewards 本體）、[#108](https://github.com/LightMemory-Team/LightMemory-Backend/pull/108)（合併） |
 
-- 測試：原本 764 個，現在 **926 個全部通過**（另有 1 個原本就預期失敗），新增 162 個測試。
-- F1～F11、F13 **沒有修改資料表**；只有 F12 刪除了兩張沒在用的資料表（後端部署時要跑 migration，前端無感）。
+- 測試：原本 764 個，現在 **982 個全部通過**（另有 1 個原本就預期失敗），新增 218 個測試。
+- F1～F11、F13 **沒有修改資料表**；F12 刪除了兩張沒在用的資料表，F14 新增 `rewards` 的兩張資料表（後端部署時要跑 migration，前端無感）。
 - 每一項都有驗證過「把修正拿掉，新測試就會失敗」，確認測試真的有在保護。
 
 ---
@@ -49,6 +52,10 @@
 - [ ] 以 `error.code` 判斷錯誤，**不要比對 `error.message` 文字**
 - [ ] （F11）冰箱檢查歷史的 `played_date`、會員統計的 `joined_at` **直接顯示後端給的日期**，不要自己再用 `completed_at` 去切字串或換算（F11）
 - [ ] （F13）日記的 AI 問題、回應不要假設每次都不同；AI 不合格時會是固定句型（F13）
+- [ ] （F14）遊戲結算、儀表板、週報、日記完成、日記分享的回應都要讀 `data.rewards`，有點數或新成就時跳出提示；`rewards.error` 不是 `null` 時溫和提示即可，不要當成請求失敗（F14）
+- [ ] （F14）新增「點數總覽」「成就牆」「點數紀錄」三個畫面所需的 API 串接（F14）
+- [ ] （F14）遊戲名稱改版：**不要在前端寫死遊戲名稱**，用後端給的 `name`／`title`（F14）
+- [ ] （F14）日記完成（`finalize`）、分享（`share`）以及回覆日記（`replies`）的錯誤回應現在有 `success: false`，用 `error.code` 判斷的話不用改（F14）
 
 ### 1.2 錯誤碼總表（這一輪新增或變更的）
 
@@ -329,7 +336,7 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 **前端要做**
 - 收到 **409 `ROUND_ALREADY_ANSWERED`**：通常是網路重試造成，代表這一輪**已經成功**。用 `GET diary/<id>/` 同步狀態（`replies`、`pending_question`），不要顯示錯誤。
 - 收到 **400 `INVALID_ROUND_INDEX`**：前端送出的值有誤，檢查 `round_index` 是 1～4。
-- 錯誤格式沒有 `success` 欄位，請看 `error.code`。
+- 錯誤格式是 `{ success: false, data: null, error: { code, message } }`（F14 起統一；原本沒有 `success` 欄位），一樣看 `error.code` 判斷。
 
 **備註**：資料庫鎖定（`select_for_update`）只在 PostgreSQL 生效，測試用的 SQLite 會忽略它；建議在測試環境用兩個並行請求再驗證一次。
 
@@ -398,6 +405,122 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 
 ---
 
+### F14 — 點數與成就（rewards）
+
+> 新功能：完成遊戲、寫日記、做今日任務可以拿點數，達成條件會解鎖成就。後端已經串好，**前端要把畫面接上**。所有 rewards 相關 API 都要登入（`Authorization: Bearer <access_token>`）。
+
+#### 1. 三支新 API
+
+| 方法與路徑 | 用途 |
+|---|---|
+| `GET /api/rewards/summary/` | 點數總覽（首頁、會員中心） |
+| `GET /api/rewards/achievements/` | 成就牆（三類分組、是否解鎖、進度） |
+| `GET /api/rewards/points/history/?page=1&page_size=10` | 點數紀錄（新的在前，分頁；`page_size` 預設 10、最多 50） |
+
+**`summary/`**
+
+```json
+{ "success": true, "data": {
+    "total_points": 135,
+    "today_points": 35,
+    "daily_cap": 100,
+    "daily_remaining": 65,
+    "achievements_unlocked": 3,
+    "achievements_total": 25
+}, "error": null }
+```
+
+**`achievements/`**：`data.categories` 是三組（`exploration` 探索類、`training` 訓練類、`milestone` 里程碑類），每組有 `label` 與 `achievements`：
+
+```json
+{ "code": "first_diary", "title": "說說我的故事", "description": "完成第一篇聲影日記",
+  "unlocked": true, "unlocked_at": "2026-11-14T10:30:00+08:00",
+  "progress": { "current": 1, "target": 1 },
+  "points": 10, "icon": "first_diary" }
+```
+
+未解鎖的成就 `unlocked_at` 是 `null`，`progress.current` 是目前進度（不會超過 `target`）。`icon` 的值同 `code`，第一版所有成就共用同一組勳章圖案，前端依 `unlocked` 決定彩色或灰色。
+
+**`points/history/`**：`data.items` 每筆 `{ id, reason, label, amount, created_at }`，`data.pagination` 有 `count`、`next`、`previous`（完整網址或 `null`）。`reason` 有 `game_complete`、`diary_complete`、`daily_task`、`all_tasks_done`、`achievement_unlock`。**`amount` 為 0 的紀錄（達每日上限時留下的）不會出現。** `page` 不是整數回 400 `INVALID_PARAM`；超過最後一頁回空的 `items`。
+
+#### 2. 10 支既有 API 的回應多了 `data.rewards`
+
+| API | 什麼時候帶 `rewards` |
+|---|---|
+| `POST /api/games/fridge-check/sessions/{id}/answers/` | **只有最後一題**（`is_completed` 為 `true`）；中間的題目沒有這個欄位 |
+| `POST /api/games/market-shopping/sessions/{id}/item-answers/`、`…/change-answers/` | 場次結束的那一次回應 |
+| `POST /api/games/market-route/finish/` | 每次呼叫（已結束的場次重複呼叫為 0 點） |
+| `POST /api/games/memory-recall/finish/` | 每次呼叫（答題逾時自動結束的場次，前端接著呼叫的第一次 `finish/` 會拿到點數） |
+| `POST /api/games/market-sort/submit/` | 場次結束的回應 |
+| `GET /api/dashboard/` | 每次（第一次解鎖「認識自己」） |
+| `GET /api/dashboard/weekly-report/` | 每次（第一次解鎖「回頭看看」，並完成「看看上週回顧」任務） |
+| `POST /api/diary/{id}/finalize/` | 日記完成時（已完成的日記再呼叫為 0 點） |
+| `POST /api/diary/{id}/share/` | 每次（第一次分享解鎖「樂於分享」） |
+
+`rewards` 區塊的格式（每次都一樣）：
+
+```json
+{
+  "points_earned": 15,
+  "breakdown": [
+    { "reason": "diary_complete", "label": "完成一篇聲影日記", "points": 15 },
+    { "reason": "daily_task", "label": "完成今日任務：聲影日記", "points": 5 }
+  ],
+  "daily_cap_reached": false,
+  "total_points": 135,
+  "new_achievements": [
+    { "code": "first_diary", "category": "exploration", "title": "說說我的故事",
+      "description": "完成第一篇聲影日記", "points": 10, "icon": "first_diary" }
+  ],
+  "error": null
+}
+```
+
+- `points_earned` 是這一次**新增**的點數；**重複呼叫同一件事一律是 0 點**（不會重複入帳），`breakdown`、`new_achievements` 是空的，前端不用特別處理，只要 `points_earned > 0` 或 `new_achievements` 不是空的才跳提示。
+- `daily_cap_reached` 為 `true`：今天遊戲、日記、今日任務的點數已達 100 點上限（成就點數不算在上限內）。
+- **`error` 不是 `null`（`{ "code": "REWARDS_FAILED", "message": "這次的點數暫時沒有算到" }`）時，原本的請求仍然成功**，只是這次沒算到點數。請溫和提示或直接忽略，**不要當成遊戲或日記失敗**。
+- `rewards` **不會**存進遊戲歷史或週報快照，所以歷史端點、再次查詢單場結果不會有這個欄位。
+
+**點數規則**：完成一場遊戲 10 點、完成一篇日記 15 點、今日任務每項 +5 點、今日任務全部完成再 +20 點；以上每天合計最多 100 點。成就是一次性的獎勵（探索類 10 點、訓練類 20 點、里程碑類 30 點），不計入每日上限。
+
+#### 3. 首頁今日任務多了點數
+
+`GET /api/home/daily-tasks/` 的每項任務多一個 `points`（完成這項任務額外加的點數，目前是 5），並新增 `all_done_bonus`：
+
+```json
+"all_done_bonus": { "points": 20, "earned": false }
+```
+
+`earned` 為 `true` 代表今天的「全部完成加碼」已經領過了。
+
+#### 4. 遊戲名稱統一為 App 內的正式名稱 ⚠️
+
+`GET /api/home/games/`（遊戲卡片）、週報、首頁今日任務標題裡的遊戲名稱（`name`／`title`）有變：
+
+| `game_id` | 原本 | 現在 |
+|---|---|---|
+| `market_route` | 菜市場找路 | **來去菜市場** |
+| `memory_recall` | 煮菜過程 | **記憶配對** |
+| `fridge_check` | 冰箱檢查 | **冰箱清點** |
+| `market_sort` | 整理菜籃（`title` 是「整理菜籃遊戲」） | **整理菜籃**（`name`、`title` 一致） |
+| `market_shopping` | 市場買菜 | 市場買菜（不變） |
+
+前端如果有把名稱寫死在畫面或判斷裡，請改用後端給的值。
+
+#### 5. 日記回應格式統一
+
+- `POST /api/diary/{id}/finalize/`、`POST /api/diary/{id}/share/` 的回應改為 `{ "success": true, "data": {…}, "error": null }`（原本只有 `{ "data": {…} }`）。**資料都在 `data` 裡，位置沒變**，只是多了 `success`、`error`。
+- 日記相關的**錯誤**一律是 `{ "success": false, "data": null, "error": { "code", "message" } }`（含 F7 的 400 `INVALID_ROUND_INDEX`、409 `ROUND_ALREADY_ANSWERED`）。原本沒有 `success`、`data` 欄位；用 `error.code` 判斷的不用改。
+- 日記的**其他成功回應**（月曆、詳情、上傳、回覆…）目前仍是 `{ "data": {…} }`，之後 `fix/global` 會再統一。
+
+#### 6. 呼叫順序與注意事項
+
+- 日記 `finalize`：先完成日記，**成功寫入後**才發點。就算發點失敗，日記仍然完成，回應照樣是 201，只是 `rewards.error` 有值。
+- 別人的遊戲場次不能結算、不能拿點數（回 403，見 F2／F3）；沒登入也不行。
+- 同一場遊戲、同一篇日記重複送出，只會入帳一次（資料庫有唯一限制）。
+
+---
+
 ## 3. 還沒做的事（前端可以先知道方向）
 
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。
@@ -424,6 +547,7 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 - **被鎖住的是帳號名稱**（F4）：知道對方帳號的人可以故意把它鎖一小時。這是次數限制的取捨。
 - **同步刪除檔案**（F6）：檔案很多的帳號，刪除請求會比較久；之後可改成背景處理。
 - **資料庫鎖**（F7）需要 PostgreSQL 才有實際效果。
+- **F14 新增 `rewards` 的 migration**（`rewards/migrations/0001_initial.py`，兩張新表），部署時要 `python manage.py migrate`。
 - **F12 的 migration 會永久刪除兩張資料表**（`assessments_ad8record`、`dashboard_healthdashboardrecord`）。部署前請先查筆數並備份（本機兩張都是 0 筆，正式環境未知）；migration 可倒退，但只會重建空表。
 - **測試檔路徑改了**（#103）：測試都搬進各 app 的 `tests/` 資料夾，指令例如 `python manage.py test diary.tests.test_media --settings=config.settings_test`。
 
@@ -446,9 +570,10 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 | F11 | #99 | `fix(games): 遊戲與會員中心的日期改用台灣時間` |
 | F10 | #100、#101 | `fix(dashboard): 週報重複點開不再重複呼叫 AI 與寫資料庫` |
 | F12 | #102 | `refactor(assessments): 移除未使用的 AD-8 與健康儀表板診斷性模型` |
+| F14 | #106、#107、#108 | `feat(rewards): 新增點數與成就系統…`、`feat(rewards): 9 支 API 串接 grant() 並回傳 rewards`＋`feat(rewards): 合併 rewards 點數與成就系統，並與 F1～F13 整合` |
 
 > 只有 F1 的 commit 有 `!`（破壞性變更）。F2～F13 對「正常使用」的前端流程不造成破壞，但上面第 1.1 節列的項目仍需要確認。
 >
 > 更詳細的技術紀錄（程式怎麼改、測試、限制）見 [fix_features_changelog.md](fix_features_changelog.md)。
 
-新增的測試檔：`games/tests/test_anonymous.py`、`games/tests/test_session_owner.py`、`games/market_sort/tests/test_owner.py`、`users/tests/test_password_reset_throttle.py`、`diary/tests/test_media.py`、`users/tests/test_delete_account_files.py`、`diary/tests/test_reply_validation.py`。F8～F13 的測試檔見 [fix_features_changelog.md](fix_features_changelog.md) 第 8～13 章。
+新增的測試檔：`games/tests/test_anonymous.py`、`games/tests/test_session_owner.py`、`games/market_sort/tests/test_owner.py`、`users/tests/test_password_reset_throttle.py`、`diary/tests/test_media.py`、`users/tests/test_delete_account_files.py`、`diary/tests/test_reply_validation.py`。F8～F14 的測試檔見 [fix_features_changelog.md](fix_features_changelog.md) 第 8～13 章與第 15 章。

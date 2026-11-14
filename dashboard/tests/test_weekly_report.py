@@ -19,6 +19,7 @@ from games import session_service
 from games.models import GameSession
 from users.models import User
 
+from ..models import WeeklyReport
 from ..services import DIMENSIONS, GAME_SOURCES
 from ..weekly_report import (
     build_abilities,
@@ -241,7 +242,7 @@ class WeeklyReportDataTests(TestCase):
         games = {g["source"]: g for g in play_time["games"]}
         self.assertEqual([g["source"] for g in play_time["games"]], GAME_SOURCES)
         self.assertEqual(games["market_route"]["seconds"], 7 * 60)
-        self.assertEqual(games["market_route"]["label"], "菜市場找路")
+        self.assertEqual(games["market_route"]["label"], "來去菜市場")
         self.assertEqual(games["memory_recall"]["seconds"], 0)
         self.assertEqual(play_time["total_seconds"], 7 * 60)
 
@@ -649,6 +650,19 @@ class WeeklyReportApiTests(APITestCase):
         self.assertEqual(data["week_end"], week_end.isoformat())
         self.assertEqual(data["highlights"]["active_day_count"], 1)
         self.assertEqual(len(data["daily_activity"]), 7)
+
+    def test_first_view_returns_rewards_and_is_not_saved_in_snapshot(self):
+        first = self.client.get(WEEKLY_REPORT_URL).data["data"]["rewards"]
+        again = self.client.get(WEEKLY_REPORT_URL).data["data"]["rewards"]
+
+        self.assertIn(
+            "first_weekly_report", [a["code"] for a in first["new_achievements"]]
+        )
+        self.assertEqual(again["points_earned"], 0)
+        self.assertEqual(again["new_achievements"], [])
+        # rewards 只放在回應，不存進週報快照
+        record = WeeklyReport.objects.get(user=self.user)
+        self.assertNotIn("rewards", record.report)
 
     def test_no_activity_still_returns_report(self):
         # 週報不設解鎖門檻，沒玩也有內容

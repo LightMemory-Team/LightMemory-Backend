@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     "ai_service",
     "home",
     "public_share",
+    "rewards",
 ]
 
 AUTH_USER_MODEL = "users.User"

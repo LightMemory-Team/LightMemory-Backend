@@ -265,3 +265,39 @@ class FullGameFlowTests(MarketShoppingTestCase):
         self.assertEqual(history_item["speed_score"], 100.0)
         self.assertEqual(history_item["average_reaction_time_ms"], 2750)
         self.assertEqual(history_item["reaction_time"], 2.75)
+
+
+class RewardsTests(MarketShoppingTestCase):
+    """第 10 題結束（is_completed 為 true）的回應才帶 rewards。"""
+
+    def test_full_game_returns_rewards_only_on_last_question(self):
+        question = self._create()
+        session_id = question["session_id"]
+
+        for _ in range(TOTAL_QUESTIONS):
+            data = self._play_question_correctly(session_id, question)
+            if data["is_completed"]:
+                break
+            # 還沒結束的題目沒有 rewards
+            self.assertNotIn("rewards", data)
+            question = data["next_question"]
+
+        self.assertTrue(data["is_completed"])
+        self.assertGreaterEqual(data["rewards"]["points_earned"], 10)
+        # rewards 只出現在回應裡，不寫進場次結果
+        session = session_service.get_session(GAME_TYPE, session_id)
+        self.assertNotIn("rewards", session["result"])
+
+    def test_skipping_last_question_by_wrong_items_returns_rewards(self):
+        session_id = self._create()["session_id"]
+        session_service.update_session(
+            GAME_TYPE, session_id, question_number=TOTAL_QUESTIONS
+        )
+
+        for _ in range(3):
+            response = self._answer_items(session_id, ["not_a_food"])
+
+        data = response.data["data"]
+        self.assertTrue(data["is_completed"])
+        self.assertTrue(data["question_skipped"])
+        self.assertGreaterEqual(data["rewards"]["points_earned"], 10)
