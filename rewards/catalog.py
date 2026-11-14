@@ -25,7 +25,7 @@ CATEGORY_POINTS = {"exploration": 10, "training": 20, "milestone": 30}
 # 5 款遊戲的 App 內正式名稱（game_id → 名稱）
 GAME_NAMES = {
     "market_route": "來去菜市場",
-    "memory_recall": "料理準備",
+    "memory_recall": "記憶配對",
     "market_sort": "整理菜籃",
     "fridge_check": "冰箱清點",
     "market_shopping": "市場買菜",

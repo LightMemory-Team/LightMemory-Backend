@@ -241,7 +241,7 @@ class WeeklyReportDataTests(TestCase):
         games = {g["source"]: g for g in play_time["games"]}
         self.assertEqual([g["source"] for g in play_time["games"]], GAME_SOURCES)
         self.assertEqual(games["market_route"]["seconds"], 7 * 60)
-        self.assertEqual(games["market_route"]["label"], "菜市場找路")
+        self.assertEqual(games["market_route"]["label"], "來去菜市場")
         self.assertEqual(games["memory_recall"]["seconds"], 0)
         self.assertEqual(play_time["total_seconds"], 7 * 60)
 

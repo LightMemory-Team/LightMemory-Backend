@@ -29,12 +29,12 @@ GAME_DIMENSIONS = [
     if item["source"] != dashboard_services.DIARY_SOURCE
 ]
 
-# 任務標題裡的遊戲短名稱（跟 games/catalog.py 的 title 不完全相同）
+# 任務標題裡的遊戲名稱（App 內正式名稱，跟 games/catalog.py 一致）
 GAME_TASK_NAMES = {
-    "market_route": "今天去菜市場",
+    "market_route": "來去菜市場",
     "memory_recall": "記憶配對",
     "market_sort": "整理菜籃",
-    "fridge_check": "冰箱檢查",
+    "fridge_check": "冰箱清點",
     "market_shopping": "市場買菜",
 }
 

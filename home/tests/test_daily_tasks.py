@@ -314,7 +314,7 @@ class DoneTests(DailyTaskTestCase):
             set(data["tasks"][0]),
             {"id", "type", "title", "game_id", "dimension", "done"},
         )
-        self.assertEqual(data["tasks"][0]["title"], "玩「今天去菜市場」")
+        self.assertEqual(data["tasks"][0]["title"], "玩「來去菜市場」")
         self.assertEqual(data["tasks"][3]["title"], "寫一篇聲影日記")
 
 
