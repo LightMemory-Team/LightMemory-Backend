@@ -785,9 +785,24 @@ multipart：`nickname`（1–12 字）、`audio_file`（webm／mp4／ogg／m4a�
 | 轉文字 | `VOICE_REPLY_NOT_FOUND` | 404 |
 | 轉文字 | `TRANSCRIBE_FAILED` | 502 |
 
-**分享頁（網頁，`GET /share/<share_token>/`）**：語音加油收在留言區，輸入框旁的麥克風點了直接錄音（最長 10 秒自動停止），可試聽、重錄、送出；送出後列在「已送出」。暱稱沿用留言的暱稱。日記有 `suggested_replies` 時，留言框上方顯示最多 3 個參考句小標籤，點了只當提詞，不會自動送出。瀏覽器不支援錄音或拒絕麥克風權限時，只保留文字留言。
+**分享頁（網頁，`GET /share/<share_token>/`）**：語音加油收在留言區，輸入框旁的麥克風點了直接錄音（最長 10 秒自動停止），可試聽、重錄、送出。暱稱沿用留言的暱稱。日記有 `suggested_replies` 時，留言框上方顯示最多 3 個參考句小標籤，點了只當提詞，不會自動送出。瀏覽器不支援錄音或拒絕麥克風權限時，只保留文字留言。
 
 **檔案**：`social/models.py`（`VoiceReply`）、`public_share/views.py`、`social/views.py`、`diary/external.py`（`download_from_firebase`）、`public_share/templates/public_share/share.html`、`public_share/static/public_share/share.js`、`share.css`
+
+---
+
+### 分享頁：送出成功彈窗＋留言彈幕（feature/share-danmaku-1114）
+
+只改分享頁網頁，**API 與資料表都沒變**。
+
+- 文字留言或語音加油送出成功後，跳出「成功送出」彈窗，按鈕「再留言一篇」；原本留言區的「已送出」列表拿掉
+- 照片上用彈幕飄過之前的人留下的內容：文字留言＋語音加油，新的在前，最多 30 則，每則最多 30 字；右上角可開關彈幕
+- 語音只顯示「{暱稱}：送了一段語音加油」，**不公開音檔與轉出來的文字**（只給作者在 App 看）
+- ⚠️ 隱私：拿到分享連結的人，都看得到其他親友的暱稱與留言（之前只看得到自己送出的）
+
+資料由 `SharePageView` 的 context `danmaku_items`（`public_share/views.py` 的 `build_danmaku_items`）以 `json_script id="danmaku-data"` 給 `share.js`，每則 `{name, text, kind: "comment" | "voice"}`。
+
+**檔案**：`public_share/views.py`、`share.html`、`share.js`、`share.css`、`public_share/tests/test_share_page_danmaku.py`
 
 ---
 
