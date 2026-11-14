@@ -1,4 +1,4 @@
-# 後端安全與穩定性修正總覽（F1～F14、G3）
+# 後端安全與穩定性修正總覽（F1～F14、G3、G4）
 
 更新日期：2026-11-10 · 範圍：`fix/features` 分支（個別功能問題），F1～F14 已全部合併進去
 
@@ -9,6 +9,8 @@
 > **F8～F13 對前端幾乎沒有影響**（API 的格式與欄位都沒變），只有 F11（日期值）與 F13（AI 文字可能改成固定句型）值得知道。看 [F8～F13 一覽](#f8f13-給前端的總結)即可。
 >
 > **G3（`fix/global`）：登入、註冊、改密碼、刪帳號也有次數限制了**，超過會回 429，見 [G3](#g3--登入註冊改密碼刪帳號的次數限制fixglobal)。
+>
+> **G4（`fix/global`）：改密碼後舊的登入 token 會失效**，部署後所有人要重新登入一次，見 [G4](#g4--改密碼或重設密碼後舊的登入-token-失效fixglobal)。
 >
 > **F14 是新功能「點數與成就」（rewards）**，有 3 支新 API，而且 10 支既有 API 的回應多了一個 `rewards` 區塊，另外遊戲名稱與日記回應格式也有變動，前端要改。看 [F14](#f14--點數與成就rewards)。
 
@@ -58,6 +60,7 @@
 - [ ] （F14）新增「點數總覽」「成就牆」「點數紀錄」三個畫面所需的 API 串接（F14）
 - [ ] （F14）遊戲名稱改版：**不要在前端寫死遊戲名稱**，用後端給的 `name`／`title`（F14）
 - [ ] （G3）**登入、註冊、修改密碼、刪除帳號**都要處理 **429**，顯示「操作太頻繁了，請稍後再試」，可讀 `Retry-After`（秒）。登入被鎖時**即使密碼正確也不能登入**，要提示等待（G3）
+- [ ] （G4）**換 token 失敗（401）就導回登入頁，不要一直重試**；**修改密碼成功後，用回應裡的新 `access`／`refresh` 換掉本機儲存的舊 token**；部署後使用者要重新登入一次（G4）
 - [ ] （F14）日記完成（`finalize`）、分享（`share`）以及回覆日記（`replies`）的錯誤回應現在有 `success: false`，用 `error.code` 判斷的話不用改（F14）
 
 ### 1.2 錯誤碼總表（這一輪新增或變更的）
@@ -555,6 +558,38 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 - `POST /api/users/login/refresh/`（換 token）沒有限制。
 
 **檔案**：`users/throttles.py`、`users/views.py`（新增 `LoginView`）、`users/urls.py`、`config/settings.py`、`users/tests/test_auth_throttle.py`（新）
+
+---
+
+### G4 — 改密碼或重設密碼後，舊的登入 token 失效（fix/global）
+
+以前換密碼之後，舊的 token 還能用最久 30 天（密碼被盜用才換的話，攻擊者仍然進得來）。現在**密碼一改，這個帳號所有舊的 token 立刻失效**。
+
+**會發生什麼**
+
+| 情境 | 結果 |
+|---|---|
+| 部署這個版本後 | **所有人的舊 token 都失效，要重新登入一次**（舊 token 沒有密碼指紋） |
+| 在手機 A 修改密碼 | 手機 A **不會被登出**（修改密碼的回應有新的 token）；同一個帳號在**其他裝置會被登出** |
+| 忘記密碼重設成功 | 重設前所有裝置的 token 都失效（本來就要用新密碼重新登入） |
+| 修改暱稱等個人資料、在另一台裝置登入 | 不影響既有 token |
+
+**失效的 token 會回**：`401`，`error.code` 是 `NOT_AUTHENTICATED`（和 token 過期同一種）。**換 token（`POST /api/users/login/refresh/`）也會回 401**，所以：
+
+```
+請求 → 401 → 用 refresh token 換新的 access token
+                ├─ 成功 → 用新的 access token 重送
+                └─ 失敗（401）→ 清掉本機 token，導回登入頁
+```
+
+**前端要做的事**
+1. 換 token 回 401 時，**清掉本機 token 並導回登入頁，不要無限重試**。
+2. **修改密碼成功後（`POST /api/users/me/password/`）**，回應 `data.access`、`data.refresh` 是新的 token，**一定要換掉本機儲存的舊 token**；不換的話下一個請求就會 401。
+3. 部署後使用者第一次會被要求重新登入，屬於預期行為。
+
+**限制**：沒有「登出時作廢 token」（access 仍有效 1 天、refresh 30 天）；只有「換密碼」會作廢。
+
+**檔案**：`config/settings.py`（`CHECK_REVOKE_TOKEN`）、`users/views.py`（`RefreshView`）、`users/urls.py`、`users/tests/test_token_revoke.py`（新）
 
 ---
 

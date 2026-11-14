@@ -211,6 +211,11 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    # 改密碼（或忘記密碼重設）後，舊的 token 全部作廢：
+    # token 裡記一份「當時密碼的雜湊」，驗證時跟目前的密碼比對，對不上就拒絕（401）。
+    # 不需要資料表。
+    # 換 token 的端點也有同樣檢查，見 users/views.py 的 RefreshView。
+    "CHECK_REVOKE_TOKEN": True,
 }
 
 # CORS（跨來源請求）只影響「瀏覽器」：Flutter 手機 App 不受影響，Flutter Web 才會用到。
