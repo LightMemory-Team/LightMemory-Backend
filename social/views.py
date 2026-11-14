@@ -1,8 +1,11 @@
+from django.db import transaction
 from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from diary.external import delete_from_firebase
 
 from .models import Comment, Notification
 from .serializers import CommentSerializer, NotificationSerializer
@@ -73,7 +76,12 @@ class PostDetailView(APIView):
         post = get_visible_post(request.user, post_id)
         if not post:
             return error_response("POST_NOT_FOUND", "找不到這則貼文", 404)
-        post.delete()
+        # 語音加油的音檔在 Firebase：先記下路徑，資料庫刪除成功後才刪檔案
+        audio_paths = list(post.voice_replies.values_list("audio_path", flat=True))
+        with transaction.atomic():
+            post.delete()
+            if audio_paths:
+                transaction.on_commit(lambda: delete_from_firebase(audio_paths))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

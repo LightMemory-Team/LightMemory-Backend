@@ -22,7 +22,7 @@ from config.exceptions import ApiError
 from diary.external import delete_from_firebase
 from diary.models import Diary, DiaryReply
 from games.models import GameSession
-from social.models import Post
+from social.models import Post, VoiceReply
 
 from .serializers import (
     AccountDeleteSerializer,
@@ -64,7 +64,7 @@ def get_active_user_or_404(username):
 def collect_user_media(user):
     """收集這位使用者所有存在檔案儲存空間的檔案（資料庫裡存的路徑或網址）。
 
-    包含頭像、日記照片、日記錄音、社群貼文照片。必須在刪除使用者「之前」呼叫，
+    包含頭像、日記照片、日記錄音、社群貼文照片、親友的語音加油。必須在刪除使用者「之前」呼叫，
     因為使用者一刪，這些資料列也會一起被刪掉。
     """
     values = {user.avatar_url}
@@ -76,6 +76,9 @@ def collect_user_media(user):
         DiaryReply.objects.filter(diary__user=user).values_list("audio_path", flat=True)
     )
     values.update(Post.objects.filter(user=user).values_list("image_path", flat=True))
+    values.update(
+        VoiceReply.objects.filter(post__user=user).values_list("audio_path", flat=True)
+    )
     return {v for v in values if v}
 
 
