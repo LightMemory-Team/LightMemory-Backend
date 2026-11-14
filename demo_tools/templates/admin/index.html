@@ -1,0 +1,21 @@
+{% extends "admin/index.html" %}
+{% comment %}
+  蓋過後台首頁，在最上面加「維護任務」入口。
+  extends 同名模板會接到 Django 原本的 admin/index.html（demo_tools 在
+  INSTALLED_APPS 排在 django.contrib.admin 前面，所以先找到這一份）。
+{% endcomment %}
+
+{% block content %}
+{% if request.user.is_superuser %}
+<div class="module" style="margin-bottom: 20px;">
+  <table style="width: 100%;">
+    <caption>Demo 展示工具</caption>
+    <tr>
+      <th scope="row"><a href="{% url 'admin-demo' %}">維護任務</a></th>
+      <td>一鍵產生 admin_demo 的展示資料</td>
+    </tr>
+  </table>
+</div>
+{% endif %}
+{{ block.super }}
+{% endblock %}

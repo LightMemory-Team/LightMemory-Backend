@@ -18,7 +18,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from demo_tools.views import demo_page
+
 urlpatterns = [
+    # 維護任務頁要排在 admin/ 前面，不然會被後台的網址規則先接走
+    path("admin/demo/", admin.site.admin_view(demo_page), name="admin-demo"),
     path("admin/", admin.site.urls),
     path("api/home/", include("home.urls")),  # 首頁連線測試*
     path("api/social/", include("social.urls")),  # 通知相關功能
