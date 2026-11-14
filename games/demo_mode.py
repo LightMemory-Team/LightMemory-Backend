@@ -25,6 +25,12 @@ SCORE_KEYS = {
     "market_sort": ["cognitive_flexibility_score"],
 }
 
+# 結束畫面除了分數，還有其他欄位會用大字顯示，demo 也固定成 80 的樣子
+EXTRA_FIELDS = {
+    # 料理準備結算視窗的大字「本次分數」是正確率 × 100
+    "memory_recall": {"accuracy": DEMO_SCORE / 100},
+}
+
 
 def is_demo_user(user_or_id):
     """傳入 User 或 user id 都可以；沒有使用者（None）一律不是 demo。"""
@@ -55,6 +61,7 @@ def apply_demo_score(game_type, result):
         return result
     for key in SCORE_KEYS.get(game_type, []):
         result[key] = DEMO_SCORE
+    result.update(EXTRA_FIELDS.get(game_type, {}))
     result["z_score"] = DEMO_Z
     return result
 

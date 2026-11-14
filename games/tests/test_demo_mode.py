@@ -209,6 +209,8 @@ class MemoryRecallDemoTests(DemoModeTestCase):
         self.assertEqual(actions[:2], ["next_question", "next_question"])
         self.assertEqual(actions[2], "finished")
         self.assertEqual(finish["total_score"], demo_mode.DEMO_SCORE)
+        # 結算視窗的大字是正確率 × 100，也要是 80
+        self.assertEqual(finish["accuracy"], 0.8)
         self.assert_demo_session_saved("memory_recall")
 
     def test_normal_official_game_does_not_stop_at_three_rounds(self):

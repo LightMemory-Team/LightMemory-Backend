@@ -829,7 +829,8 @@ GET /api/games/market-sort/config/
 ```
 
 - admin_demo 交 3 題的 `submit/` 會被接受；其他人少於 28 題照舊回 400
-- admin_demo 每場分數固定 **80**（`total_score`／`standard_score`／`final_score`／`current_score`），`z_score` 固定 1.2，儀表板與週報也會顯示 80
+- admin_demo 每場分數固定 **80**（`total_score`／`standard_score`／`final_score`／`current_score`，市場買菜的 `raw_score` 也是），`z_score` 固定 1.2，儀表板與週報也會顯示 80
+- 料理準備的 `accuracy` 固定 0.8（結算視窗大字「本次分數」是正確率 × 100，才會跟總分一樣是 80）
 - admin_demo 沒有熟悉場（`is_pretest` 一律 false），第一場就有分數；點數、成就照常發
 - config 打不到或沒有 `total_questions` 時，前端請用原本的題數（20／28）
 
