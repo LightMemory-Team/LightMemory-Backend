@@ -806,6 +806,37 @@ multipart：`nickname`（1–12 字）、`audio_file`（webm／mp4／ogg／m4a�
 
 ---
 
+### 遊戲 Demo 模式：admin_demo 答 3 題就結束（feature/game-demo-mode-1115）
+
+複賽 demo 用。**只有登入帳號是 `admin_demo` 才會變**，其他帳號的 API 回應與流程完全照舊。前端不要自己判斷帳號名稱，一律照後端給的 `total_questions` 出題。
+
+| 遊戲 | 誰決定結束 | 前端要做的事 |
+|---|---|---|
+| 市場路線 market_route | 前端 | `GET /api/games/market-route/config/` 的 `total_questions`（admin_demo 是 3，其他人 20）取代寫死的 20 |
+| 市場分類 market_sort | 前端 | 開局先打**新 API** `GET /api/games/market-sort/config/`，照 `total_questions` 出題（admin_demo 是 3，其他人 28） |
+| 冰箱檢查 fridge_check | 後端 | 第 3 題答完就回 `is_completed: true`；進度顯示請用回應裡的 `total_questions` |
+| 市場買菜 market_shopping | 後端 | 同上 |
+| 料理準備 memory_recall | 後端 | 第 3 回合回 `action: "finished"`，前端原本就會呼叫 `finish/` |
+
+新 API（需登入）：
+
+```http
+GET /api/games/market-sort/config/
+```
+
+```json
+{ "success": true, "data": { "total_questions": 28 }, "error": null }
+```
+
+- admin_demo 交 3 題的 `submit/` 會被接受；其他人少於 28 題照舊回 400
+- admin_demo 每場分數固定 **80**（`total_score`／`standard_score`／`final_score`／`current_score`），`z_score` 固定 1.2，儀表板與週報也會顯示 80
+- admin_demo 沒有熟悉場（`is_pretest` 一律 false），第一場就有分數；點數、成就照常發
+- config 打不到或沒有 `total_questions` 時，前端請用原本的題數（20／28）
+
+**檔案**：`games/demo_mode.py`、`games/session_service.py`、五款遊戲的 views／services、`games/market_sort/urls.py`、`games/tests/test_demo_mode.py`
+
+---
+
 ## 3. 還沒做的事（前端可以先知道方向）
 
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。
