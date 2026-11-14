@@ -5,8 +5,8 @@
 - 沒有有效日記的使用者不會掃全站
 - 一次儀表板／週報請求只掃一次全站日記（原本最多 4 次）
 
-執行：
-    python manage.py test dashboard.tests.test_diary_z_scan --settings=config.settings_test
+執行（PostgreSQL 或加上 --settings=config.settings_test 用 SQLite 都可以）：
+    python manage.py test dashboard.tests.test_diary_z_scan
 """
 
 import random
@@ -25,9 +25,11 @@ from diary.models import Diary, DiaryAnalysis
 from users.models import User
 
 from .. import services
-# 借用 test_dashboard_api 的測試資料 helper；只 import 模組、不 import 類別，避免被重複執行
-from . import test_dashboard_api as dashboard_tests
 from ..diary_zscore import METRIC_RULES, calculate_language_z_score
+
+# 借用 test_dashboard_api 的測試資料 helper；
+# 只 import 模組、不 import 類別，避免被重複執行
+from . import test_dashboard_api as dashboard_tests
 
 
 def make_diary(user, created_at, rng, *, is_valid=True, audio_path=""):
@@ -126,6 +128,14 @@ class DiaryZScoreEquivalenceTests(TestCase):
             (self.now + day, None),
         ]
 
+    def assert_same_scores(self, actual, expected):
+        """兩份 (建立時間, z) 清單內容相同。
+
+        同一時間建立的日記，資料庫不保證回傳順序（PostgreSQL 新舊兩版的查詢
+        可能排得不一樣，SQLite 剛好一樣），所以先排序再比，只比內容不比順序。
+        """
+        self.assertEqual(sorted(actual), sorted(expected))
+
     def test_same_as_the_old_algorithm_for_every_period(self):
         compared_non_empty = 0
         for who in (self.me, User.objects.get(username="b"), self.staff):
@@ -134,7 +144,7 @@ class DiaryZScoreEquivalenceTests(TestCase):
                     expected = reference_diary_z_scores(who, start, end)
                     actual = services.diary_z_scores(who, start, end)
 
-                    self.assertEqual(actual, expected)
+                    self.assert_same_scores(actual, expected)
                     compared_non_empty += bool(expected)
         # 確認這份資料真的算得出 z，比較才有意義
         self.assertGreater(compared_non_empty, 5)
@@ -148,7 +158,7 @@ class DiaryZScoreEquivalenceTests(TestCase):
             )
 
         self.assertEqual(len(ctx), 0)
-        self.assertEqual(
+        self.assert_same_scores(
             result,
             reference_diary_z_scores(self.me, start=self.now - timedelta(days=90)),
         )
