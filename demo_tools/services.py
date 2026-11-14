@@ -11,15 +11,17 @@ from django.utils import timezone
 
 from dashboard.alerts import get_score_alerts
 from dashboard.management.commands.seed_demo import (
+    DIARY_THEMES,
     QUESTION_COUNTS,
     RESULT_BUILDERS,
     SEED_PREFIX,
+    create_diary_analysis,
     ensure_games,
     seed_demo_data,
 )
 from dashboard.models import WeeklyReport
 from dashboard.services import GAME_SOURCES, GAME_TITLES
-from diary.models import Diary
+from diary.models import Diary, DiaryReply
 from games.models import GameRecord, GameSession
 from games.zscore import z_score_to_display_score
 from home.models import DailyTask
@@ -133,7 +135,68 @@ def seed_share_comments(user):
     return f"已分享日記「{diary.title}」並加上 {len(DEMO_COMMENTS)} 則親友留言"
 
 
-# ── 按鈕 3：點數與成就 ───────────────────────────────────
+# ── 按鈕 3：一篇已發佈到動態牆的日記 ────────────────────────
+
+
+def feed_audio_path(theme_index):
+    # seed/ 開頭：不會被拿去當其他人的比較基準；重按同一個主題靠它找到舊的那篇
+    return f"{SEED_PREFIX}/feed-{theme_index}.m4a"
+
+
+def seed_feed_post(user, theme_choice):
+    """建立一篇今天的完整日記（照片、問答、分析），並發佈到動態牆。
+
+    主題用 seed_demo 的 DIARY_THEMES（照片已在 Firebase Storage）。
+    同一個主題重按只留一篇；換主題再按就多一篇。
+    """
+    if theme_choice not in {str(i) for i in range(len(DIARY_THEMES))}:
+        raise DemoTaskError("請先選擇日記主題")
+    theme = DIARY_THEMES[int(theme_choice)]
+
+    # 刪日記會連帶刪掉它的貼文、問答、分析、留言
+    audio_path = feed_audio_path(theme_choice)
+    Diary.objects.filter(user=user, audio_path=audio_path).delete()
+
+    created_at = timezone.now() - timedelta(minutes=10)
+    diary = Diary.objects.create(
+        user=user,
+        audio_path=audio_path,
+        image_path=theme["image_url"],
+        transcription=theme["transcription"],
+        diary_text=theme["transcription"],
+        title=theme["title"],
+        first_question=theme["first_question"],
+        ai_response=theme["ai_response"],
+        status="done",
+        post_text=theme["post_text"],
+        hashtags=theme["hashtags"],
+        category=theme["category"],
+        suggested_replies=["好溫馨！", "看起來好棒！", "下次也帶我去！"],
+        invite_text="一起來分享你的生活吧！",
+    )
+    # created_at 是 auto_now_add，只能建立後再改
+    Diary.objects.filter(pk=diary.pk).update(created_at=created_at)
+    for round_index, transcript in enumerate(theme["replies"], start=1):
+        reply = DiaryReply.objects.create(
+            diary=diary, round_index=round_index, transcript=transcript
+        )
+        DiaryReply.objects.filter(pk=reply.pk).update(
+            created_at=created_at + timedelta(minutes=2 * round_index)
+        )
+    create_diary_analysis(diary, 0.3)
+
+    # 跟 App 的分享 API（diary/views.py DiaryShareView）一樣的建立方式
+    Post.objects.create(
+        diary=diary,
+        user=user,
+        post_type="diary",
+        content=diary.post_text,
+        image_path=diary.image_path,
+    )
+    return f"已發佈日記「{theme['title']}」到動態牆"
+
+
+# ── 按鈕 4：點數與成就 ───────────────────────────────────
 
 
 def seed_rewards(user):
@@ -170,7 +233,7 @@ def seed_rewards(user):
     return f"目前共 {points} 點、已解鎖 {achievements} 個成就"
 
 
-# ── 按鈕 4：分數極端值（儀表板小提醒） ─────────────────────
+# ── 按鈕 5：分數極端值（儀表板小提醒） ─────────────────────
 
 # 比小提醒的門檻（dashboard/alerts.py 的 ALERT_Z_THRESHOLD = -1.5）再低一點，
 # 一定會觸發；換算成顯示分數是 5 分
@@ -218,7 +281,7 @@ def seed_score_alert(user, game_code):
     )
 
 
-# ── 按鈕 5：全部清除 ─────────────────────────────────────
+# ── 按鈕 6：全部清除 ─────────────────────────────────────
 
 
 def clear_all(user):
@@ -255,6 +318,7 @@ def get_status(user):
         ],
         "diary_count": Diary.objects.filter(user=user).count(),
         "comment_count": Comment.objects.filter(post__user=user).count(),
+        "post_count": Post.objects.filter(user=user, is_enabled=True).count(),
         "total_points": rewards_services.total_points(user),
         "achievement_count": UserAchievement.objects.filter(user=user).count(),
         # 儀表板現在會顯示的小提醒（遊戲名稱）
@@ -269,6 +333,13 @@ TASKS = {
         "label": "產生三個月遊戲＋日記紀錄",
         "help": "五款遊戲各 30 場、聲影日記 30 篇。儀表板雷達圖會解鎖，週報也有內容。",
         "run": seed_history,
+    },
+    "seed_feed_post": {
+        "label": "產生動態牆日記",
+        "help": "選一個主題，建立一篇今天的完整日記（照片、問答）並發佈到動態牆。"
+        "換主題再按就多一篇；之後按「產生分享頁留言」會留言在最新這篇。",
+        "run": seed_feed_post,
+        "choices": [(str(i), theme["title"]) for i, theme in enumerate(DIARY_THEMES)],
     },
     "seed_share_comments": {
         "label": "產生分享頁留言",

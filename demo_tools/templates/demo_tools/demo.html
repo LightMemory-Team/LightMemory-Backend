@@ -21,6 +21,7 @@
         <tr><th scope="row">{{ game.title }}</th><td>{{ game.count }} 場</td></tr>
         {% endfor %}
         <tr><th scope="row">聲影日記</th><td>{{ status.diary_count }} 篇</td></tr>
+        <tr><th scope="row">動態牆貼文</th><td>{{ status.post_count }} 篇</td></tr>
         <tr><th scope="row">分享頁留言</th><td>{{ status.comment_count }} 則</td></tr>
         <tr>
           <th scope="row">儀表板小提醒</th>
@@ -52,7 +53,7 @@
               {% csrf_token %}
               <input type="hidden" name="task" value="{{ task.key }}">
               {% if task.choices %}
-                <select name="choice" aria-label="選擇遊戲" style="margin-bottom: 4px;">
+                <select name="choice" aria-label="選擇{{ task.label }}的項目" style="margin-bottom: 4px;">
                   {% for value, label in task.choices %}
                     <option value="{{ value }}">{{ label }}</option>
                   {% endfor %}
