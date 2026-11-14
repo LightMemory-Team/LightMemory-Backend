@@ -348,7 +348,15 @@ class HomeEndpointSystemTests(APITestCase):
         response = self.client.get('/api/home/games/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        games = response.data['games']
+        # 目錄裡的欄位原樣回傳，另外加上本週是否玩過、對應的認知維度
+        added = ('dimension', 'dimension_label')
+        catalog_fields = [
+            {k: v for k, v in game.items() if k not in added} for game in games
+        ]
         self.assertEqual(
-            response.data['games'],
+            catalog_fields,
             [{**game, 'played_this_week': False} for game in GAMES],
         )
+        for game in games:
+            self.assertTrue(game['dimension_label'])
