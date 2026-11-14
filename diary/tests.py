@@ -13,6 +13,17 @@ User = get_user_model()
 
 CALENDAR_URL = '/api/diary/'
 
+# 假的 AI 產生內容（finalize 測試用，避免真的呼叫 AI）
+FINALIZE_CONTENT = {
+    "title": "公園散步",
+    "ai_response": "聽起來真愉快！",
+    "post_text": "今天去公園散步",
+    "hashtags": ["#散步"],
+    "category": "entertainment",
+    "suggested_replies": ["真棒！"],
+    "invite_text": "來看看吧",
+}
+
 
 class DiaryCalendarEndpointTests(APITestCase):
 
@@ -116,6 +127,22 @@ class DiaryFinalizeEndpointTests(APITestCase):
         self.assertEqual(response.data['data']['title'], "公園散步")
         self.assertTrue(DiaryAnalysis.objects.filter(diary=self.diary).exists())
 
+    @patch(
+        'diary.views.ai_gen.generate_finalize_content',
+        return_value=FINALIZE_CONTENT,
+    )
+    def test_finalize_returns_rewards_only_the_first_time(self, mock_content):
+        url = f'/api/diary/{self.diary.id}/finalize/'
+        first = self.client.post(url).data['data']['rewards']
+        again = self.client.post(url).data['data']['rewards']
+
+        # 第一次：完成日記 15 點，並解鎖「說說我的故事」
+        self.assertGreaterEqual(first['points_earned'], 15)
+        self.assertIn('first_diary', [a['code'] for a in first['new_achievements']])
+        # 已完成的日記再呼叫一次：0 點、沒有新成就
+        self.assertEqual(again['points_earned'], 0)
+        self.assertEqual(again['new_achievements'], [])
+
     def test_finalize_without_any_reply_returns_400(self):
         empty_diary = Diary.objects.create(user=self.user, status='pending')
         response = self.client.post(f'/api/diary/{empty_diary.id}/finalize/')
@@ -167,6 +194,15 @@ class DiaryShareEndpointTests(APITestCase):
         post = Post.objects.get(diary=self.done_diary)
         self.assertEqual(post.user, self.user)
         self.assertEqual(post.content, self.done_diary.post_text)
+
+    def test_first_share_unlocks_achievement_only_once(self):
+        url = f'/api/diary/{self.done_diary.id}/share/'
+        first = self.client.post(url).data['data']['rewards']
+        again = self.client.post(url).data['data']['rewards']
+
+        self.assertIn('first_share', [a['code'] for a in first['new_achievements']])
+        self.assertEqual(again['points_earned'], 0)
+        self.assertEqual(again['new_achievements'], [])
 
     def test_share_already_shared_returns_200_and_same_post(self):
         url = f'/api/diary/{self.done_diary.id}/share/'

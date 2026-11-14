@@ -182,6 +182,7 @@ def submit_item_answer(request, session_id):
                             "average_reaction_time_ms"
                         ),
                         "completed_at": result["completed_at"],
+                        "rewards": session_service.grant_rewards(GAME_TYPE, session_id),
                     },
                     "error": None,
                 },
@@ -345,6 +346,7 @@ def submit_change_answer(request, session_id):
                             "average_reaction_time_ms"
                         ),
                         "completed_at": result["completed_at"],
+                        "rewards": session_service.grant_rewards(GAME_TYPE, session_id),
                     },
                     "error": None,
                 },
@@ -394,6 +396,7 @@ def submit_change_answer(request, session_id):
                     "average_reaction_time_ms": result.get("average_reaction_time_ms"),
                     "difficulty": result["difficulty"],
                     "completed_at": result["completed_at"],
+                    "rewards": session_service.grant_rewards(GAME_TYPE, session_id),
                 },
                 "error": None,
             },

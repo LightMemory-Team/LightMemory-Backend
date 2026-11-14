@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 
+from rewards import services as rewards_services
 from social.models import Post
 from social.utils import get_visible_post, serialize_post
 
@@ -157,7 +158,10 @@ class DiaryFinalizeView(APIView):
             return Response({"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}}, status=404)
 
         if diary.status == "done":
-            return self._build_response(diary, http_status=200)
+            # 已完成的日記再呼叫一次：grant() 不會重複入帳，回 0 點
+            return self._build_response(
+                diary, http_status=200, rewards=self._grant(diary)
+            )
 
         replies = diary.replies.filter(is_skipped=False).order_by('round_index')
         combined = '，'.join(r.transcript for r in replies if r.transcript)
@@ -185,9 +189,16 @@ class DiaryFinalizeView(APIView):
         diary.status = "done"
         diary.save()
 
-        return self._build_response(diary, http_status=201)
+        return self._build_response(diary, http_status=201, rewards=self._grant(diary))
 
-    def _build_response(self, diary, http_status):
+    @staticmethod
+    def _grant(diary):
+        """日記完成：發放點數與成就，回傳 rewards 區塊。"""
+        return rewards_services.grant(
+            diary.user, rewards_services.DIARY_COMPLETE, diary
+        )
+
+    def _build_response(self, diary, http_status, rewards):
         return Response({
             "data": {
                 "diary_id": diary.id,
@@ -201,6 +212,7 @@ class DiaryFinalizeView(APIView):
                 "hashtags": diary.hashtags,
                 "category": diary.category,
                 "invite_text": diary.invite_text,
+                "rewards": rewards,
             }
         }, status=http_status)
 
@@ -238,6 +250,10 @@ class DiaryShareView(APIView):
 
         visible_post = get_visible_post(request.user, post.id)
         data = serialize_post(visible_post, request.user)
+        # 第一次分享解鎖「樂於分享」成就；再分享一次不會重複解鎖
+        data["rewards"] = rewards_services.grant(
+            request.user, rewards_services.DIARY_SHARED
+        )
         http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response({"data": data}, status=http_status)
 

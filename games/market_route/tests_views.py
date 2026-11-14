@@ -409,10 +409,18 @@ class ErrorHandlingTests(MarketRouteTestCase):
         second = self._finish(session_id)
 
         self.assertEqual(second.status_code, status.HTTP_200_OK)
-        self.assertEqual(second.data["data"], first)
+        # 點數只發一次：第一次有點數，第二次是 0 點；其他結果完全相同
+        first_rewards = first.pop("rewards")
+        second_data = dict(second.data["data"])
+        second_rewards = second_data.pop("rewards")
+        self.assertGreaterEqual(first_rewards["points_earned"], 10)
+        self.assertEqual(second_rewards["points_earned"], 0)
+        self.assertEqual(second_data, first)
         self.assertEqual(
             GameSession.objects.get(id=session_id).finished_at, finished_at
         )
+        # rewards 只出現在回應裡，不寫進場次結果
+        self.assertNotIn("rewards", GameSession.objects.get(id=session_id).result)
 
 
 class ResultApiTests(MarketRouteTestCase):
