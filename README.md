@@ -269,6 +269,21 @@ pip install -r requirements.txt
 
 並填入 PostgreSQL 與 Firebase 相關設定。
 
+安全相關設定（`DJANGO_DEBUG`、`DJANGO_SECRET_KEY`、CORS 等）也從 `.env` 讀取：
+
+| 變數 | 開發 | 正式環境 |
+|---|---|---|
+| `DJANGO_DEBUG` | 設 `True` | 不設或設 `False`（**沒設就是 `False`**） |
+| `DJANGO_SECRET_KEY` | 不用設（會用開發專用的備用金鑰） | **一定要設**，沒設服務會起不來；不能用 `django-insecure-` 開頭的金鑰 |
+| `DJANGO_ALLOWED_HOSTS`、`DJANGO_CSRF_TRUSTED_ORIGINS` | 不用設（有預設） | 以逗號分隔，填實際網域 |
+| `DJANGO_CORS_ALLOWED_ORIGINS` | 不用設（開發預設允許所有來源） | 填 Flutter Web 的網址；Flutter 手機 App 不受 CORS 影響 |
+
+產生 `DJANGO_SECRET_KEY`：
+
+```bash
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
+
 > `.env` 不會上傳至 GitHub。
 
 ### 7. 建立資料庫

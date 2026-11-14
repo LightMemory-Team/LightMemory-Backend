@@ -16,7 +16,13 @@ Django 跑測試時會建立 test_<DB_NAME> 資料庫，若 .env 裡的 DB_USER
     python manage.py test
 """
 
-from .settings import *  # noqa: F401,F403
+import os
+
+# 測試不依賴 .env 裡有沒有金鑰：settings 在 DEBUG 關閉時一定要有 DJANGO_SECRET_KEY，
+# 這裡先補一把測試專用的（沒有 "django-insecure-" 開頭，不會被正式環境檢查擋掉）。
+os.environ.setdefault("DJANGO_SECRET_KEY", "test-only-secret-key-not-for-real-use")
+
+from .settings import *  # noqa: E402,F401,F403
 
 # 測試資料庫改用 SQLite in-memory，免 CREATEDB 權限
 DATABASES = {
