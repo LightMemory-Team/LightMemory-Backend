@@ -3,7 +3,7 @@ import random
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from games import session_service
+from games import demo_mode, session_service
 from games.dda import DDAConfig, apply_answer
 from games.utils import get_current_user
 
@@ -16,6 +16,8 @@ from .market_score import (
 from .market_zscore import calculate_attention_z_score
 
 GAME_TYPE = "market_route"
+# 每場題數；前端照 config/ 回傳的 total_questions 出題（demo 帳號是 3）
+TOTAL_QUESTIONS = 20
 
 STAGE_EXPOSURE_RANGE = {
     "basic": (2000, 1500),
@@ -119,7 +121,9 @@ def config(request):
     data = {
         "is_pretest": False,
         "current_stage": "basic",
-        "total_questions": 20,
+        "total_questions": demo_mode.question_limit(
+            get_current_user(request), TOTAL_QUESTIONS
+        ),
         "timeout_seconds": 20,
         "promote_streak": PROMOTE_STREAK,
         "demote_streak": DEMOTE_STREAK,
@@ -416,7 +420,7 @@ def finish(request):
     z_score = calculate_attention_z_score(session_id)
 
     result = {
-        "total_questions": 20,
+        "total_questions": demo_mode.session_question_limit(session, TOTAL_QUESTIONS),
         "answered_count": answered_count,
         "correct_count": correct_count,
         "timeout_count": timeout_count,

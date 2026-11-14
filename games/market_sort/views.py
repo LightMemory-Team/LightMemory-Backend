@@ -3,16 +3,19 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from games import session_service
+from games import demo_mode, session_service
 
 from .serializers import MarketSortSubmitSerializer
 from .services import (
+    STAGE_BOUNDARIES,
     InsufficientDataError,
     calculate_cognitive_flexibility_score,
     determine_encouragement_tier,
 )
 
 GAME_TYPE = "market_sort"
+# 正式計分需要的題數（最後一個階段邊界 = 28 題）
+TOTAL_QUESTIONS = STAGE_BOUNDARIES[-1]
 
 
 def previous_raw_metrics(session_id):
@@ -34,6 +37,21 @@ def previous_raw_metrics(session_id):
         ).items()
     }
     return personal, population
+
+
+class MarketSortConfigView(APIView):
+    """GET /api/games/market-sort/config/：這場要出幾題。
+
+    前端開局先問這支，照 total_questions 出題（demo 帳號是 3，其他人 28）。
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        data = {
+            "total_questions": demo_mode.question_limit(request.user, TOTAL_QUESTIONS)
+        }
+        return Response({"success": True, "data": data, "error": None})
 
 
 class MarketSortSubmitView(APIView):
@@ -92,6 +110,15 @@ class MarketSortSubmitView(APIView):
                 {"success": True, "data": None, "error": None},
                 status=status.HTTP_201_CREATED,
             )
+
+        # demo 帳號只玩 3 題，不夠正式計分：直接給固定分數（見 games/demo_mode.py）
+        if demo_mode.is_demo_user(request.user):
+            session = session_service.finish_session(
+                GAME_TYPE,
+                session_id,
+                result=demo_mode.market_sort_result(questions, timezone.now()),
+            )
+            return self._build_response(request.user, session)
 
         # 熟悉場不算分，給空歷史讓 z、分數都是 None
         histories = (

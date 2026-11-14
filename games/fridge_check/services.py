@@ -1,6 +1,6 @@
 from django.utils import timezone
 
-from games import session_service
+from games import demo_mode, session_service
 from games.utils import local_date_from_iso
 from games.dda import DDAConfig, NoOpStrategy, apply_answer
 from games.zscore import composite_z_score, z_score_to_display_score
@@ -409,7 +409,8 @@ def move_to_next_question(session):
 
     已完成 TOTAL_QUESTIONS 時回傳 None。
     """
-    if session["question_number"] >= TOTAL_QUESTIONS:
+    limit = demo_mode.session_question_limit(session, TOTAL_QUESTIONS)
+    if session["question_number"] >= limit:
         return None
 
     state = session["state"]
@@ -439,11 +440,13 @@ def calculate_final_result(session, personal_history=None, population_history=No
     personal_history / population_history 沒給時，從資料庫查這場之前的場次。
     """
     state = session["state"]
+    # 這場的題數（demo 帳號只有 3 題，見 games/demo_mode.py）
+    total_questions = demo_mode.session_question_limit(session, TOTAL_QUESTIONS)
 
     # 1. 正確率 0 ~ 100
     accuracy = round(
         state["total_correct"]
-        / TOTAL_QUESTIONS
+        / total_questions
         * 100,
         2,
     )
@@ -512,7 +515,7 @@ def calculate_final_result(session, personal_history=None, population_history=No
 
     return {
         "total_correct": state["total_correct"],
-        "total_questions": TOTAL_QUESTIONS,
+        "total_questions": total_questions,
 
         "accuracy": accuracy,
         "speed_score": speed_score,

@@ -6,7 +6,7 @@
 import random
 from django.utils import timezone
 
-from games import session_service
+from games import demo_mode, session_service
 from games.dda import DDAConfig, NoOpStrategy, apply_answer
 from games.zscore import composite_z_score, z_score_to_display_score
 
@@ -141,8 +141,10 @@ def generate_question(difficulty="easy"):
     }
 
 
-def build_question_payload(current_question, difficulty, question_number):
-    """組出回傳給前端的題目資料。"""
+def build_question_payload(
+    current_question, difficulty, question_number, total_questions=TOTAL_QUESTIONS
+):
+    """組出回傳給前端的題目資料。total_questions 是這場的題數（demo 帳號 3 題）。"""
     shopping_list = [
         {"food_code": item["food_code"], "food_name": item["food_name"]}
         for item in current_question["target_items"]
@@ -154,7 +156,7 @@ def build_question_payload(current_question, difficulty, question_number):
     return {
         "difficulty": difficulty,
         "current_question": question_number,
-        "total_questions": TOTAL_QUESTIONS,
+        "total_questions": total_questions,
         "shopping_list": shopping_list,
         "selection_options": selection_options,
     }
@@ -411,7 +413,7 @@ def move_to_next_question(session):
     question_number = session["question_number"]
     state = session["state"]
 
-    if question_number >= TOTAL_QUESTIONS:
+    if question_number >= demo_mode.session_question_limit(session, TOTAL_QUESTIONS):
         complete_session(session)
         return None
 
@@ -444,7 +446,10 @@ def move_to_next_question(session):
     )
 
     return build_question_payload(
-        current_question, current_difficulty, session["question_number"]
+        current_question,
+        current_difficulty,
+        session["question_number"],
+        demo_mode.session_question_limit(session, TOTAL_QUESTIONS),
     )
 
 
@@ -455,8 +460,10 @@ def calculate_final_result(session, personal_history=None, population_history=No
     """
     state = session["state"]
     completed_at = timezone.now()
+    # 這場的題數（demo 帳號只有 3 題，見 games/demo_mode.py）
+    total_questions = demo_mode.session_question_limit(session, TOTAL_QUESTIONS)
     accuracy = round(
-        state["first_try_correct_count"] / TOTAL_QUESTIONS * 100,
+        state["first_try_correct_count"] / total_questions * 100,
         2,
     )
     speed_score = state.get("speed_score")
@@ -494,7 +501,7 @@ def calculate_final_result(session, personal_history=None, population_history=No
     return {
         "total_correct": state["total_correct"],
         "first_try_correct_count": state["first_try_correct_count"],
-        "total_questions": TOTAL_QUESTIONS,
+        "total_questions": total_questions,
         "accuracy": accuracy,
         "speed_score": clamped_speed_score,
         "raw_score": raw_score,
