@@ -14,6 +14,8 @@ from dashboard import services as dashboard_services
 from dashboard import weekly_report
 from dashboard.models import WeeklyReport
 from diary.models import Diary
+from rewards.models import PointTransaction
+from rewards.services import POINTS
 
 from . import service
 from .models import DailyTask
@@ -157,6 +159,7 @@ def build_response(user, today):
             "game_id": task.game_id,
             "dimension": task.dimension,
             "done": is_done(task),
+            "points": POINTS["daily_task"],  # 完成這項任務額外加給的點數
         }
         for task in tasks
     ]
@@ -170,4 +173,11 @@ def build_response(user, today):
             "goal": WEEKLY_GOAL,
         },
         "tasks": items,
+        "all_done_bonus": {
+            "points": POINTS["all_tasks_done"],
+            # 以「今天是否已有全部完成加碼的流水帳」判斷，不是用即時完成數
+            "earned": PointTransaction.objects.filter(
+                user=user, reason="all_tasks_done", source_id=str(today)
+            ).exists(),
+        },
     }
