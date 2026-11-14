@@ -683,6 +683,28 @@ F14 曾把 `memory_recall` 命名為「記憶配對」，與前端遊戲內的�
 
 ---
 
+### 首頁遊戲卡片：新增認知維度欄位（feature/game-dimension-1114）
+
+`GET /api/home/games/` 的每款遊戲多兩個欄位，前端可在卡片上顯示「注意力」等標籤。只有**新增**欄位，原本的欄位不變，舊前端不受影響。
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `dimension` | string \| null | 雷達圖維度代碼：`attention`、`working_memory`、`executive_function`、`visual_spatial`、`math` |
+| `dimension_label` | string \| null | 顯示用名稱：注意力、工作記憶、執行功能、視覺空間、數學 |
+
+```json
+{"games": [
+  {"id": "market_route", "name": "來去菜市場", "title": "來去菜市場", "is_developed": true,
+   "played_this_week": false, "dimension": "attention", "dimension_label": "注意力"}
+]}
+```
+
+對應關係跟儀表板雷達圖共用 `dashboard/services.py` 的 `DIMENSIONS`（新增 `dimension_for_source()`），不另外維護。之後新增遊戲時若沒有對應維度，兩個欄位會是 `null`。
+
+**檔案**：`home/views.py`（`games_list`）、`dashboard/services.py`、`home/tests/test_home_api.py`
+
+---
+
 ## 3. 還沒做的事（前端可以先知道方向）
 
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。

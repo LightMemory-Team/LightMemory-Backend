@@ -26,7 +26,7 @@
 | 忘記密碼第 1 步 | `POST /api/users/password-reset/check/` | 免登入；不存在回 404 `ACCOUNT_NOT_FOUND` |
 | 忘記密碼第 2 步 | `POST /api/users/password-reset/` | 免登入；兩次不同回 `PASSWORD_MISMATCH`。**尚無驗證碼，上線前要補** |
 | 首頁問候 | `GET /api/home/user/` | 需登入；`user_name` 回暱稱（舊帳號退回姓名、再退回帳號）；`unread_notification_count` 是鈴鐺未讀數，和通知 `unread_count` 一致 |
-| 首頁遊戲卡片 | `GET /api/home/games/` | 需登入；新增 `name`（短名稱，如「整理菜籃」）與 `played_this_week`；沿用 `title`（完整名稱）／`is_developed` |
+| 首頁遊戲卡片 | `GET /api/home/games/` | 需登入；新增 `name`（短名稱，如「整理菜籃」）、`played_this_week`、`dimension`／`dimension_label`（認知維度，如「執行功能」）；沿用 `title`（完整名稱）／`is_developed` |
 | 今日任務 | `GET /api/home/daily-tasks/` | 需登入；當天第一次呼叫時產生並存進 `home.DailyTask` |
 | 通知列表 | `GET /api/social/notifications/` | 回傳 `data.notifications[]`；沿用舊網址與欄位（`id`、`notification_type`、`message`、`target_url`） |
 | 通知全部已讀 | `PATCH /api/social/notifications/` | 新增；只動自己的未讀通知 |
