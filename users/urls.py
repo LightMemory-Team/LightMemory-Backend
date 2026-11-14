@@ -1,11 +1,13 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import views
 
 urlpatterns = [
     # 登入
-    path("login/", TokenObtainPairView.as_view(), name="token_obtain_pair"),  # 檢查帳密
+    path(
+        "login/", views.LoginView.as_view(), name="token_obtain_pair"
+    ),  # 檢查帳密（有失敗次數限制）
     path(
         "login/refresh/", TokenRefreshView.as_view(), name="token_refresh"
     ),  # 回傳token key

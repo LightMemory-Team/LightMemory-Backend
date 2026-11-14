@@ -74,8 +74,21 @@ class DebugTests(SimpleTestCase):
 
 class SecretKeyTests(SimpleTestCase):
     def test_production_without_a_key_fails_to_start(self):
-        with self.assertRaises(decouple.UndefinedValueError):
+        with self.assertRaises(ImproperlyConfigured):
             load_settings({})
+
+    def test_production_with_an_empty_key_fails_to_start(self):
+        # .env 留著「DJANGO_SECRET_KEY=」卻沒填值，不能當成有設
+        for empty in ("", "   "):
+            with self.subTest(value=repr(empty)):
+                with self.assertRaises(ImproperlyConfigured):
+                    load_settings({"DJANGO_SECRET_KEY": empty})
+
+    def test_the_error_tells_you_what_to_do(self):
+        with self.assertRaises(ImproperlyConfigured) as ctx:
+            load_settings({})
+
+        self.assertIn("DJANGO_SECRET_KEY", str(ctx.exception))
 
     def test_production_uses_the_key_from_the_environment(self):
         s = load_settings({"DJANGO_SECRET_KEY": GOOD_KEY})
@@ -98,6 +111,13 @@ class SecretKeyTests(SimpleTestCase):
         self.assertTrue(s.DEBUG)
         self.assertTrue(s.SECRET_KEY)
         self.assertTrue(s.SECRET_KEY.startswith("django-insecure-"))
+
+    def test_development_with_an_empty_key_uses_the_dev_key(self):
+        # 本機把金鑰清空但留著那一行：不能讓服務壞掉
+        for empty in ("", "   "):
+            with self.subTest(value=repr(empty)):
+                s = load_settings({"DJANGO_DEBUG": "True", "DJANGO_SECRET_KEY": empty})
+                self.assertTrue(s.SECRET_KEY.startswith("django-insecure-"))
 
     def test_development_still_prefers_a_key_from_the_environment(self):
         s = load_settings({"DJANGO_DEBUG": "True", "DJANGO_SECRET_KEY": GOOD_KEY})

@@ -33,11 +33,16 @@ DEBUG = config("DJANGO_DEBUG", default=False, cast=bool)
 _DEV_ONLY_SECRET_KEY = "django-insecure-dev-only-do-not-use-in-production"
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = (
-    config("DJANGO_SECRET_KEY", default=_DEV_ONLY_SECRET_KEY)
-    if DEBUG
-    else config("DJANGO_SECRET_KEY")
-)
+# 空字串（例如 .env 留著「DJANGO_SECRET_KEY=」但沒填值）視同沒設定。
+SECRET_KEY = config("DJANGO_SECRET_KEY", default="").strip()
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "正式環境（DJANGO_DEBUG 沒開）一定要設定 DJANGO_SECRET_KEY，"
+            "請在 .env 加上一行 DJANGO_SECRET_KEY=（後面接新產生的金鑰）。產生方式：python -c "
+            '"import secrets; print(secrets.token_urlsafe(50))"'
+        )
+    SECRET_KEY = _DEV_ONLY_SECRET_KEY
 
 # 正式環境不准用 "django-insecure-" 開頭的金鑰：Django 專案建立時產生的金鑰
 # 都是這個開頭，包含曾經寫進這個專案程式碼（已公開在 Git 歷史裡）的那一把。
@@ -186,6 +191,19 @@ REST_FRAMEWORK = {
     ),
     # 所有錯誤統一成 {"success": false, "error": {"code", "message", "fields"}}
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
+    # 請求次數限制（users/throttles.py）。格式「次數/期間」，期間可用 hour、min、day。
+    # 這些只是「次數」；套用在哪些 API 由各個 View 的 throttle_classes 決定。
+    "DEFAULT_THROTTLE_RATES": {
+        "login_ip": "60/hour",  # 同一個來源登入「失敗」的次數
+        "login_username": "10/hour",  # 同一個帳號登入「失敗」的次數
+        "register_ip": "30/hour",  # 同一個來源註冊的次數（成功失敗都算）
+        "password_confirm_user": "10/hour",  # 同一位使用者改密碼＋刪帳號的次數
+    },
+    # 判斷「來源 IP」要信任前面幾層代理。正式環境走 Cloudflare Tunnel 時，
+    # 後端看到的連線都來自 cloudflared（本機），真正的來源在 X-Forwarded-For
+    # 最後一個值（Cloudflare 會把來源接在最後；使用者自己加的假值會排在前面，
+    # 取最後一個就騙不了）。沒有代理、直接對外時要設 0（忽略 X-Forwarded-For）。
+    "NUM_PROXIES": config("DJANGO_NUM_PROXIES", default=1, cast=int),
 }
 
 # JWT token 有效時間（simplejwt 預設 access 只有 5 分鐘，長者玩到一半就會過期被擋 401）
