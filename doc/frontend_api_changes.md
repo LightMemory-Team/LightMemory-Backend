@@ -1,4 +1,4 @@
-# 後端安全與穩定性修正總覽（F1～F14、G1、G3、G4、G9、日記上傳限制）
+# 後端安全與穩定性修正總覽（F1～F14、G1、G3、G4、G9、日記上傳限制、跳過本輪 API）
 
 更新日期：2026-11-14 · 範圍：`fix/features`（個別功能問題，F1～F14）與 `fix/global`（共通問題：G1、G3、G4、G9、日記上傳限制），都已合併
 
@@ -620,6 +620,66 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 - 照片上傳這支 API 的錯誤格式維持舊的 `{"error": {"code", "message"}}`（沒有 `success`）；錄音回覆是 `{"success": false, "data": null, "error": {...}}`。
 
 **檔案**：`diary/upload_checks.py`（新）、`diary/views.py`、`diary/tests/test_upload_limits.py`（新）
+
+---
+
+### 日記「跳過本輪」API（fix/global 新增）
+
+使用者在日記聊天頁按「跳過」時呼叫，**取代前端目前的假資料 `skipReply`**。
+
+```
+POST /api/diary/<diary_id>/replies/skip/
+Authorization: Bearer <access_token>
+Content-Type: application/json（或 multipart 表單）
+
+{ "round_index": 2 }
+```
+
+成功 `201`：
+
+```json
+{
+  "success": true,
+  "data": {
+    "round_index": 2,
+    "ai_reply": "那我們換個話題，這張照片裡你最喜歡的是什麼呢？",
+    "reply_count": 2,
+    "is_finalizable": false,
+    "is_done": false
+  },
+  "error": null
+}
+```
+
+欄位與 `POST /api/diary/<id>/replies/` 的回應相同，只是沒有 `transcript`、`audio_url`（沒有錄音）。
+
+**規則**
+- 跳過會算一輪：`reply_count` 增加；`round_index` 的範圍與 `replies` 一樣是 1～4。
+- `is_finalizable` 要「**有內容**的回覆」至少 2 輪才會是 `true`，跳過的不算。
+- `ai_reply` 是**固定句型**（3 句輪流，不呼叫 AI），第 4 輪（最後一輪）是 `null`、`is_done` 是 `true`。
+- 完成日記（`finalize`）只採用有內容的回覆，跳過的輪次不會出現在日記裡。日記詳情的 `replies[]` 會有這一輪，`is_skipped` 是 `true`、`transcript` 是空字串、`audio_url` 是 `null`。
+- **前端已經有的 `force=1` 欄位後端不處理，也不需要送。**
+
+**錯誤**（格式 `{success: false, data: null, error: {code, message}}`，看 `error.code`）
+
+| HTTP | `error.code` | 何時出現 | 建議處理 |
+|---|---|---|---|
+| 400 | `INVALID_ROUND_INDEX` | `round_index` 缺少或不是 1～4 的整數 | 同 `replies` |
+| 409 | `ROUND_ALREADY_ANSWERED` | 這一輪已回答或已跳過 | 同 `replies`：重新取得日記詳情還原那一輪 |
+| 400 | `DIARY_ALREADY_FINALIZED` | 日記已完成 | 導回日記 |
+| 400 | `SKIP_NOT_ALLOWED` | **前三輪全部跳過**，第 4 輪還想跳過（日記會完全沒有內容） | 提示「至少要錄一段內容才能完成日記，這一輪請錄音回答」（`error.message` 已是這句，可直接顯示）；建議前端在「前三輪都跳過」時，第 4 輪**隱藏或停用跳過按鈕** |
+| 404 | `DIARY_NOT_FOUND` | 不是你的日記或不存在 | 導回日記列表 |
+| 401 | `NOT_AUTHENTICATED` | 沒登入或 token 失效 | 導回登入頁 |
+
+**前端依賴的後端行為**（之後若要改，後端會先通知）：一篇日記最多 **4 輪**（後端 `MAX_REPLY_ROUNDS`），第 4 輪回覆或跳過後 `is_done` 是 `true`。
+
+**檔案**：`diary/views.py`（`DiaryReplySkipView`）、`diary/urls.py`、`diary/tests/test_skip_reply.py`（新）
+
+---
+
+### 遊戲名稱：`memory_recall` 改為「料理準備」（fix/global）
+
+F14 曾把 `memory_recall` 命名為「記憶配對」，與前端遊戲內的「料理準備」對不上，現在統一為 **料理準備**。只有 `name`／`title` 字串變了（`GET /api/home/games/`、首頁今日任務標題、成就說明），`game_id` 不變。前端不寫死名稱的話不用改。其他四款不變。
 
 ---
 
