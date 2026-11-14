@@ -14,6 +14,7 @@
   --input-bg: #ecece8;
   --input-line: #cfcfc8;
   --error: #b3261e;
+  --record-red: #c9302c;
 }
 
 * {
@@ -235,6 +236,190 @@ body {
   color: var(--green);
   font-size: 0.9rem;
   font-weight: 500;
+}
+
+/* 圖示：Material Symbols（同比賽版 futureQ） */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.icon-fill {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* 參考句：留言框上方的小標籤，點一句錄音時照著唸 */
+.reply-suggestions {
+  margin: 0 0 12px;
+}
+
+.suggest-title {
+  margin: 0 0 6px 4px;
+  color: var(--text-sub);
+  font-size: 0.85rem;
+}
+
+.suggest-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.suggest-chip {
+  min-height: 40px;
+  padding: 6px 14px;
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  background: var(--green-pale);
+  color: var(--green-dark);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.suggest-chip.is-selected {
+  border-color: var(--green);
+  font-weight: 700;
+}
+
+/* 輸入框旁的麥克風（同發送鈕高度，外框綠色；錄音中變紅） */
+.btn-mic {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: 2px solid var(--green);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.btn-mic .material-symbols-outlined {
+  font-size: 28px;
+}
+
+.btn-mic.is-recording {
+  box-shadow: 0 0 0 5px rgba(201, 48, 44, 0.18);
+  border-color: var(--record-red);
+  background: var(--record-red);
+  color: #fff;
+}
+
+.btn-mic:focus-visible {
+  outline: 3px solid var(--green-dark);
+  outline-offset: 3px;
+}
+
+/* 按麥克風後在輸入框下方展開的語音區 */
+.vr-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 20px;
+  background: var(--green-pale);
+}
+
+.cue-card {
+  margin: 0;
+  color: var(--green-dark);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.vr-recording-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* 錄音中的紅點，慢慢閃 */
+.vr-rec-dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--record-red);
+  box-shadow: 0 0 0 6px rgba(201, 48, 44, 0.15);
+  animation: vr-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes vr-blink {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vr-rec-dot { animation: none; }
+}
+
+.vr-recording-text p {
+  margin: 0;
+}
+
+.vr-timer {
+  color: var(--record-red);
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.vr-hint {
+  color: var(--text-sub);
+  font-size: 0.9rem;
+}
+
+.vr-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vr-audio {
+  width: 100%;
+}
+
+.vr-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.vr-redo-btn,
+.vr-send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 52px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.vr-redo-btn {
+  flex: none;
+  padding: 0 18px;
+  border: 1.5px solid var(--input-line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text-sub);
+  font-weight: 500;
+}
+
+.vr-send-btn {
+  flex: 1;
+  font-size: 1.05rem;
+}
+
+.vr-send-btn:disabled,
+.vr-redo-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 /* 留言區 */

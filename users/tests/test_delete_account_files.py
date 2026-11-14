@@ -21,7 +21,7 @@ from rest_framework.test import APITestCase
 
 from diary.external import blob_name_from_stored, delete_from_firebase
 from diary.models import Diary, DiaryReply
-from social.models import Post
+from social.models import Post, VoiceReply
 
 User = get_user_model()
 
@@ -149,11 +149,18 @@ class DeleteAccountFilesTests(APITestCase):
         Diary.objects.create(
             user=self.user, status="done", image_path="https://example.com/seed.jpg"
         )
-        Post.objects.create(
+        post = Post.objects.create(
             user=self.user,
             diary=diary,
             content="c",
             image_path="voice-diary/images/d1.jpg",
+        )
+        # 親友錄給這篇貼文的語音加油
+        VoiceReply.objects.create(
+            post=post,
+            nickname="小玲",
+            audio_path="voice-diary/voice-replies/v1.webm",
+            duration_sec=8,
         )
 
     def _delete(self, password=PASSWORD):
@@ -172,6 +179,7 @@ class DeleteAccountFilesTests(APITestCase):
                 "voice-diary/avatars/me.jpg",
                 "voice-diary/images/d1.jpg",
                 "voice-diary/images/old.jpg",
+                "voice-diary/voice-replies/v1.webm",
             ],
         )
 
