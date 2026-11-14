@@ -29,6 +29,7 @@ urlpatterns = [
     path("api/diary/", include("diary.urls")),  # 聲影日記
     path("", include("public_share.urls")),  # 親友公開分享與留言
     path("api/dashboard/", include("dashboard.urls")),  # 儀表板
+    path("api/rewards/", include("rewards.urls")),  # 點數與成就
 ]
 
 if settings.DEBUG:
