@@ -45,7 +45,9 @@ class SharePageDanmakuTests(TestCase):
         self.assertIn('id="danmaku-data"', html)
 
     def test_comments_and_voice_replies_newest_first(self):
-        old = Comment.objects.create(post=self.post, nickname="小玲", content="花好漂亮！")
+        old = Comment.objects.create(
+            post=self.post, nickname="小玲", content="花好漂亮！"
+        )
         voice = VoiceReply.objects.create(
             post=self.post,
             nickname="阿明",
@@ -53,7 +55,9 @@ class SharePageDanmakuTests(TestCase):
             duration_sec=5,
             transcribed_text="阿嬤加油",
         )
-        new = Comment.objects.create(post=self.post, nickname="小華", content="下次帶我去看")
+        new = Comment.objects.create(
+            post=self.post, nickname="小華", content="下次帶我去看"
+        )
         self._set_created_at(old, 30)
         self._set_created_at(voice, 20)
         self._set_created_at(new, 10)
@@ -108,27 +112,31 @@ class SharePageDanmakuTests(TestCase):
         self.assertEqual(len(items), DANMAKU_LIMIT)
 
     def test_other_posts_comments_are_not_included(self):
-        other = Post.objects.create(user=self.user, content="另一篇", is_share_enabled=True)
+        other = Post.objects.create(
+            user=self.user, content="另一篇", is_share_enabled=True
+        )
         Comment.objects.create(post=other, nickname="路人", content="別篇的留言")
 
         self.assertEqual(self.client.get(self.url).context["danmaku_items"], [])
 
     def test_danmaku_json_is_escaped(self):
         Comment.objects.create(
-            post=self.post, nickname="小玲", content="</script><script>alert(1)</script>"
+            post=self.post,
+            nickname="小玲",
+            content="</script><script>alert(1)</script>",
         )
 
         html = self.client.get(self.url).content.decode()
 
         self.assertNotIn("<script>alert(1)", html)
         start = html.index('id="danmaku-data"')
-        raw = html[html.index(">", start) + 1:html.index("</script>", start)]
+        raw = html[html.index(">", start) + 1 : html.index("</script>", start)]
         self.assertEqual(json.loads(raw)[0]["text"], "</script><script>alert(1)</scr…")
 
     def test_success_modal_and_no_sent_list(self):
         html = self.client.get(self.url).content.decode()
 
-        modal = html[html.index('id="success-modal"'):]
+        modal = html[html.index('id="success-modal"') :]
         self.assertIn('role="dialog"', modal)
         self.assertIn("成功送出", modal)
         self.assertIn("再留言一篇", modal)
@@ -137,12 +145,12 @@ class SharePageDanmakuTests(TestCase):
 
     def test_media_band_hidden_without_photo_and_comments(self):
         html = self.client.get(self.url).content.decode()
-        media_tag = html[html.index('id="post-media"'):]
-        media_tag = media_tag[:media_tag.index(">")]
+        media_tag = html[html.index('id="post-media"') :]
+        media_tag = media_tag[: media_tag.index(">")]
         self.assertIn("hidden", media_tag)
 
         Comment.objects.create(post=self.post, nickname="小玲", content="花好漂亮！")
         html = self.client.get(self.url).content.decode()
-        media_tag = html[html.index('id="post-media"'):]
-        media_tag = media_tag[:media_tag.index(">")]
+        media_tag = html[html.index('id="post-media"') :]
+        media_tag = media_tag[: media_tag.index(">")]
         self.assertNotIn("hidden", media_tag)

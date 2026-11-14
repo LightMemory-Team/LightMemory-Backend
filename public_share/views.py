@@ -35,7 +35,8 @@ def build_danmaku_items(post):
             continue
         if len(content) > DANMAKU_MAX_CHARS:
             content = content[:DANMAKU_MAX_CHARS] + '…'
-        name = comment.nickname or (get_display_name(comment.user) if comment.user else '')
+        author = get_display_name(comment.user) if comment.user else ''
+        name = comment.nickname or author
         items.append({
             'name': name,
             'text': content,
