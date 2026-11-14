@@ -222,6 +222,82 @@ class DiaryReplyView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+# 使用者按「跳過本輪」時，接下來問的固定句型（不呼叫 AI：沒有內容可以接著問）。
+# 依輪次輪流用，連續跳過時不會一直問同一句。
+SKIP_FOLLOW_UP_QUESTIONS = (
+    "那我們換個話題，這張照片裡你最喜歡的是什麼呢？",
+    "沒關係，我們聊聊別的。今天有沒有什麼讓你開心的小事呢？",
+    "好的，那你想跟我說說今天的心情嗎？",
+)
+
+
+class DiaryReplySkipView(APIView):
+    """跳過這一輪：不錄音，記一筆 is_skipped=True 的回覆，回傳格式與 replies 一致。"""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, diary_id):
+        try:
+            diary = Diary.objects.get(id=diary_id, user=request.user)
+        except Diary.DoesNotExist:
+            return _error("DIARY_NOT_FOUND", "找不到這篇日記", 404)
+        if diary.status == "done":
+            return _error("DIARY_ALREADY_FINALIZED", "這篇日記已經完成了", 400)
+
+        round_index = parse_round_index(request.data.get("round_index"))
+        if round_index is None:
+            return _error("INVALID_ROUND_INDEX", "這一輪的編號不正確，請重新操作", 400)
+
+        # 跟 replies 一樣：鎖住這篇日記，同一篇同時送來的請求會排隊
+        with transaction.atomic():
+            diary = Diary.objects.select_for_update().get(pk=diary.pk)
+            if diary.status == "done":
+                return _error("DIARY_ALREADY_FINALIZED", "這篇日記已經完成了", 400)
+            if diary.replies.filter(round_index=round_index).exists():
+                return _error(*ROUND_ALREADY_ANSWERED)
+
+            reply_count = diary.replies.count() + 1
+            non_skipped_count = diary.replies.filter(is_skipped=False).count()
+            is_done = reply_count >= MAX_REPLY_ROUNDS
+            if is_done and non_skipped_count == 0:
+                # 四輪全部跳過，日記會沒有任何內容，無法完成
+                return _error(
+                    "SKIP_NOT_ALLOWED",
+                    "至少要錄一段內容才能完成日記，這一輪請錄音回答",
+                    400,
+                )
+
+            DiaryReply.objects.create(
+                diary=diary,
+                round_index=round_index,
+                question=diary.pending_question or diary.first_question,
+                transcript="",
+                audio_path="",
+                is_skipped=True,
+            )
+            diary.status = "processing"
+            if is_done:
+                diary.pending_question = ""
+                ai_reply = None
+            else:
+                ai_reply = SKIP_FOLLOW_UP_QUESTIONS[
+                    round_index % len(SKIP_FOLLOW_UP_QUESTIONS)
+                ]
+                diary.pending_question = ai_reply
+            diary.save()
+
+        return _ok(
+            {
+                "round_index": round_index,
+                "ai_reply": ai_reply,
+                "reply_count": reply_count,
+                "is_finalizable": non_skipped_count >= 2,
+                "is_done": is_done,
+            },
+            status.HTTP_201_CREATED,
+        )
+
+
 class DiaryFinalizeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
