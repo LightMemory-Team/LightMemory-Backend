@@ -251,6 +251,66 @@ class DiaryShareEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
+class DiaryUnifiedFormatTests(APITestCase):
+    """finalize、share 的回應統一為 {success, data, error}。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='format_tester', password='Str0ng!Pass2026'
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def assert_ok(self, response):
+        self.assertTrue(response.data['success'])
+        self.assertIsNotNone(response.data['data'])
+        self.assertIsNone(response.data['error'])
+
+    def assert_error(self, response, code):
+        self.assertFalse(response.data['success'])
+        self.assertIsNone(response.data['data'])
+        self.assertEqual(response.data['error']['code'], code)
+        self.assertTrue(response.data['error']['message'])
+
+    @patch(
+        'diary.views.ai_gen.generate_finalize_content',
+        return_value=FINALIZE_CONTENT,
+    )
+    def test_finalize_success_and_repeat(self, mock_content):
+        diary = Diary.objects.create(user=self.user, status='processing')
+        DiaryReply.objects.create(
+            diary=diary, round_index=1, transcript="我今天跟家人去公園散步"
+        )
+        url = f'/api/diary/{diary.id}/finalize/'
+
+        self.assert_ok(self.client.post(url))  # 第一次完成（201）
+        self.assert_ok(self.client.post(url))  # 已完成再呼叫（200）
+
+    def test_finalize_errors(self):
+        empty = Diary.objects.create(user=self.user, status='pending')
+
+        self.assert_error(
+            self.client.post(f'/api/diary/{empty.id}/finalize/'), 'NO_VALID_REPLY'
+        )
+        self.assert_error(
+            self.client.post('/api/diary/99999/finalize/'), 'DIARY_NOT_FOUND'
+        )
+
+    def test_share_success(self):
+        diary = Diary.objects.create(user=self.user, status='done', title='花燈')
+
+        self.assert_ok(self.client.post(f'/api/diary/{diary.id}/share/'))
+
+    def test_share_errors(self):
+        pending = Diary.objects.create(user=self.user, status='pending')
+
+        self.assert_error(
+            self.client.post(f'/api/diary/{pending.id}/share/'), 'DIARY_NOT_DONE'
+        )
+        self.assert_error(
+            self.client.post('/api/diary/99999/share/'), 'DIARY_NOT_FOUND'
+        )
+
+
 class DiaryDetailEndpointTests(APITestCase):
 
     def setUp(self):

@@ -14,6 +14,17 @@ from .models import Diary, DiaryReply, DiaryAnalysis
 from . import external, ai_gen, analysis as analysis_utils
 
 
+# 統一回傳格式 {success, data, error}（目前只有 finalize、share 使用）
+def _ok(data, http_status=status.HTTP_200_OK):
+    return Response({"success": True, "data": data, "error": None}, status=http_status)
+
+
+def _error(code, message, http_status):
+    return Response(
+        {"success": False, "data": None, "error": {"code": code, "message": message}},
+        status=http_status,
+    )
+
 
 class DiaryCalendarView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -155,7 +166,7 @@ class DiaryFinalizeView(APIView):
         try:
             diary = Diary.objects.get(id=diary_id, user=request.user)
         except Diary.DoesNotExist:
-            return Response({"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}}, status=404)
+            return _error("DIARY_NOT_FOUND", "找不到這篇日記", status.HTTP_404_NOT_FOUND)
 
         if diary.status == "done":
             # 已完成的日記再呼叫一次：grant() 不會重複入帳，回 0 點
@@ -166,7 +177,11 @@ class DiaryFinalizeView(APIView):
         replies = diary.replies.filter(is_skipped=False).order_by('round_index')
         combined = '，'.join(r.transcript for r in replies if r.transcript)
         if not combined:
-            return Response({"error": {"code": "NO_VALID_REPLY", "message": "需要先錄一段內容才能生成日記"}}, status=400)
+            return _error(
+                "NO_VALID_REPLY",
+                "需要先錄一段內容才能生成日記",
+                status.HTTP_400_BAD_REQUEST,
+            )
 
         diary.transcription = combined
         diary.diary_text = combined
@@ -199,8 +214,8 @@ class DiaryFinalizeView(APIView):
         )
 
     def _build_response(self, diary, http_status, rewards):
-        return Response({
-            "data": {
+        return _ok(
+            {
                 "diary_id": diary.id,
                 "status": diary.status,
                 "date": timezone.localtime(diary.created_at).date().isoformat(),
@@ -213,8 +228,9 @@ class DiaryFinalizeView(APIView):
                 "category": diary.category,
                 "invite_text": diary.invite_text,
                 "rewards": rewards,
-            }
-        }, status=http_status)
+            },
+            http_status,
+        )
 
 
 class DiaryShareView(APIView):
@@ -227,15 +243,13 @@ class DiaryShareView(APIView):
         try:
             diary = Diary.objects.get(id=diary_id, user=request.user)
         except Diary.DoesNotExist:
-            return Response(
-                {"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _error("DIARY_NOT_FOUND", "找不到這篇日記", status.HTTP_404_NOT_FOUND)
 
         if diary.status != "done":
-            return Response(
-                {"error": {"code": "DIARY_NOT_DONE", "message": "日記還沒完成，完成後才能分享"}},
-                status=status.HTTP_400_BAD_REQUEST,
+            return _error(
+                "DIARY_NOT_DONE",
+                "日記還沒完成，完成後才能分享",
+                status.HTTP_400_BAD_REQUEST,
             )
 
         post, created = Post.objects.get_or_create(
@@ -255,7 +269,7 @@ class DiaryShareView(APIView):
             request.user, rewards_services.DIARY_SHARED
         )
         http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
-        return Response({"data": data}, status=http_status)
+        return _ok(data, http_status)
 
 
 class DiaryDetailView(APIView):
