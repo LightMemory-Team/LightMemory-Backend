@@ -292,6 +292,10 @@ class PretestFlowTests(MemoryRecallTestCase):
             FINISH_URL, {"session_id": session_id}, format="json"
         ).data["data"]
 
+        # 點數只發一次：第一次有點數，第二次是 0 點；其他結果完全相同
+        first, second = dict(first), dict(second)
+        self.assertGreaterEqual(first.pop("rewards")["points_earned"], 10)
+        self.assertEqual(second.pop("rewards")["points_earned"], 0)
         self.assertEqual(first, second)
 
 
@@ -561,6 +565,26 @@ class ErrorHandlingTests(MemoryRecallTestCase):
             result_response.data["data"]["session_result"]["total_rounds"], 0
         )
 
+    def test_finish_after_round_timeout_still_grants_points_once(self):
+        """逾時（ROUND_TIME_UP）沒有 rewards；接著第一次 finish/ 要拿到點數。"""
+        session_id = self._start_official_session()
+        question = self._get_round(session_id)
+        session = session_service.get_session(GAME_TYPE, session_id)
+        current_question = session["current_question"]
+        current_question["round_expires_at"] = "2020-01-01T00:00:00+00:00"
+        session_service.set_current_question(GAME_TYPE, session_id, current_question)
+
+        timeout = self._answer(
+            session_id, question["round_number"], self._current_answer(session_id)
+        )
+        first = self.client.post(FINISH_URL, {"session_id": session_id}, format="json")
+        again = self.client.post(FINISH_URL, {"session_id": session_id}, format="json")
+
+        self.assertEqual(timeout.status_code, 410)
+        self.assertNotIn("rewards", timeout.data.get("data") or {})
+        self.assertGreaterEqual(first.data["data"]["rewards"]["points_earned"], 10)
+        self.assertEqual(again.data["data"]["rewards"]["points_earned"], 0)
+
     def test_pretest_round_has_no_timeout(self):
         session_id = self._start()["session_id"]
         self._get_round(session_id)
@@ -583,6 +607,8 @@ class ResultApiTests(MemoryRecallTestCase):
         response = self.client.get(result_url(session_id))
 
         self.assertTrue(response.data["success"])
+        # rewards 只出現在 finish 的回應，不存進場次結果
+        finish_data = {k: v for k, v in finish_data.items() if k != "rewards"}
         self.assertEqual(response.data["data"]["session_result"], finish_data)
 
 

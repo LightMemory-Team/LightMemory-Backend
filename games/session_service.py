@@ -227,6 +227,22 @@ def finish_session(game_type, session_id, result, avg_response_time_ms=None):
     return _to_dict(session)
 
 
+def grant_rewards(game_type, session_id):
+    """遊戲結算後呼叫：發放這場的點數與成就，回傳 rewards 區塊。
+
+    各遊戲 view 手上只有 dict，這裡負責查出 GameSession 物件交給
+    rewards.services.grant()。點數發給這場遊戲的主人（session.user），
+    不用 request.user，因為多數遊戲 API 允許未登入呼叫。
+    重複呼叫是安全的：同一場只會入帳一次，之後回 0 點的空區塊。
+    """
+    from rewards import services as rewards_services
+
+    session = _lookup(game_type, session_id)
+    if session is None or session.status != "finished":
+        return rewards_services.empty_rewards()
+    return rewards_services.grant(session.user, rewards_services.GAME_FINISH, session)
+
+
 # demo 帳號的種子場次（dashboard 的 seed_demo 指令建立）的 client_session_id 前綴；
 # 這些場次不是真人玩的，不能拿來當全體基準
 SEED_CLIENT_SESSION_PREFIX = "seed-"

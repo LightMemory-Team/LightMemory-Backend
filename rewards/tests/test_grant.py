@@ -77,7 +77,9 @@ class GrantTests(TestCase):
         self.assertEqual(reasons, ["diary_complete", "daily_task", "all_tasks_done"])
         self.assertEqual(rewards["points_earned"], 15 + 5 + 20)
         self.assertEqual(amounts(self.user, "all_tasks_done"), [20])
-        self.assertIn("first_all_tasks", [a["code"] for a in rewards["new_achievements"]])
+        self.assertIn(
+            "first_all_tasks", [a["code"] for a in rewards["new_achievements"]]
+        )
         # 全部完成的當天不會再發第二次
         again = self.finish("market_route")
         self.assertNotIn("all_tasks_done", [i["reason"] for i in again["breakdown"]])
@@ -119,11 +121,17 @@ class GrantTests(TestCase):
         services.grant(self.user, services.DIARY_COMPLETE, diary)
         # 沒領到 20 點，但「今天任務全部完成」這件事要留下來
         self.assertEqual(amounts(self.user, "all_tasks_done"), [0])
-        self.assertTrue(UserAchievement.objects.filter(user=self.user, code="first_all_tasks").exists())
+        self.assertTrue(
+            UserAchievement.objects.filter(
+                user=self.user, code="first_all_tasks"
+            ).exists()
+        )
 
     def test_dashboard_viewed_unlocks_once(self):
         first = services.grant(self.user, services.DASHBOARD_VIEWED)
-        self.assertEqual([a["code"] for a in first["new_achievements"]], ["first_dashboard"])
+        self.assertEqual(
+            [a["code"] for a in first["new_achievements"]], ["first_dashboard"]
+        )
         self.assertEqual(first["points_earned"], 0)
         self.assertEqual(first["total_points"], 10)
         second = services.grant(self.user, services.DASHBOARD_VIEWED)
@@ -138,7 +146,9 @@ class GrantTests(TestCase):
         self.finish("fridge_check")
         self.finish("market_shopping")  # 到這裡 5 款都玩過
         self.assertTrue(
-            UserAchievement.objects.filter(user=self.user, code="week_all_games").exists()
+            UserAchievement.objects.filter(
+                user=self.user, code="week_all_games"
+            ).exists()
         )
 
     def test_weekly_report_viewed_gives_task_points(self):
@@ -160,7 +170,9 @@ class GrantTests(TestCase):
         )
         rewards = services.grant(self.user, services.WEEKLY_REPORT_VIEWED)
         self.assertEqual([i["reason"] for i in rewards["breakdown"]], ["daily_task"])
-        self.assertIn("first_weekly_report", [a["code"] for a in rewards["new_achievements"]])
+        self.assertIn(
+            "first_weekly_report", [a["code"] for a in rewards["new_achievements"]]
+        )
 
     def test_failure_returns_empty_block_and_does_not_raise(self):
         with mock.patch("rewards.services._grant", side_effect=RuntimeError("boom")):
@@ -169,6 +181,18 @@ class GrantTests(TestCase):
         self.assertEqual(rewards["points_earned"], 0)
         self.assertEqual(rewards["breakdown"], [])
         self.assertEqual(rewards["new_achievements"], [])
+        # 前端可以從 error 知道這次發點失敗
+        self.assertEqual(rewards["error"]["code"], "REWARDS_FAILED")
+        self.assertTrue(rewards["error"]["message"])
+
+    def test_error_is_none_when_granting_succeeds(self):
+        self.assertIsNone(self.finish("market_route")["error"])
+
+    def test_error_is_none_on_repeat_call_with_nothing_new(self):
+        session = make_session(self.user, "market_route")
+        services.grant(self.user, services.GAME_FINISH, session)
+        again = services.grant(self.user, services.GAME_FINISH, session)
+        self.assertIsNone(again["error"])
 
     def test_users_are_isolated(self):
         other = User.objects.create_user(username="other", password="x")

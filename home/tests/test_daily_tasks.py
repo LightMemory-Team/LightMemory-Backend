@@ -19,6 +19,7 @@ from dashboard.models import WeeklyReport
 from diary.models import Diary
 from home import daily_tasks
 from home.models import DailyTask
+from rewards.models import PointTransaction
 
 from .helpers import make_session
 
@@ -312,10 +313,33 @@ class DoneTests(DailyTaskTestCase):
         self.assertEqual(data["date"], "2026-11-02")
         self.assertEqual(
             set(data["tasks"][0]),
-            {"id", "type", "title", "game_id", "dimension", "done"},
+            {"id", "type", "title", "game_id", "dimension", "done", "points"},
         )
-        self.assertEqual(data["tasks"][0]["title"], "玩「今天去菜市場」")
+        self.assertEqual(data["tasks"][0]["title"], "玩「來去菜市場」")
         self.assertEqual(data["tasks"][3]["title"], "寫一篇聲影日記")
+
+    def test_every_task_shows_its_points(self):
+        data = self.build(MONDAY)
+
+        self.assertEqual([t["points"] for t in data["tasks"]], [5, 5, 5, 5])
+
+    def test_all_done_bonus_not_earned_at_first(self):
+        data = self.build(MONDAY)
+
+        self.assertEqual(data["all_done_bonus"], {"points": 20, "earned": False})
+
+    def test_all_done_bonus_earned_once_recorded_today(self):
+        # earned 只看「今天有沒有全部完成加碼的流水帳」
+        PointTransaction.objects.create(
+            user=self.user,
+            reason="all_tasks_done",
+            source_id="2026-11-02",
+            amount=20,
+            label="今日任務全部完成",
+        )
+
+        self.assertTrue(self.build(MONDAY)["all_done_bonus"]["earned"])
+        self.assertFalse(self.build(TUESDAY)["all_done_bonus"]["earned"])
 
 
 class WeeklyReportTaskTests(DailyTaskTestCase):

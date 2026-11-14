@@ -153,6 +153,10 @@ class MarketSortSubmitView(APIView):
                     "highest_score": highest_score,
                     "recent_scores": recent_scores,
                     "encouragement_tier": tier,
+                    # 只在場次已結束時才會走到這裡；重複交卷只會是 0 點
+                    "rewards": session_service.grant_rewards(
+                        GAME_TYPE, session["session_id"]
+                    ),
                 },
                 "error": None,
             },

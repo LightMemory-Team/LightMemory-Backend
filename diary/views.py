@@ -6,12 +6,24 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 
+from rewards import services as rewards_services
 from social.models import Post
 from social.utils import get_visible_post, serialize_post
 
 from .models import Diary, DiaryReply, DiaryAnalysis
 from . import external, ai_gen, analysis as analysis_utils
 
+
+# 統一回傳格式 {success, data, error}（目前只有 finalize、share 使用）
+def _ok(data, http_status=status.HTTP_200_OK):
+    return Response({"success": True, "data": data, "error": None}, status=http_status)
+
+
+def _error(code, message, http_status):
+    return Response(
+        {"success": False, "data": None, "error": {"code": code, "message": message}},
+        status=http_status,
+    )
 
 
 class DiaryCalendarView(APIView):
@@ -154,15 +166,22 @@ class DiaryFinalizeView(APIView):
         try:
             diary = Diary.objects.get(id=diary_id, user=request.user)
         except Diary.DoesNotExist:
-            return Response({"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}}, status=404)
+            return _error("DIARY_NOT_FOUND", "找不到這篇日記", status.HTTP_404_NOT_FOUND)
 
         if diary.status == "done":
-            return self._build_response(diary, http_status=200)
+            # 已完成的日記再呼叫一次：grant() 不會重複入帳，回 0 點
+            return self._build_response(
+                diary, http_status=200, rewards=self._grant(diary)
+            )
 
         replies = diary.replies.filter(is_skipped=False).order_by('round_index')
         combined = '，'.join(r.transcript for r in replies if r.transcript)
         if not combined:
-            return Response({"error": {"code": "NO_VALID_REPLY", "message": "需要先錄一段內容才能生成日記"}}, status=400)
+            return _error(
+                "NO_VALID_REPLY",
+                "需要先錄一段內容才能生成日記",
+                status.HTTP_400_BAD_REQUEST,
+            )
 
         diary.transcription = combined
         diary.diary_text = combined
@@ -185,11 +204,18 @@ class DiaryFinalizeView(APIView):
         diary.status = "done"
         diary.save()
 
-        return self._build_response(diary, http_status=201)
+        return self._build_response(diary, http_status=201, rewards=self._grant(diary))
 
-    def _build_response(self, diary, http_status):
-        return Response({
-            "data": {
+    @staticmethod
+    def _grant(diary):
+        """日記完成：發放點數與成就，回傳 rewards 區塊。"""
+        return rewards_services.grant(
+            diary.user, rewards_services.DIARY_COMPLETE, diary
+        )
+
+    def _build_response(self, diary, http_status, rewards):
+        return _ok(
+            {
                 "diary_id": diary.id,
                 "status": diary.status,
                 "date": timezone.localtime(diary.created_at).date().isoformat(),
@@ -201,8 +227,10 @@ class DiaryFinalizeView(APIView):
                 "hashtags": diary.hashtags,
                 "category": diary.category,
                 "invite_text": diary.invite_text,
-            }
-        }, status=http_status)
+                "rewards": rewards,
+            },
+            http_status,
+        )
 
 
 class DiaryShareView(APIView):
@@ -215,15 +243,13 @@ class DiaryShareView(APIView):
         try:
             diary = Diary.objects.get(id=diary_id, user=request.user)
         except Diary.DoesNotExist:
-            return Response(
-                {"error": {"code": "DIARY_NOT_FOUND", "message": "找不到這篇日記"}},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _error("DIARY_NOT_FOUND", "找不到這篇日記", status.HTTP_404_NOT_FOUND)
 
         if diary.status != "done":
-            return Response(
-                {"error": {"code": "DIARY_NOT_DONE", "message": "日記還沒完成，完成後才能分享"}},
-                status=status.HTTP_400_BAD_REQUEST,
+            return _error(
+                "DIARY_NOT_DONE",
+                "日記還沒完成，完成後才能分享",
+                status.HTTP_400_BAD_REQUEST,
             )
 
         post, created = Post.objects.get_or_create(
@@ -238,8 +264,12 @@ class DiaryShareView(APIView):
 
         visible_post = get_visible_post(request.user, post.id)
         data = serialize_post(visible_post, request.user)
+        # 第一次分享解鎖「樂於分享」成就；再分享一次不會重複解鎖
+        data["rewards"] = rewards_services.grant(
+            request.user, rewards_services.DIARY_SHARED
+        )
         http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
-        return Response({"data": data}, status=http_status)
+        return _ok(data, http_status)
 
 
 class DiaryDetailView(APIView):

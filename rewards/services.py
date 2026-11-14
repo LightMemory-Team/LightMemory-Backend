@@ -10,7 +10,8 @@ grant() 做三件事：
     3. 組出 rewards 區塊
 
 重複呼叫是安全的：(user, reason, source_id) 唯一，同一件事只會入帳一次。
-發點失敗（例外）時不會影響原本的 API，只回傳 0 點的空區塊。
+發點失敗（例外）時不會影響原本的 API，只回傳 0 點的空區塊，
+並在 rewards["error"] 標記 REWARDS_FAILED（正常時 error 為 None）。
 """
 
 import logging
@@ -22,7 +23,6 @@ from django.utils import timezone
 
 from .catalog import (
     ACHIEVEMENTS,
-    ACHIEVEMENTS_BY_CODE,
     CATEGORY_LABELS,
     CATEGORY_ORDER,
     EVENT_ACHIEVEMENTS,
@@ -50,6 +50,12 @@ DIARY_COMPLETE = "diary_complete"
 WEEKLY_REPORT_VIEWED = "weekly_report_viewed"
 DASHBOARD_VIEWED = "dashboard_viewed"
 DIARY_SHARED = "diary_shared"
+
+# 發點失敗時放進 rewards["error"]（長者友善：語氣溫和、不用負面字眼）
+REWARDS_FAILED_ERROR = {
+    "code": "REWARDS_FAILED",
+    "message": "這次的點數暫時沒有算到",
+}
 
 
 # ── 小工具 ──────────────────────────────────────────
@@ -87,6 +93,7 @@ def empty_rewards(user=None):
         "daily_cap_reached": False,
         "total_points": total,
         "new_achievements": [],
+        "error": None,
     }
 
 
@@ -316,7 +323,9 @@ def grant(user, event, ref=None):
             return _grant(user, event, ref)
     except Exception:  # noqa: BLE001
         logger.exception("發放點數失敗：user=%s event=%s ref=%s", user, event, ref)
-        return empty_rewards(user)
+        rewards = empty_rewards(user)
+        rewards["error"] = dict(REWARDS_FAILED_ERROR)
+        return rewards
 
 
 def _grant(user, event, ref):
@@ -339,12 +348,16 @@ def _grant(user, event, ref):
 
     if event == GAME_FINISH:
         session = ref
-        if not add("game_complete", session.pk, "完成一場遊戲", POINTS["game_complete"]):
+        if not add(
+            "game_complete", session.pk, "完成一場遊戲", POINTS["game_complete"]
+        ):
             return empty_rewards(user)  # 這場已經發過了（重複呼叫 finish）
         _grant_task_points(user, today, add, daily_tasks, game_id=session.game.code)
     elif event == DIARY_COMPLETE:
         diary = ref
-        if not add("diary_complete", diary.pk, "完成一篇聲影日記", POINTS["diary_complete"]):
+        if not add(
+            "diary_complete", diary.pk, "完成一篇聲影日記", POINTS["diary_complete"]
+        ):
             return empty_rewards(user)
         _grant_task_points(user, today, add, daily_tasks, task_type="diary")
     elif event == WEEKLY_REPORT_VIEWED:
@@ -361,6 +374,7 @@ def _grant(user, event, ref):
         "daily_cap_reached": attempted and running >= DAILY_CAP,
         "total_points": total_points(user),
         "new_achievements": [_achievement_payload(a) for a in new_achievements],
+        "error": None,
     }
 
 
