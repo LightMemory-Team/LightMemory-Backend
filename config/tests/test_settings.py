@@ -18,9 +18,11 @@ SECRET_KEY、DEBUG、CORS、ALLOWED_HOSTS、CSRF_TRUSTED_ORIGINS 不再寫死在
 import importlib.util
 import os
 from pathlib import Path
+from unittest import skipUnless
 from unittest.mock import patch
 
 import decouple
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 
@@ -195,6 +197,10 @@ class HostsTests(SimpleTestCase):
         self.assertEqual(s.CSRF_TRUSTED_ORIGINS, ["https://api.example.com"])
 
 
+@skipUnless(
+    settings.SETTINGS_MODULE == "config.settings_test",
+    "只檢查 config.settings_test；用一般 settings 跑時，沒設金鑰本來就會用開發用金鑰",
+)
 class TestSettingsTests(SimpleTestCase):
     def test_the_test_settings_do_not_need_a_key_in_the_environment(self):
         # settings_test 會先補一把測試用金鑰，所以沒有 .env 也能跑測試（CI 用得到）

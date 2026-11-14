@@ -8,6 +8,7 @@ from unittest.mock import patch
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework import status
@@ -431,6 +432,11 @@ class UserStatsTests(MeApiTestCase):
 
 class MeWithRealTokenTests(APITestCase):
     """不用 force_authenticate，走真正的登入流程拿 token"""
+
+    def setUp(self):
+        # 註冊／登入的限速計數存在 cache；整組一起跑時前面的測試會用掉額度，
+        # 這裡清掉，避免註冊被擋、拿不到 token
+        cache.clear()
 
     def test_register_login_then_get_me(self):
         self.client.post(
