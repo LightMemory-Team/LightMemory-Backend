@@ -9,6 +9,7 @@ from io import StringIO
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from rest_framework.test import APIClient
 
 from diary.models import Diary
 from games.models import GameSession
@@ -155,3 +156,71 @@ class DemoTaskTests(TestCase):
         response = self.run_task("drop_database")
 
         self.assertContains(response, "找不到這個任務")
+
+
+class ScoreAlertTaskTests(TestCase):
+    """產生分數極端值：儀表板 API 的 alerts 要真的出現「建議多注意」的小提醒。"""
+
+    def setUp(self):
+        call_command("setup_admin_demo", stdout=StringIO())
+        self.demo = User.objects.get(username=DEMO_USERNAME)
+        self.client.force_login(self.demo)
+
+    def press(self, game_code):
+        return self.client.post(
+            URL, {"task": "seed_score_alert", "choice": game_code}, follow=True
+        )
+
+    def dashboard_alerts(self):
+        api = APIClient()
+        api.force_authenticate(user=self.demo)
+        return api.get("/api/dashboard/").data["data"]["alerts"]
+
+    def test_page_has_game_dropdown(self):
+        response = self.client.get(URL)
+
+        self.assertContains(response, '<select name="choice"')
+        self.assertContains(response, 'value="fridge_check"')
+
+    def test_creates_low_score_session_and_dashboard_shows_alert(self):
+        response = self.press("fridge_check")
+
+        self.assertContains(response, "儀表板會出現小提醒")
+        alerts = self.dashboard_alerts()
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["game_id"], "fridge_check")
+        self.assertIn("建議多注意", alerts[0]["message"])
+        # 狀態表也看得到
+        self.assertContains(self.client.get(URL), "1 則")
+
+    def test_pressing_same_game_twice_keeps_one_session(self):
+        self.press("market_route")
+        self.press("market_route")
+
+        self.assertEqual(
+            GameSession.objects.filter(
+                user=self.demo, client_session_id__contains="alert"
+            ).count(),
+            1,
+        )
+        self.assertEqual(len(self.dashboard_alerts()), 1)
+
+    def test_different_games_add_more_alerts(self):
+        self.press("fridge_check")
+        self.press("market_route")
+
+        games = {alert["game_id"] for alert in self.dashboard_alerts()}
+        self.assertEqual(games, {"fridge_check", "market_route"})
+
+    def test_alert_still_shows_after_seeding_history(self):
+        self.client.post(URL, {"task": "seed_history"})
+        self.press("memory_recall")
+
+        games = [alert["game_id"] for alert in self.dashboard_alerts()]
+        self.assertEqual(games, ["memory_recall"])
+
+    def test_unknown_game_shows_hint(self):
+        response = self.press("chess")
+
+        self.assertContains(response, "請先選擇")
+        self.assertFalse(GameSession.objects.filter(user=self.demo).exists())
