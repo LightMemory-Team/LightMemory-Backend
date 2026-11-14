@@ -785,7 +785,9 @@ multipart：`nickname`（1–12 字）、`audio_file`（webm／mp4／ogg／m4a�
 | 轉文字 | `VOICE_REPLY_NOT_FOUND` | 404 |
 | 轉文字 | `TRANSCRIBE_FAILED` | 502 |
 
-**檔案**：`social/models.py`（`VoiceReply`）、`public_share/views.py`、`social/views.py`、`diary/external.py`（`download_from_firebase`）
+**分享頁（網頁，`GET /share/<share_token>/`）**：語音加油收在留言區，輸入框旁的麥克風點了直接錄音（最長 10 秒自動停止），可試聽、重錄、送出；送出後列在「已送出」。暱稱沿用留言的暱稱。日記有 `suggested_replies` 時，留言框上方顯示最多 3 個參考句小標籤，點了只當提詞，不會自動送出。瀏覽器不支援錄音或拒絕麥克風權限時，只保留文字留言。
+
+**檔案**：`social/models.py`（`VoiceReply`）、`public_share/views.py`、`social/views.py`、`diary/external.py`（`download_from_firebase`）、`public_share/templates/public_share/share.html`、`public_share/static/public_share/share.js`、`share.css`
 
 ---
 
