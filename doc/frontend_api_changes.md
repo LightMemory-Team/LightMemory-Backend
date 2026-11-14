@@ -593,6 +593,28 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 
 ---
 
+### 日記照片與錄音的大小、類型限制（fix/global）
+
+以前日記上傳不檢查檔案，現在有上限；超過或類型不對會回 **400**，**不會**建立日記或寫入回覆。
+
+| API | 規則 | 錯誤碼（`error.code`） |
+|---|---|---|
+| `POST /api/diary/`（照片 `photo`） | 最大 10MB；副檔名 jpg／jpeg／png／webp／heic／heif（或類型是 `image/*`） | 太大：`IMAGE_TOO_LARGE`；空檔或不是圖片：`INVALID_IMAGE` |
+| `POST /api/diary/<id>/replies/`（錄音 `audio`） | 最大 25MB；webm／ogg／opus／m4a／mp4／aac／mp3／wav／flac（或類型是 `audio/*`） | 太大：`AUDIO_TOO_LARGE`；空檔或不是音訊：`INVALID_AUDIO` |
+
+**多出來的錯誤碼只有 `IMAGE_TOO_LARGE`、`AUDIO_TOO_LARGE`**；`INVALID_IMAGE`、`INVALID_AUDIO` 原本就有，現在多了「類型不對／空檔」也會出現。`error.message` 已經是給使用者看的中文（例如「這張照片太大了（不能超過 10MB），換一張試試看吧」），可以直接顯示。
+
+**目前的 App 不用改也能正常運作**：照片已壓縮到寬度 1600（通常不到 1MB），錄音單輪最長 3 分鐘（約 1MB）。
+
+**要注意**
+- 被擋的錄音**不會占用該輪次**，使用者重錄後同一輪還能回答。
+- **Flutter Web**：照片檔名若沒有副檔名、又沒有指定 `contentType`，會被判為 `INVALID_IMAGE`。手機 App 不受影響；Web 若遇到，請在 `MultipartFile.fromBytes` 補上 `contentType: MediaType('image', 'jpeg')`。
+- 照片上傳這支 API 的錯誤格式維持舊的 `{"error": {"code", "message"}}`（沒有 `success`）；錄音回覆是 `{"success": false, "data": null, "error": {...}}`。
+
+**檔案**：`diary/upload_checks.py`（新）、`diary/views.py`、`diary/tests/test_upload_limits.py`（新）
+
+---
+
 ## 3. 還沒做的事（前端可以先知道方向）
 
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。

@@ -12,7 +12,7 @@ from social.models import Post
 from social.utils import get_visible_post, serialize_post
 
 from .models import Diary, DiaryReply, DiaryAnalysis
-from . import external, ai_gen, analysis as analysis_utils
+from . import external, ai_gen, upload_checks, analysis as analysis_utils
 from .media import media_url
 
 
@@ -81,6 +81,10 @@ class DiaryCalendarView(APIView):
         photo = request.FILES.get('photo')
         if not photo:
             return Response({"error": {"code": "INVALID_IMAGE", "message": "這張照片無法使用，換一張試試看吧"}}, status=400)
+        problem = upload_checks.check_photo(photo)
+        if problem:
+            code, message = problem
+            return Response({"error": {"code": code, "message": message}}, status=400)
 
         image_url = external.upload_to_firebase(photo, "images")
         if image_url is None:
@@ -152,6 +156,9 @@ class DiaryReplyView(APIView):
         raw_round_index = request.data.get('round_index')
         if not audio or raw_round_index is None or raw_round_index == "":
             return _error("INVALID_AUDIO", "這一段錄音沒有收到，請再錄一次", 400)
+        problem = upload_checks.check_audio(audio)
+        if problem:
+            return _error(*problem, 400)
         round_index = parse_round_index(raw_round_index)
         if round_index is None:
             return _error("INVALID_ROUND_INDEX", "這一輪的編號不正確，請重新錄音", 400)
