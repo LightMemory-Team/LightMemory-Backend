@@ -33,11 +33,16 @@ DEBUG = config("DJANGO_DEBUG", default=False, cast=bool)
 _DEV_ONLY_SECRET_KEY = "django-insecure-dev-only-do-not-use-in-production"
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = (
-    config("DJANGO_SECRET_KEY", default=_DEV_ONLY_SECRET_KEY)
-    if DEBUG
-    else config("DJANGO_SECRET_KEY")
-)
+# 空字串（例如 .env 留著「DJANGO_SECRET_KEY=」但沒填值）視同沒設定。
+SECRET_KEY = config("DJANGO_SECRET_KEY", default="").strip()
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "正式環境（DJANGO_DEBUG 沒開）一定要設定 DJANGO_SECRET_KEY，"
+            "請在 .env 加上一行 DJANGO_SECRET_KEY=（後面接新產生的金鑰）。產生方式：python -c "
+            '"import secrets; print(secrets.token_urlsafe(50))"'
+        )
+    SECRET_KEY = _DEV_ONLY_SECRET_KEY
 
 # 正式環境不准用 "django-insecure-" 開頭的金鑰：Django 專案建立時產生的金鑰
 # 都是這個開頭，包含曾經寫進這個專案程式碼（已公開在 Git 歷史裡）的那一把。
