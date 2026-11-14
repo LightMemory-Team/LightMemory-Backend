@@ -226,7 +226,12 @@ class MarketSortSubmitEndpointTests(APITestCase):
         first_response = self.client.post(SUBMIT_URL, payload, format="json")
         second_response = self.client.post(SUBMIT_URL, payload, format="json")
 
-        self.assertEqual(first_response.data, second_response.data)
+        # 點數只發一次：第一次有點數，第二次是 0 點；其他結果完全相同
+        first_data = dict(first_response.data["data"])
+        second_data = dict(second_response.data["data"])
+        self.assertGreaterEqual(first_data.pop("rewards")["points_earned"], 10)
+        self.assertEqual(second_data.pop("rewards")["points_earned"], 0)
+        self.assertEqual(first_data, second_data)
 
         from games import session_service
 

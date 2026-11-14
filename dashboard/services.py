@@ -7,7 +7,10 @@
   （跟更早的有效日記比，見 diary_zscore.py），只算有效的日記。
 """
 
+import contextvars
+import functools
 import statistics
+from contextlib import contextmanager
 from datetime import timedelta
 from itertools import groupby
 from operator import itemgetter
@@ -143,6 +146,53 @@ def _compute_diary_z_scores(user):
     return results
 
 
+# 「同一個範圍內只掃一次」的共用結果：範圍外是 None（每次都現算）。
+_shared_scan = contextvars.ContextVar("diary_scan_scope", default=None)
+
+
+@contextmanager
+def shared_diary_scan():
+    """範圍內，同一位使用者的 diary_z_scores 只掃一次全站日記。
+
+    一次請求裡，儀表板、發點數（rewards）、首頁任務各自都會用到日記的語言 z，
+    每個都重新掃一遍全站日記很浪費。用法：把整段處理包在 with 裡，
+    範圍內的呼叫自動共用結果，不必把 scores 一路傳過好幾個 app。
+
+    - 只在範圍內有效，離開就丟掉，所以不會有跨請求的過期資料
+    - 範圍可以巢狀：內層直接沿用外層的結果
+    - 範圍內如果又寫入了日記，結果不會更新；要的人請在寫入「之後」才進入範圍
+    """
+    if _shared_scan.get() is not None:
+        yield
+        return
+    token = _shared_scan.set({})
+    try:
+        yield
+    finally:
+        _shared_scan.reset(token)
+
+
+def with_shared_diary_scan(view):
+    """把整個 view 包進 shared_diary_scan()。"""
+
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        with shared_diary_scan():
+            return view(*args, **kwargs)
+
+    return wrapper
+
+
+def _scores_for(user):
+    """這位使用者的完整日記語言 z；在 shared_diary_scan() 範圍內會共用。"""
+    cache = _shared_scan.get()
+    if cache is None:
+        return _compute_diary_z_scores(user)
+    if user.id not in cache:
+        cache[user.id] = _compute_diary_z_scores(user)
+    return cache[user.id]
+
+
 def diary_z_scores(user, start=None, end=None, scores=None):
     """期間內這位使用者每篇有效日記的 (建立時間, 語言 z)。
 
@@ -154,7 +204,7 @@ def diary_z_scores(user, start=None, end=None, scores=None):
     不傳就現算。不管有沒有傳，結果都一樣。
     """
     if scores is None:
-        scores = _compute_diary_z_scores(user)
+        scores = _scores_for(user)
     return [
         (created_at, z)
         for created_at, z in scores

@@ -482,12 +482,20 @@ def finish(request):
         return error_response
 
     # 冪等性處理：已經結束過的 session 直接回傳既有結果，不重算不覆寫。
+    # 這裡也要發點：答題逾時（ROUND_TIME_UP）時場次已被自動結束，
+    # 前端接著呼叫的第一次 finish/ 會走到這裡，要在這次拿到點數。
+    # 之後再呼叫只會是 0 點；rewards 不寫進 GameSession.result
     if session["status"] == "finished":
-        return Response({"success": True, "data": session["result"], "error": None})
+        data = {
+            **session["result"],
+            "rewards": session_service.grant_rewards(GAME_TYPE, session_id),
+        }
+        return Response({"success": True, "data": data, "error": None})
 
     result = _build_result(session)
     session_service.finish_session(GAME_TYPE, session_id, result)
-    return Response({"success": True, "data": result, "error": None})
+    data = {**result, "rewards": session_service.grant_rewards(GAME_TYPE, session_id)}
+    return Response({"success": True, "data": data, "error": None})
 
 
 # 6. 查詢單場結果

@@ -5,6 +5,8 @@ from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from rewards import services as rewards_services
+
 from . import encouragement, services, weekly_report
 from .models import WeeklyReport
 
@@ -22,6 +24,7 @@ def _error_response(code, message, *, data=None, status=200):
 
 # 儀表板（雷達圖）：各認知維度近三個月（90 天）的 z-score 平均，各維度分開解鎖
 @api_view(["GET"])
+@services.with_shared_diary_scan  # 儀表板與發點數共用同一次全站日記掃描
 def dashboard(request):
     # DRF 預設的 401 格式是 {"detail": ...}，這裡自己回統一格式
     if not request.user.is_authenticated:
@@ -30,31 +33,31 @@ def dashboard(request):
     # 日記的語言 z 要掃全站日記：算一次，雷達圖與機器人卡片共用
     diary_scores = services.diary_z_scores(request.user)
 
-    return Response(
-        {
-            "success": True,
-            "data": {
-                "period_days": services.PERIOD_DAYS,
-                "required_sessions": services.REQUIRED_SESSIONS,
-                # 固定 6 個維度，各自帶解鎖狀態；沒解鎖的維度前端畫灰色軸、
-                # 顯示「再玩 N 次就能看到」
-                "dimensions": services.get_dashboard_dimensions(
-                    request.user, diary_scores=diary_scores
-                ),
-                # 機器人卡片：總體分數的趨勢代碼，前端翻成鼓勵文字；
-                # 6 個維度都解鎖前是 null
-                "encouragement": encouragement.get_encouragement(
-                    request.user, diary_scores=diary_scores
-                ),
-            },
-            "error": None,
-        }
-    )
+    data = {
+        "period_days": services.PERIOD_DAYS,
+        "required_sessions": services.REQUIRED_SESSIONS,
+        # 固定 6 個維度，各自帶解鎖狀態；沒解鎖的維度前端畫灰色軸、
+        # 顯示「再玩 N 次就能看到」
+        "dimensions": services.get_dashboard_dimensions(
+            request.user, diary_scores=diary_scores
+        ),
+        # 機器人卡片：總體分數的趨勢代碼，前端翻成鼓勵文字；
+        # 6 個維度都解鎖前是 null
+        "encouragement": encouragement.get_encouragement(
+            request.user, diary_scores=diary_scores
+        ),
+        # 第一次查看解鎖「認識自己」成就；之後再開都是 0 點
+        "rewards": rewards_services.grant(
+            request.user, rewards_services.DASHBOARD_VIEWED
+        ),
+    }
+    return Response({"success": True, "data": data, "error": None})
 
 
 # 週報表：上一個完整的週（週一～週日）的回顧；活動、日記照常顯示，
 # 能力分數只列已解鎖的維度
 @api_view(["GET"])
+@services.with_shared_diary_scan  # 週報、首頁任務與發點數共用同一次全站日記掃描
 def weekly_report_view(request):
     if not request.user.is_authenticated:
         return _error_response("NOT_AUTHENTICATED", "請先登入", status=401)
@@ -98,6 +101,12 @@ def weekly_report_view(request):
         if changed:
             record.save(update_fields=changed)
 
-    return Response(
-        {"success": True, "data": weekly_report.with_signed_media(data), "error": None}
-    )
+    # 存完快照才加 rewards（rewards 只放在這次回應，不存進週報快照）。
+    # viewed_at 已寫入，grant() 才判斷得到「看看上週回顧」任務已完成
+    response_data = {
+        **weekly_report.with_signed_media(data),
+        "rewards": rewards_services.grant(
+            request.user, rewards_services.WEEKLY_REPORT_VIEWED
+        ),
+    }
+    return Response({"success": True, "data": response_data, "error": None})

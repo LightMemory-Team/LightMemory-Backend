@@ -19,6 +19,23 @@ from ..services import DIMENSIONS, GAME_SOURCES, REQUIRED_SESSIONS
 DASHBOARD_URL = "/api/dashboard/"
 
 
+class DashboardRewardsTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="tester", password="pw123456")
+        self.client.force_authenticate(user=self.user)
+
+    def test_first_view_unlocks_achievement_only_once(self):
+        first = self.client.get(DASHBOARD_URL).data["data"]["rewards"]
+        again = self.client.get(DASHBOARD_URL).data["data"]["rewards"]
+
+        # 第一次查看解鎖「認識自己」；成就點數不算在 points_earned
+        self.assertEqual(
+            [a["code"] for a in first["new_achievements"]], ["first_dashboard"]
+        )
+        self.assertEqual(again["points_earned"], 0)
+        self.assertEqual(again["new_achievements"], [])
+
+
 class DashboardApiTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="tester", password="pw123456")

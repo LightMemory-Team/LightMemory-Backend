@@ -5,6 +5,7 @@ from datetime import timedelta
 from django.test import TestCase
 from django.utils import timezone
 
+from rewards.models import PointTransaction
 from users.models import User
 
 from .. import session_service
@@ -422,3 +423,49 @@ class IsFirstSessionTests(HistoryTestCase):
         )
 
         self.assertTrue(session_service.is_first_session(GAME_TYPE, self.user))
+
+
+class GrantRewardsTests(TestCase):
+    """grant_rewards()：遊戲結算後發點，回傳 rewards 區塊。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="tester", password="pw123456")
+        # 用另一個帳號呼叫也一樣：點數發給場次的主人
+        self.other_user = User.objects.create_user(
+            username="other", password="pw123456"
+        )
+
+    def test_finished_session_pays_its_owner_once(self):
+        session_id = session_service.create_session(GAME_TYPE, user=self.user)[
+            "session_id"
+        ]
+        session_service.finish_session(GAME_TYPE, session_id, {})
+
+        first = session_service.grant_rewards(GAME_TYPE, session_id)
+        again = session_service.grant_rewards(GAME_TYPE, session_id)
+
+        self.assertGreaterEqual(first["points_earned"], 10)
+        self.assertEqual(again["points_earned"], 0)
+        self.assertIsNone(first["error"])
+        self.assertTrue(
+            PointTransaction.objects.filter(
+                user=self.user, reason="game_complete"
+            ).exists()
+        )
+        self.assertFalse(PointTransaction.objects.filter(user=self.other_user).exists())
+
+    def test_unfinished_session_pays_nothing(self):
+        session_id = session_service.create_session(GAME_TYPE, user=self.user)[
+            "session_id"
+        ]
+
+        rewards = session_service.grant_rewards(GAME_TYPE, session_id)
+
+        self.assertEqual(rewards["points_earned"], 0)
+        self.assertFalse(PointTransaction.objects.exists())
+
+    def test_unknown_session_returns_empty_block(self):
+        rewards = session_service.grant_rewards(GAME_TYPE, "no-such-session")
+
+        self.assertEqual(rewards["points_earned"], 0)
+        self.assertEqual(rewards["new_achievements"], [])
