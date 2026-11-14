@@ -211,20 +211,19 @@ body {
   max-width: none;
   padding: 5px 14px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
+  /* 實心白底深色字：不透出照片，老花眼也看得清楚（對比約 16:1） */
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
   font-size: 0.95rem;
   line-height: 1.5;
   white-space: nowrap;
   will-change: transform;
 }
 
-.no-photo .danmaku-item {
-  background: rgba(46, 99, 66, 0.82);
-}
-
 .danmaku-name {
   font-weight: 700;
+  color: var(--green-dark);
 }
 
 .danmaku-name::after {
@@ -234,13 +233,18 @@ body {
 .danmaku-icon {
   margin-right: 4px;
   font-size: 1.1rem;
+  color: var(--green);
 }
 
-/* 自己剛送出的：白底綠字＋綠框，一眼認得出來 */
+/* 自己剛送出的：實心深綠底白字，跟別人的白底彈幕一眼分得出來 */
 .danmaku-item.is-own {
-  background: #fff;
-  color: var(--green-dark);
-  box-shadow: 0 0 0 2px var(--green);
+  background: var(--green-dark);
+  color: #fff;
+}
+
+.danmaku-item.is-own .danmaku-name,
+.danmaku-item.is-own .danmaku-icon {
+  color: #fff;
 }
 
 /* 減少動態效果時：靜態排在左邊 */
