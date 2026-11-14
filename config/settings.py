@@ -71,6 +71,8 @@ CSRF_TRUSTED_ORIGINS = config(
 # Application definition
 
 INSTALLED_APPS = [
+    # demo 後台工具：要排在 django.contrib.admin 前面，才能蓋過後台首頁模板
+    "demo_tools",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",

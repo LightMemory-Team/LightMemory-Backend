@@ -86,6 +86,7 @@ LightMemory/
 | assessments | 已停用（原 AD-8 量表模型已移除，保留空 app 供 migration 使用） |
 | ai_service | OpenAI、Whisper、AI 分析服務 |
 | home | 首頁整合 API |
+| demo_tools | 複賽 demo 用：admin_demo 帳號與後台維護任務頁（`/admin/demo/`） |
 
 ---
 
@@ -309,6 +310,16 @@ Firebase Storage 與 Service Account 設定方式請參考：
 ```bash
 python manage.py runserver
 ```
+
+### 10. （demo 用）建立展示帳號
+
+```bash
+python manage.py setup_admin_demo
+```
+
+建立（或重設密碼）`admin_demo`／`admin`（superuser，暱稱 demo）。用它登入後台，首頁的「維護任務」（`/admin/demo/`）可以一鍵產生展示資料：遊戲＋日記紀錄（儀表板、週報）、分享頁留言、點數與成就，或全部清除。每個按鈕只動 admin_demo 的資料，可以重複按。
+
+> ⚠️ 密碼很簡單又是 superuser，demo 結束後請到後台改密碼或停用帳號。
 
 ---
 

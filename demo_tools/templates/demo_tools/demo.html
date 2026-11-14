@@ -1,0 +1,62 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">首頁</a> &rsaquo; 維護任務
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p>
+    展示帳號：<strong>{{ demo_user.username }}</strong>（暱稱：{{ demo_user.nickname }}）。
+    按下按鈕後，用這個帳號登入 App 就能看到結果。每個按鈕都可以重複按，不會越按越多。
+  </p>
+
+  <div class="module">
+    <table style="width: 100%;">
+      <caption>目前狀態</caption>
+      <tbody>
+        {% for game in status.games %}
+        <tr><th scope="row">{{ game.title }}</th><td>{{ game.count }} 場</td></tr>
+        {% endfor %}
+        <tr><th scope="row">聲影日記</th><td>{{ status.diary_count }} 篇</td></tr>
+        <tr><th scope="row">分享頁留言</th><td>{{ status.comment_count }} 則</td></tr>
+        <tr><th scope="row">點數</th><td>{{ status.total_points }} 點（成就 {{ status.achievement_count }} 個）</td></tr>
+        <tr>
+          <th scope="row">分享頁</th>
+          <td>
+            {% if status.share_url %}
+              <a href="{{ status.share_url }}" target="_blank" rel="noopener">{{ status.share_url }}</a>
+            {% else %}
+              還沒有分享的日記
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module">
+    <table style="width: 100%;">
+      <caption>維護任務</caption>
+      <tbody>
+        {% for task in tasks %}
+        <tr>
+          <td style="width: 16em;">
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="task" value="{{ task.key }}">
+              <input type="submit" value="{{ task.label }}"
+                {% if task.danger %}class="deletelink" style="cursor: pointer;"
+                onclick="return confirm('確定要清除 {{ demo_user.username }} 的所有資料嗎？');"{% else %}class="default"{% endif %}>
+            </form>
+          </td>
+          <td>{{ task.help }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
