@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from games import session_service
+from games import demo_mode, session_service
 from games.dda import DDAConfig, apply_answer
 from games.utils import get_current_user
 from games.zscore import z_score_to_display_score
@@ -401,10 +401,15 @@ def round_answer(request):
 
     question_number = session["question_number"] + 1
 
+    # demo 帳號答滿 3 回合就結束（其他人是 None，照原本的時間限制玩到時間到）
+    demo_limit = demo_mode.session_question_limit(session, None)
+
     if is_pretest:
         action = (
             "finished" if question_number >= PRETEST_TOTAL_ROUNDS else "next_question"
         )
+    elif demo_limit is not None and question_number >= demo_limit:
+        action = "finished"
     else:
         action = "promoted" if promoted else "next_question"
 
