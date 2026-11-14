@@ -289,3 +289,62 @@ class FeedPostTaskTests(TestCase):
 
         self.assertContains(response, "請先選擇日記主題")
         self.assertFalse(Diary.objects.filter(user=self.demo).exists())
+
+
+class SetPointsTaskTests(TestCase):
+    """點數更新至 500 點：總點數剛好 500，App 的點數 API 也是 500。"""
+
+    def setUp(self):
+        call_command("setup_admin_demo", stdout=StringIO())
+        self.demo = User.objects.get(username=DEMO_USERNAME)
+        self.client.force_login(self.demo)
+
+    def press(self):
+        return self.client.post(URL, {"task": "set_points"}, follow=True)
+
+    def summary(self):
+        api = APIClient()
+        api.force_authenticate(user=self.demo)
+        return api.get("/api/rewards/summary/").data["data"]
+
+    def test_from_zero_to_500(self):
+        response = self.press()
+
+        self.assertContains(response, "總點數已更新為 500 點")
+        self.assertEqual(self.summary()["total_points"], 500)
+
+    def test_tops_up_existing_points_and_repeat_stays_500(self):
+        PointTransaction.objects.create(
+            user=self.demo, reason="game_complete", source_id="g1", amount=120
+        )
+
+        self.press()
+        self.press()
+
+        self.assertEqual(self.summary()["total_points"], 500)
+        adjust = PointTransaction.objects.get(
+            user=self.demo, source_id="demo-points-adjust"
+        )
+        self.assertEqual(adjust.amount, 380)
+
+    def test_more_than_500_goes_down_to_500(self):
+        PointTransaction.objects.create(
+            user=self.demo, reason="game_complete", source_id="g1", amount=650
+        )
+
+        self.press()
+
+        self.assertEqual(self.summary()["total_points"], 500)
+
+    def test_does_not_use_up_daily_cap(self):
+        self.press()
+
+        self.assertEqual(self.summary()["today_points"], 0)
+
+    def test_after_seed_rewards(self):
+        self.client.post(URL, {"task": "seed_history"})
+        self.client.post(URL, {"task": "seed_rewards"})
+
+        self.press()
+
+        self.assertEqual(self.summary()["total_points"], 500)
