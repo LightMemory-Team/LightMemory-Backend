@@ -514,7 +514,7 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 | `game_id` | 原本 | 現在 |
 |---|---|---|
 | `market_route` | 菜市場找路 | **來去菜市場** |
-| `memory_recall` | 煮菜過程 | **記憶配對** |
+| `memory_recall` | 煮菜過程 | **料理準備**（11/14 起；F14 曾短暫叫「記憶配對」，已改回與前端遊戲內一致） |
 | `fridge_check` | 冰箱檢查 | **冰箱清點** |
 | `market_sort` | 整理菜籃（`title` 是「整理菜籃遊戲」） | **整理菜籃**（`name`、`title` 一致） |
 | `market_shopping` | 市場買菜 | 市場買菜（不變） |
