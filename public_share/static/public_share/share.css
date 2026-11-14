@@ -14,6 +14,7 @@
   --input-bg: #ecece8;
   --input-line: #cfcfc8;
   --error: #b3261e;
+  --record-red: #c9302c;
 }
 
 * {
@@ -235,6 +236,234 @@ body {
   color: var(--green);
   font-size: 0.9rem;
   font-weight: 500;
+}
+
+/* 圖示：Material Symbols（同比賽版 futureQ） */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.icon-fill {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* 語音加油（版面參考比賽版 futureQ 的 voice-reply-section） */
+.voice-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 8px 22px 4px;
+  padding: 22px 18px;
+  border-radius: 20px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
+}
+
+.voice-reply-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.voice-reply-heart {
+  font-size: 28px;
+  color: var(--green);
+}
+
+.voice-reply-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.voice-reply-sub {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 0.95rem;
+}
+
+.reply-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.suggest-title {
+  margin: 0;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.suggest-chip {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 2px solid transparent;
+  border-radius: 14px;
+  background: var(--green-pale);
+  color: var(--green-dark);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggest-chip.is-selected {
+  border-color: var(--green);
+}
+
+.cue-card {
+  margin: 0;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: var(--green-pale);
+  color: var(--green-dark);
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.vr-record-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+/* 麥克風按鈕：88px 圓形，錄音中變紅、放大、外圈光暈 */
+.vr-mic-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88px;
+  height: 88px;
+  border: none;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s, background 0.1s;
+}
+
+.vr-mic-btn .material-symbols-outlined {
+  font-size: 44px;
+}
+
+.vr-mic-btn:focus-visible {
+  outline: 3px solid var(--green-dark);
+  outline-offset: 4px;
+}
+
+.vr-mic-btn.vr-recording {
+  /* 放大＋外圈光暈會往外多 17px，上下多留空間，才不會蓋到提示文字 */
+  margin: 16px 0;
+  transform: scale(1.12);
+  background: var(--record-red);
+  box-shadow: 0 0 0 12px rgba(201, 48, 44, 0.15);
+}
+
+.vr-hint {
+  margin: 0;
+  color: var(--text-sub);
+  font-weight: 500;
+  text-align: center;
+}
+
+.vr-timer {
+  margin: 0;
+  color: var(--record-red);
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.vr-preview,
+.vr-done {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.vr-audio {
+  width: 100%;
+  border-radius: 12px;
+}
+
+.vr-send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 56px;
+  border: none;
+  border-radius: 14px;
+  background: var(--green);
+  color: #fff;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.vr-send-btn:hover,
+.vr-send-btn:focus-visible {
+  background: var(--green-dark);
+}
+
+.vr-send-btn:disabled,
+.vr-redo-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.vr-redo-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 48px;
+  border: 1.5px solid var(--input-line);
+  border-radius: 12px;
+  background: none;
+  color: var(--text-sub);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.vr-done {
+  align-items: center;
+  text-align: center;
+}
+
+.vr-done-icon {
+  font-size: 48px;
+  color: var(--green);
+}
+
+.vr-done-text {
+  margin: 0;
+  font-weight: 700;
+}
+
+.vr-done .vr-redo-btn {
+  align-self: stretch;
+}
+
+.comment-hint {
+  margin: 0 0 8px 4px;
+  color: var(--text-sub);
+  font-size: 0.9rem;
 }
 
 /* 留言區 */

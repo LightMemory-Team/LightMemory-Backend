@@ -43,6 +43,14 @@ class SharePageView(View):
         photo_url = media_url(post.image_path or (diary.image_path if diary else ''))
         title = (diary.title if diary and diary.title else '')
         hashtags = diary.hashtags if (diary and isinstance(diary.hashtags, list)) else []
+        # 「不知道說什麼嗎？」的建議句（日記完成時由 AI 產生，最多 3 句）。
+        # 只當提詞卡給親友照著唸，不會直接送出文字；舊日記沒有就不顯示
+        raw_replies = diary.suggested_replies if diary else []
+        suggested_replies = [
+            text.strip()
+            for text in (raw_replies if isinstance(raw_replies, list) else [])
+            if isinstance(text, str) and text.strip()
+        ][:3]
 
         context = {
             'share_token': post.share_token,
@@ -52,6 +60,7 @@ class SharePageView(View):
             'title': title,
             'post_text': post.content,
             'hashtags': hashtags,
+            'suggested_replies': suggested_replies,
         }
 
         return render(request, 'public_share/share.html', context)

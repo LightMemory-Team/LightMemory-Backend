@@ -11,6 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap">
+  <!-- 圖示：Material Symbols（同比賽版 futureQ 分享頁） -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
   <link rel="stylesheet" href="{% static 'public_share/share.css' %}">
 </head>
 <body data-share-token="{{ share_token }}">
@@ -60,14 +62,67 @@
         {% endif %}
       </div>
 
+      <!-- 語音加油：錄一段最多 10 秒的話給作者（照比賽版 futureQ）。
+           音檔只上傳，作者在 App 按「轉文字」才轉成文字 -->
+      <section id="voice-reply" class="voice-reply" aria-labelledby="voice-reply-title">
+        <div class="voice-reply-header">
+          <span class="material-symbols-outlined icon-fill voice-reply-heart" aria-hidden="true">favorite</span>
+          <h2 id="voice-reply-title" class="voice-reply-title">留下語音加油</h2>
+        </div>
+        <p class="voice-reply-sub">點一下麥克風開始錄音，再點一下結束，錄下您想對{{ author_name }}說的話（最多 10 秒）</p>
+
+        {% if suggested_replies %}
+        <!-- 不知道說什麼時的提詞卡：點一句放大顯示在麥克風上方，照著唸即可，不會直接送出文字 -->
+        <div class="reply-suggestions">
+          <p class="suggest-title">💬 不知道說什麼嗎？可以參考：</p>
+          {% for text in suggested_replies %}
+          <button type="button" class="suggest-chip" data-text="{{ text }}">{{ text }}</button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <p id="cue-card" class="cue-card" hidden></p>
+
+        <!-- 錄音中／待機 -->
+        <div id="vr-record-area" class="vr-record-area">
+          <button type="button" id="vr-mic-btn" class="vr-mic-btn" aria-label="開始錄音">
+            <span id="vr-mic-icon" class="material-symbols-outlined icon-fill" aria-hidden="true">mic</span>
+          </button>
+          <p id="vr-hint" class="vr-hint" aria-live="polite">點一下開始錄音</p>
+          <p id="vr-timer" class="vr-timer" hidden>00:00 / 00:10</p>
+        </div>
+
+        <!-- 錄好了：試聽、送出、重錄 -->
+        <div id="vr-preview" class="vr-preview" hidden>
+          <audio id="vr-audio" class="vr-audio" controls></audio>
+          <button type="button" id="vr-send-btn" class="vr-send-btn">
+            <span class="material-symbols-outlined" aria-hidden="true">send</span>送出語音加油
+          </button>
+          <button type="button" id="vr-redo-btn" class="vr-redo-btn">
+            <span class="material-symbols-outlined" aria-hidden="true">replay</span>重新錄製
+          </button>
+        </div>
+
+        <!-- 送出成功 -->
+        <div id="vr-done" class="vr-done" hidden>
+          <span class="material-symbols-outlined icon-fill vr-done-icon" aria-hidden="true">check_circle</span>
+          <p class="vr-done-text">已送出，謝謝您的加油！</p>
+          <button type="button" id="vr-again-btn" class="vr-redo-btn">
+            <span class="material-symbols-outlined" aria-hidden="true">mic</span>再錄一段
+          </button>
+        </div>
+
+        <p id="vr-error" class="error-text" role="alert" hidden></p>
+      </section>
+
       <div class="comment-area">
         <ul id="sent-list" class="sent-list" hidden></ul>
 
         <p class="as-line">
-          以「<span id="nickname-display"></span>」留言
+          以「<span id="nickname-display"></span>」留言、錄音
           <button type="button" id="change-nickname" class="btn-link">修改</button>
         </p>
 
+        <p class="comment-hint">也可以打字留言</p>
         <form id="comment-form" class="comment-row" novalidate>
           <label for="comment-input" class="sr-only">留言</label>
           <textarea id="comment-input" class="pill-input comment-input" rows="1"
