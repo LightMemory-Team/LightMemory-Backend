@@ -59,13 +59,27 @@ class MarketSortSubmitView(APIView):
         is_complete = validated["is_complete"]
         questions = validated["questions"]
 
-        session, created = session_service.get_or_create_session(
-            GAME_TYPE,
-            session_id,
-            initial_state={"user_id": request.user.id},
-            user=request.user,
-            is_pretest=session_service.is_first_session(GAME_TYPE, request.user),
-        )
+        try:
+            session, created = session_service.get_or_create_session(
+                GAME_TYPE,
+                session_id,
+                initial_state={"user_id": request.user.id},
+                user=request.user,
+                is_pretest=session_service.is_first_session(GAME_TYPE, request.user),
+            )
+        except session_service.SessionOwnerMismatch:
+            # session_id 已被別的使用者用過：不回傳也不修改對方的 session
+            return Response(
+                {
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "FORBIDDEN",
+                        "message": "這場遊戲不屬於目前的使用者",
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # 冪等性處理：同一個 session_id 已經算過分，直接回傳既有結果，不重算不重寫。
         # 還沒結束的（之前送過未完成、或資料不足被擋下）照常往下驗證、計分，
@@ -115,12 +129,10 @@ class MarketSortSubmitView(APIView):
         return self._build_response(request.user, session)
 
     def _build_response(self, user, session):
-        all_sessions = session_service.list_sessions(GAME_TYPE)
-        history = [
-            s
-            for s in all_sessions
-            if s["status"] == "finished" and s["state"].get("user_id") == user.id
-        ]
+        # 在資料庫就篩選出「這位使用者、已完成」的場次，不載入全站資料
+        history = session_service.list_user_sessions(
+            GAME_TYPE, user.id, status="finished"
+        )
         history.sort(key=lambda s: s["result"]["generated_at"], reverse=True)
 
         # 資料不足的場次分數是 None，最高分、近期分數都不算它

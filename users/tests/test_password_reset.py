@@ -6,6 +6,7 @@
 """
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -18,6 +19,7 @@ LOGIN_URL = "/api/users/login/"
 
 class PasswordResetCheckTests(APITestCase):
     def setUp(self):
+        cache.clear()  # 限速計數存在 cache，避免測試之間互相影響
         User.objects.create_user(username="0912345678", password="Old!Pass2026")
 
     def test_existing_account_returns_exists_true(self):
@@ -69,6 +71,7 @@ class PasswordResetCheckTests(APITestCase):
 
 class PasswordResetTests(APITestCase):
     def setUp(self):
+        cache.clear()  # 限速計數存在 cache，避免測試之間互相影響
         self.user = User.objects.create_user(
             username="0912345678", password="Old!Pass2026"
         )

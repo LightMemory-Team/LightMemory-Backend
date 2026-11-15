@@ -4,6 +4,8 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.utils.urls import replace_query_param
 
+from diary.media import media_url
+
 from .models import Post
 
 
@@ -87,7 +89,7 @@ def serialize_post(post, viewer):
         "author": author_dict(post.user),
         "is_mine": is_mine,
         "title": diary.title if diary else "",
-        "photo_url": post.image_path,
+        "photo_url": media_url(post.image_path),
         "post_text": post.content,
         "hashtags": diary.hashtags if diary else [],
         "category": diary.category if diary else "",

@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from games import session_service
-from games.utils import get_current_user
+from games.utils import forbidden_unless_owner, get_current_user
 
 from . import services
 
@@ -104,6 +104,10 @@ def submit_item_answer(request, session_id):
             },
             status=status.HTTP_404_NOT_FOUND,
         )
+
+    forbidden = forbidden_unless_owner(request, session)
+    if forbidden is not None:
+        return forbidden
 
     if session["status"] == "finished":
         return Response(
@@ -268,6 +272,10 @@ def submit_change_answer(request, session_id):
             },
             status=status.HTTP_404_NOT_FOUND,
         )
+
+    forbidden = forbidden_unless_owner(request, session)
+    if forbidden is not None:
+        return forbidden
 
     if session["status"] == "finished":
         return Response(

@@ -27,7 +27,7 @@
    - 全體的變異用「個人內」變異（同一人多場之間的變化）
    - **每款遊戲的第一場是熟悉場**：不算分、不進任何歷史
 
-驗證：測試用 200 場模擬，1 個指標與 5 個指標的最終 z 標準差差距 < 0.15（`games/tests_zscore.py`）。
+驗證：測試用 200 場模擬，1 個指標與 5 個指標的最終 z 標準差差距 < 0.15（`games/tests/test_zscore.py`）。
 
 ---
 
@@ -349,11 +349,11 @@ python manage.py test --settings=config.settings_test
 
 | 檔案 | 驗證內容 |
 |---|---|
-| `games/tests_zscore.py` | 收縮基準、二階段標準化、等權重；1 vs 5 個指標模擬 SD 一致 |
-| `games/tests_session_service.py` | 歷史查詢排除熟悉場、`is_staff`、種子資料；依使用者分組 |
-| `games/tests_recompute_scores.py` | 回填熟悉場、重算、`--dry-run`、可重複執行 |
+| `games/tests/test_zscore.py` | 收縮基準、二階段標準化、等權重；1 vs 5 個指標模擬 SD 一致 |
+| `games/tests/test_session_service.py` | 歷史查詢排除熟悉場、`is_staff`、種子資料；依使用者分組 |
+| `games/tests/test_recompute_scores.py` | 回填熟悉場、重算、`--dry-run`、可重複執行 |
 | 各遊戲 `tests_*` | 熟悉場 `null`、`is_pretest` 回應、冷啟動借全體、手算 z 值 |
-| `dashboard/tests*.py` | 各維度解鎖、`encouragement` 需 6 維度解鎖、週報 `unlocked` 與 `overall`、日記 z |
+| `dashboard/tests/` | 各維度解鎖、`encouragement` 需 6 維度解鎖、週報 `unlocked` 與 `overall`、日記 z |
 
 ## 十、已知問題與備註
 

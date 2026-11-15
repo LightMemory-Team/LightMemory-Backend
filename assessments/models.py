@@ -1,12 +1,5 @@
-from django.db import models
-from users.models import User
+"""assessments app 已停用。
 
-
-class Ad8Record(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ad8_records')
-    total_score = models.IntegerField(null=True, blank=True)
-    result_description = models.CharField(max_length=200, blank=True)
-    completed_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.user} 的AD-8測驗 ({self.completed_at.date()}) - {self.total_score}分"
+原本的 Ad8Record（AD-8 量表）沒有任何 API 使用，而且屬於診斷性質，與專案「輔助維持認知活躍度」的定位不符，已移除（見 migration 0002）。
+空的 app 先保留，讓已經套用過 0001 的資料庫可以執行刪除資料表的 migration。
+"""

@@ -28,8 +28,8 @@
    | `users` | `User`, `FamilyContact` | 使用者、家屬聯絡人 |
    | `diary` | `Diary`, `DiaryAnalysis` | 聲影日記、日記 AI 分析（可重複分析） |
    | `games` | `GameCategory`, `Game`, `GameRecord` | 遊戲類別、遊戲、遊戲紀錄 |
-   | `assessments` | `Ad8Record` | AD-8 認知評估量表 |
-   | `dashboard` | `HealthDashboardRecord` | 健康儀表板（各項認知分數） |
+   | `assessments` | （已移除）~~`Ad8Record`~~ | 當時的 AD-8 量表模型，已因診斷性質與沒有使用而移除 |
+   | `dashboard` | （已移除）~~`HealthDashboardRecord`~~ | 當時的健康儀表板模型，沒有使用而移除；儀表板改為即時計算 |
    | `activities` | `HealthInformation`, `ActivityRecord` | 資訊加油站活動、活動報名紀錄 |
 
 6. 產生對應的 migration 檔案（`各app/migrations/0001_initial.py` 等），這些檔案記錄了「怎麼把 models 轉換成資料表」，**必須一起同步**，不然無法在你的電腦上建出一樣的資料表
@@ -89,11 +89,11 @@
 
 ### assessments app
 
-**Ad8Record**：`user`、`total_score`、`result_description`、`completed_at`
+（已移除）Ad8Record 不再存在。
 
 ### dashboard app
 
-**HealthDashboardRecord**：`user`、六項認知分數（注意力/執行功能/語言/工作記憶/數學/視覺空間）、`brain_age`、`trend_alert_level`（低/中/高）、`report_type`（週報/月報/手動）、`generated_at`
+（已移除）HealthDashboardRecord 不再存在；儀表板資料改為即時計算，只有 `WeeklyReport` 存週報快照。
 
 ### activities app
 

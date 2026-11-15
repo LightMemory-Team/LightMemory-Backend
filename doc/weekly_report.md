@@ -225,7 +225,7 @@
 | `ai_service/weekly_summary.py` | 一句話總結：正向事實、AI 呼叫、禁用詞檢查、固定句型 |
 | `games/zscore.py` | 共用的 z 計算（收縮基準、二階段標準化）與 `z_score_to_display_score`：z → 1～100 分（五款遊戲與週報共用） |
 | `dashboard/services.py` | 另有 `get_unlock_progress`、`unlocked_sources`：各維度累計幾筆有 z、哪些已解鎖（週報與儀表板共用） |
-| `dashboard/tests_weekly_report.py`、`ai_service/tests.py` | 測試（AI 以 mock 取代，不會真的呼叫 OpenAI） |
+| `dashboard/tests/test_weekly_report.py`、`ai_service/tests/test_weekly_summary.py` | 測試（AI 以 mock 取代，不會真的呼叫 OpenAI） |
 
 ---
 

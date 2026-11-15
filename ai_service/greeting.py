@@ -11,7 +11,8 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from .weekly_summary import BANNED_WORDS, _client
+from .weekly_summary import _client
+from .wording import contains_banned_word
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def _is_acceptable(greeting):
     return (
         bool(greeting)
         and len(greeting) <= MAX_GREETING_LENGTH
-        and not any(word in greeting for word in BANNED_WORDS)
+        and not contains_banned_word(greeting)
     )
 
 
