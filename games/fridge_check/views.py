@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from games import session_service
+from games import demo_mode, session_service
 from games.utils import forbidden_unless_owner, get_current_user
 
 from . import services
@@ -47,7 +47,7 @@ def create_session(request):
                 "is_pretest": session["is_pretest"],
                 "difficulty": session["state"]["difficulty"],
                 "current_question": session["question_number"],
-                "total_questions": TOTAL_QUESTIONS,
+                "total_questions": demo_mode.question_limit(user, TOTAL_QUESTIONS),
                 "consecutive_correct": (
                     session["state"]["consecutive_correct"]
                 ),
@@ -241,7 +241,8 @@ def submit_answer(request, session_id):
         # 如果這就是第 10 題 → 遊戲結束
         # -------------------------------------------------
 
-        if session["question_number"] >= TOTAL_QUESTIONS:
+        limit = demo_mode.session_question_limit(session, TOTAL_QUESTIONS)
+        if session["question_number"] >= limit:
 
             final_session = services.complete_session(
                 session
@@ -376,7 +377,8 @@ def submit_answer(request, session_id):
     # 第 10 題答對 → 遊戲結束
     # -----------------------------------------------------
 
-    if session["question_number"] >= TOTAL_QUESTIONS:
+    limit = demo_mode.session_question_limit(session, TOTAL_QUESTIONS)
+    if session["question_number"] >= limit:
 
         final_session = services.complete_session(
             session

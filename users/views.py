@@ -1,22 +1,27 @@
-from datetime import timedelta
 import logging
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.utils import get_md5_hash_password
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from config.exceptions import ApiError
 from diary.external import delete_from_firebase
 from diary.models import Diary, DiaryReply
 from games.models import GameSession
-from social.models import Post
+from social.models import Post, VoiceReply
 
 from .serializers import (
     AccountDeleteSerializer,
@@ -28,7 +33,14 @@ from .serializers import (
     RegisterSerializer,
     validate_new_password,
 )
-from .throttles import PasswordResetIPThrottle, PasswordResetUsernameThrottle
+from .throttles import (
+    LoginIPThrottle,
+    LoginUsernameThrottle,
+    PasswordConfirmUserThrottle,
+    PasswordResetIPThrottle,
+    PasswordResetUsernameThrottle,
+    RegisterIPThrottle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +63,7 @@ def get_active_user_or_404(username):
 def collect_user_media(user):
     """收集這位使用者所有存在檔案儲存空間的檔案（資料庫裡存的路徑或網址）。
 
-    包含頭像、日記照片、日記錄音、社群貼文照片。必須在刪除使用者「之前」呼叫，
+    包含頭像、日記照片、日記錄音、社群貼文照片、親友的語音加油。必須在刪除使用者「之前」呼叫，
     因為使用者一刪，這些資料列也會一起被刪掉。
     """
     values = {user.avatar_url}
@@ -63,45 +75,28 @@ def collect_user_media(user):
         DiaryReply.objects.filter(diary__user=user).values_list("audio_path", flat=True)
     )
     values.update(Post.objects.filter(user=user).values_list("image_path", flat=True))
+    values.update(
+        VoiceReply.objects.filter(post__user=user).values_list("audio_path", flat=True)
+    )
     return {v for v in values if v}
 
 
 def remove_user_media(values):
-    """刪除收集到的檔案：雲端（Firebase）的檔案，以及存在本機 media 的頭像。
+    """刪除收集到的檔案（都在 Firebase 上）。
 
     盡力而為：任何一個檔案刪不掉都只記錄，不會影響其他檔案，也不會丟例外。
     """
-    from django.conf import settings
-
-    local = {v for v in values if v.startswith(settings.MEDIA_URL)}
-    delete_from_firebase(values - local)
-    for value in local:
-        try:
-            default_storage.delete(value[len(settings.MEDIA_URL) :])
-        except Exception as exc:
-            logger.warning("本機檔案刪除失敗（%s）: %s", value, exc)
+    delete_from_firebase(values)
 
 
 def save_avatar_file(avatar_file):
-    """上傳頭像檔案，優先上傳至 Firebase Storage，若未設定則存至本機 media。"""
-    try:
-        from diary.external import upload_to_firebase
+    """上傳頭像到 Firebase Storage，回傳公開網址；失敗回傳 None。
 
-        url = upload_to_firebase(avatar_file, "avatars", public=True)
-        if url:
-            return url
-    except Exception as exc:
-        logger.warning("Firebase avatar upload failed: %s", exc)
+    不存本機 media：本機檔案只有 DEBUG 模式才看得到，正式環境頭像會壞掉。
+    """
+    from diary.external import upload_to_firebase
 
-    import os
-    import uuid
-    from django.conf import settings
-    from django.core.files.storage import default_storage
-
-    ext = os.path.splitext(avatar_file.name)[1] or ".jpg"
-    filename = f"avatars/{uuid.uuid4().hex}{ext}"
-    path = default_storage.save(filename, avatar_file)
-    return f"{settings.MEDIA_URL}{path}"
+    return upload_to_firebase(avatar_file, "avatars", public=True)
 
 
 def calculate_user_stats(user, today=None):
@@ -163,10 +158,67 @@ def calculate_user_stats(user, today=None):
     }
 
 
+class PasswordAwareTokenRefreshSerializer(TokenRefreshSerializer):
+    """換 token 時，也檢查「這張 refresh token 是不是在目前的密碼之下簽發的」。
+
+    simplejwt 開了 CHECK_REVOKE_TOKEN 之後，只有「拿 access token 打 API」會檢查密碼有沒有
+    改過，換 token 的端點不檢查。結果是密碼改了之後，舊的 refresh token 還是換得到
+    新的 access token，只是那個 access token 一用就被拒絕（401），前端會一直重試。
+    這裡讓換 token 這一步就失敗（401），前端才知道要回登入頁。
+
+    另外，帳號已經被刪除時，simplejwt 原本會直接丟 DoesNotExist（變成 500），
+    這裡改成一樣回 401。
+    """
+
+    def validate(self, attrs):
+        refresh = self.token_class(attrs["refresh"])  # 不合法或過期 → TokenError
+        user_id = refresh.payload.get(jwt_settings.USER_ID_CLAIM)
+        user = User.objects.filter(**{jwt_settings.USER_ID_FIELD: user_id}).first()
+        if user is None:
+            raise TokenError("找不到這個帳號")
+        if jwt_settings.CHECK_REVOKE_TOKEN and refresh.get(
+            jwt_settings.REVOKE_TOKEN_CLAIM
+        ) != get_md5_hash_password(user.password):
+            raise TokenError("密碼已經變更，請重新登入")
+        return super().validate(attrs)
+
+
+class RefreshView(TokenRefreshView):
+    """換 token：POST /api/users/login/refresh/"""
+
+    serializer_class = PasswordAwareTokenRefreshSerializer
+
+
+class LoginView(TokenObtainPairView):
+    """登入：POST /api/users/login/
+
+    simplejwt 原本的登入，加上「登入失敗次數限制」：
+    - 同一個帳號失敗太多次、或同一個來源失敗太多次，就回 429
+    - 只有「帳密錯誤」才算失敗；成功登入、欄位沒填（400）都不算
+    - 登入成功會把這個帳號的失敗次數歸零
+    次數見 settings 的 login_username、login_ip。
+    """
+
+    throttle_classes = [LoginIPThrottle, LoginUsernameThrottle]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            response = super().post(request, *args, **kwargs)
+        except AuthenticationFailed:
+            for throttle in self.get_throttles():
+                throttle.record_failure(request, self)
+            raise
+        for throttle in self.get_throttles():
+            if isinstance(throttle, LoginUsernameThrottle):
+                throttle.clear(request, self)
+        return response
+
+
 # Create your views here.
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]  # 註冊時還沒有帳號，必須開放
+    throttle_classes = [RegisterIPThrottle]
 
 
 class MeView(generics.RetrieveUpdateAPIView):
@@ -180,6 +232,12 @@ class MeView(generics.RetrieveUpdateAPIView):
     serializer_class = MeSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ["get", "patch", "delete", "head", "options"]
+
+    def get_throttles(self):
+        # 只有刪除帳號要輸入密碼確認，才限制次數；查看、修改資料不限
+        if self.request.method == "DELETE":
+            return [PasswordConfirmUserThrottle()]
+        return super().get_throttles()
 
     def get_object(self):
         return self.request.user
@@ -216,9 +274,11 @@ class PasswordChangeView(APIView):
     """修改密碼：POST /api/users/me/password/
 
     驗證舊密碼與新密碼強度，成功後更新密碼並回發新的 access / refresh token。
+    要輸入舊密碼，所以限制次數（與刪除帳號共用），避免偷到 token 的人一直猜密碼。
     """
 
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [PasswordConfirmUserThrottle]
 
     def post(self, request):
         serializer = PasswordChangeSerializer(
@@ -232,15 +292,17 @@ class PasswordChangeView(APIView):
         user.save(update_fields=["password"])
 
         refresh = RefreshToken.for_user(user)
-        return Response({
-            "success": True,
-            "data": {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "message": "密碼已更新",
-            },
-            "error": None,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
+                    "message": "密碼已更新",
+                },
+                "error": None,
+            }
+        )
 
 
 class AvatarView(APIView):
@@ -270,11 +332,13 @@ class AvatarView(APIView):
         user.avatar_url = url
         user.save(update_fields=["avatar_url"])
 
-        return Response({
-            "success": True,
-            "data": {"avatar_url": user.avatar_url},
-            "error": None,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": {"avatar_url": user.avatar_url},
+                "error": None,
+            }
+        )
 
     def delete(self, request):
         user = request.user
@@ -290,11 +354,13 @@ class UserStatsView(APIView):
 
     def get(self, request):
         stats = calculate_user_stats(request.user)
-        return Response({
-            "success": True,
-            "data": stats,
-            "error": None,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": stats,
+                "error": None,
+            }
+        )
 
 
 class PasswordResetCheckView(APIView):

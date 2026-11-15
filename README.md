@@ -86,6 +86,7 @@ LightMemory/
 | assessments | 已停用（原 AD-8 量表模型已移除，保留空 app 供 migration 使用） |
 | ai_service | OpenAI、Whisper、AI 分析服務 |
 | home | 首頁整合 API |
+| demo_tools | 複賽 demo 用：admin_demo 帳號與後台維護任務頁（`/admin/demo/`） |
 
 ---
 
@@ -269,6 +270,21 @@ pip install -r requirements.txt
 
 並填入 PostgreSQL 與 Firebase 相關設定。
 
+安全相關設定（`DJANGO_DEBUG`、`DJANGO_SECRET_KEY`、CORS 等）也從 `.env` 讀取：
+
+| 變數 | 開發 | 正式環境 |
+|---|---|---|
+| `DJANGO_DEBUG` | 設 `True` | 不設或設 `False`（**沒設就是 `False`**） |
+| `DJANGO_SECRET_KEY` | 不用設（會用開發專用的備用金鑰） | **一定要設**，沒設服務會起不來；不能用 `django-insecure-` 開頭的金鑰 |
+| `DJANGO_ALLOWED_HOSTS`、`DJANGO_CSRF_TRUSTED_ORIGINS` | 不用設（有預設） | 以逗號分隔，填實際網域 |
+| `DJANGO_CORS_ALLOWED_ORIGINS` | 不用設（開發預設允許所有來源） | 填 Flutter Web 的網址；Flutter 手機 App 不受 CORS 影響 |
+
+產生 `DJANGO_SECRET_KEY`：
+
+```bash
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
+
 > `.env` 不會上傳至 GitHub。
 
 ### 7. 建立資料庫
@@ -294,6 +310,16 @@ Firebase Storage 與 Service Account 設定方式請參考：
 ```bash
 python manage.py runserver
 ```
+
+### 10. （demo 用）建立展示帳號
+
+```bash
+python manage.py setup_admin_demo
+```
+
+建立（或重設密碼）`admin_demo`／`admin`（superuser，暱稱 demo）。用它登入後台，首頁的「維護任務」（`/admin/demo/`）可以一鍵產生展示資料：遊戲＋日記紀錄（儀表板、週報）、一篇已發佈到動態牆的日記（可選主題）、分享頁留言、點數與成就、點數更新至 500 點、分數極端值（選一款遊戲，儀表板會出現「建議多注意」的小提醒），或全部清除。每個按鈕只動 admin_demo 的資料，可以重複按。
+
+> ⚠️ 密碼很簡單又是 superuser，demo 結束後請到後台改密碼或停用帳號。
 
 ---
 

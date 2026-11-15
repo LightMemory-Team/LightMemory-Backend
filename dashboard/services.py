@@ -38,6 +38,19 @@ DIMENSIONS = [
 
 DIARY_SOURCE = "diary"
 
+
+def dimension_for_source(source):
+    """遊戲 id（或 "diary"）對應的雷達圖維度，回傳 {dimension, label}；沒有則 None。
+
+    首頁遊戲卡片顯示「注意力」等標籤時用，跟雷達圖共用 DIMENSIONS 這一份對應，
+    不另外維護
+    """
+    for item in DIMENSIONS:
+        if item["source"] == source:
+            return {"dimension": item["dimension"], "label": item["label"]}
+    return None
+
+
 # demo 帳號的種子日記（seed_demo 指令建立）的錄音路徑前綴；
 # 這些日記不是真人寫的，不能拿來當全體基準
 SEED_DIARY_AUDIO_PREFIX = "seed/"
@@ -208,8 +221,7 @@ def diary_z_scores(user, start=None, end=None, scores=None):
     return [
         (created_at, z)
         for created_at, z in scores
-        if (start is None or created_at >= start)
-        and (end is None or created_at < end)
+        if (start is None or created_at >= start) and (end is None or created_at < end)
     ]
 
 

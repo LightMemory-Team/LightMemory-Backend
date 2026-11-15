@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from games import session_service
+from games import demo_mode, session_service
 from games.utils import forbidden_unless_owner, get_current_user
 
 from . import services
@@ -58,7 +58,10 @@ def create_session(request):
     )
 
     payload = services.build_question_payload(
-        session["current_question"], current_difficulty, session["question_number"]
+        session["current_question"],
+        current_difficulty,
+        session["question_number"],
+        demo_mode.session_question_limit(session, TOTAL_QUESTIONS),
     )
     payload["session_id"] = session["session_id"]
     payload["is_pretest"] = session["is_pretest"]
@@ -176,7 +179,7 @@ def submit_item_answer(request, session_id):
                         "is_completed": True,
                         "total_correct": result["total_correct"],
                         "first_try_correct_count": result["first_try_correct_count"],
-                        "total_questions": TOTAL_QUESTIONS,
+                        "total_questions": result["total_questions"],
                         "accuracy": result["accuracy"],
                         "speed_score": result.get("speed_score"),
                         "raw_score": result.get("raw_score"),
@@ -344,7 +347,7 @@ def submit_change_answer(request, session_id):
                         "is_completed": True,
                         "total_correct": result["total_correct"],
                         "first_try_correct_count": result["first_try_correct_count"],
-                        "total_questions": TOTAL_QUESTIONS,
+                        "total_questions": result["total_questions"],
                         "accuracy": result["accuracy"],
                         "speed_score": result.get("speed_score"),
                         "raw_score": result.get("raw_score"),
@@ -384,7 +387,7 @@ def submit_change_answer(request, session_id):
     question_number = session["question_number"]
 
     # 第 10 題完成 → 結束
-    if question_number >= TOTAL_QUESTIONS:
+    if question_number >= demo_mode.session_question_limit(session, TOTAL_QUESTIONS):
         finished_session = services.complete_session(session)
         result = finished_session["result"]
         return Response(
@@ -395,7 +398,7 @@ def submit_change_answer(request, session_id):
                     "is_completed": True,
                     "total_correct": result["total_correct"],
                     "first_try_correct_count": result["first_try_correct_count"],
-                    "total_questions": TOTAL_QUESTIONS,
+                    "total_questions": result["total_questions"],
                     "accuracy": result["accuracy"],
                     "speed_score": result.get("speed_score"),
                     "raw_score": result.get("raw_score"),

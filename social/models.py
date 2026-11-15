@@ -33,6 +33,30 @@ class Comment(models.Model):
         return f"{name} 對 {self.post} 的留言"
 
 
+class VoiceReply(models.Model):
+    """親友在分享頁錄給長者的「語音加油」（最長 10 秒）。
+
+    音檔存在 Firebase（audio_path 是私有路徑，給前端時換成簽名網址）。
+    轉文字由長者在動態牆按「轉文字」才跑，結果存在 transcribed_text，
+    空字串代表還沒轉。
+    """
+
+    post = models.ForeignKey(
+        Post, on_delete=models.CASCADE, related_name='voice_replies'
+    )
+    nickname = models.CharField(max_length=20)
+    audio_path = models.CharField(max_length=255)
+    duration_sec = models.PositiveSmallIntegerField()
+    transcribed_text = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f"{self.nickname} 對 {self.post} 的語音加油"
+
+
 class Like(models.Model):
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='likes')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='likes')
@@ -52,6 +76,7 @@ class Notification(models.Model):
         ('family_reply', '家人回覆日記'),
         ('diary_reminder', '日記提醒'),
         ('game_reminder', '遊戲進度提醒'),
+        ('voice_reply', '語音加油'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')

@@ -15,12 +15,14 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
-from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from demo_tools.views import demo_page
+
 urlpatterns = [
+    # 維護任務頁要排在 admin/ 前面，不然會被後台的網址規則先接走
+    path("admin/demo/", admin.site.admin_view(demo_page), name="admin-demo"),
     path("admin/", admin.site.urls),
     path("api/home/", include("home.urls")),  # 首頁連線測試*
     path("api/social/", include("social.urls")),  # 通知相關功能
@@ -31,6 +33,3 @@ urlpatterns = [
     path("api/dashboard/", include("dashboard.urls")),  # 儀表板
     path("api/rewards/", include("rewards.urls")),  # 點數與成就
 ]
-
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

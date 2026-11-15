@@ -117,6 +117,20 @@ class HomeGamesTests(APITestCase):
             self.assertTrue(game["name"])
             self.assertIs(game["played_this_week"], False)
 
+    def test_every_game_has_its_dimension_label(self):
+        games = self.games()
+
+        expected = {
+            "market_route": ("attention", "注意力"),
+            "memory_recall": ("working_memory", "工作記憶"),
+            "market_sort": ("executive_function", "執行功能"),
+            "fridge_check": ("visual_spatial", "視覺空間"),
+            "market_shopping": ("math", "數學"),
+        }
+        for game_id, (dimension, label) in expected.items():
+            self.assertEqual(games[game_id]["dimension"], dimension)
+            self.assertEqual(games[game_id]["dimension_label"], label)
+
     def test_played_this_week_true_after_finishing_a_game(self):
         make_session(self.user, "fridge_check")
 

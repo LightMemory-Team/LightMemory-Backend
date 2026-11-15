@@ -394,6 +394,28 @@ def create_diary_analysis(diary, z):
     )
 
 
+def seed_demo_data(user):
+    """幫 user 重建整套展示資料（先刪掉之前 seed 的，再重建）。
+
+    指令（python manage.py seed_demo）和後台「維護任務」頁（/admin/demo/）共用。
+    """
+    games = ensure_games()
+    clear_seed_data(user)
+    now = timezone.now()
+    times = batch_times(now)
+    create_game_sessions(
+        user, games, {**history_times(now, HISTORY_GAMES_PER_WEEK), **times}
+    )
+    create_diaries(
+        user,
+        {
+            **history_times(now, HISTORY_DIARIES_PER_WEEK),
+            "warmup": warmup_times(now),
+            **times,
+        },
+    )
+
+
 class Command(BaseCommand):
     help = "建立 demo 帳號的展示資料（五款遊戲各 30 場、聲影日記 30 篇，近三個月）"
 
@@ -408,21 +430,7 @@ class Command(BaseCommand):
             user.set_password(options["password"])
             user.save()
 
-        games = ensure_games()
-        clear_seed_data(user)
-        now = timezone.now()
-        times = batch_times(now)
-        create_game_sessions(
-            user, games, {**history_times(now, HISTORY_GAMES_PER_WEEK), **times}
-        )
-        create_diaries(
-            user,
-            {
-                **history_times(now, HISTORY_DIARIES_PER_WEEK),
-                "warmup": warmup_times(now),
-                **times,
-            },
-        )
+        seed_demo_data(user)
 
         account = "新建立" if created else "已存在"
         self.stdout.write(

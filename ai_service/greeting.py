@@ -11,7 +11,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from .weekly_summary import _client
+from .client import get_client as _client
 from .wording import contains_banned_word
 
 logger = logging.getLogger(__name__)

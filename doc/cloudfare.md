@@ -163,4 +163,4 @@ ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.trycloudflare.com']
 | 網址打不開 / 一直轉圈 | 剛開的 tunnel 需要幾秒鐘生效,等一下再試;或 `Ctrl + C` 關掉重開拿新網址 |
 | `cloudflared` 指令找不到 | PATH 未生效,關掉 PowerShell 重開 |
 | 前端說昨天的網址不能用了 | 正常,網址每次重開都會變,重新開 tunnel 給新網址 |
-| 擔心跨網域被擋(CORS) | 開發階段 `config/settings.py` 已設 `CORS_ALLOW_ALL_ORIGINS = True`,允許所有來源,正常情況不會遇到 |
+| 擔心跨網域被擋(CORS) | 開發階段(`.env` 有 `DJANGO_DEBUG=True`)預設允許所有來源,正常情況不會遇到。若 `DJANGO_DEBUG` 沒設成 `True`,會變成一個來源都不允許,要在 `.env` 用 `DJANGO_CORS_ALLOWED_ORIGINS` 列出(僅影響 Flutter Web,手機 App 不受影響) |

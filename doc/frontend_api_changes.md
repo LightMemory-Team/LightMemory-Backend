@@ -1,12 +1,16 @@
-# 後端安全與穩定性修正總覽（F1～F14）
+# 後端安全與穩定性修正總覽（F1～F14、G1、G3、G4、G9、日記上傳限制、跳過本輪 API）
 
-更新日期：2026-11-10 · 範圍：`fix/features` 分支（個別功能問題），F1～F14 已全部合併進去
+更新日期：2026-11-14 · 範圍：`fix/features`（個別功能問題，F1～F14）與 `fix/global`（共通問題：G1、G3、G4、G9、日記上傳限制），都已合併
 
 這份文件說明這一輪後端修正**改了什麼、為什麼改、前端要配合什麼**。給前端（Flutter）看，也可以當後端的修改紀錄。
 
 > 重點先看第 1 節的「前端待辦」與「錯誤碼總表」。想知道某一項的來龍去脈，再看第 2 節對應的小節。
 >
 > **F8～F13 對前端幾乎沒有影響**（API 的格式與欄位都沒變），只有 F11（日期值）與 F13（AI 文字可能改成固定句型）值得知道。看 [F8～F13 一覽](#f8f13-給前端的總結)即可。
+>
+> **G3（`fix/global`）：登入、註冊、改密碼、刪帳號也有次數限制了**，超過會回 429，見 [G3](#g3--登入註冊改密碼刪帳號的次數限制fixglobal)。
+>
+> **G4（`fix/global`）：改密碼後舊的登入 token 會失效**，部署後所有人要重新登入一次，見 [G4](#g4--改密碼或重設密碼後舊的登入-token-失效fixglobal)。
 >
 > **F14 是新功能「點數與成就」（rewards）**，有 3 支新 API，而且 10 支既有 API 的回應多了一個 `rewards` 區塊，另外遊戲名稱與日記回應格式也有變動，前端要改。看 [F14](#f14--點數與成就rewards)。
 
@@ -30,6 +34,11 @@
 | F12 | 移除後台的失智篩檢與警示等級模型 | 中 | 不用（從沒有對外 API） | [#102](https://github.com/LightMemory-Team/LightMemory-Backend/pull/102) |
 | F13 | 日記 AI 輸出沒有用語檢查與驗證 | 高 | 👀 AI 文字可能是固定句型；欄位長度有上限 | [#96](https://github.com/LightMemory-Team/LightMemory-Backend/pull/96) |
 | F14 | 點數與成就（rewards）納入，與 F1～F13 整合 | 新功能 | ⚠️ 3 支新 API、`rewards` 區塊、遊戲名稱、錯誤格式 | [#106](https://github.com/LightMemory-Team/LightMemory-Backend/pull/106)、[#107](https://github.com/LightMemory-Team/LightMemory-Backend/pull/107)（rewards 本體）、[#108](https://github.com/LightMemory-Team/LightMemory-Backend/pull/108)（合併） |
+| G1 | `SECRET_KEY`、`DEBUG`、CORS 寫死在程式碼 | 高 | 👀 Flutter Web 的網址要由後端列進 CORS 白名單；手機 App 不受影響；部署後舊 token 失效，要重新登入 | [#109](https://github.com/LightMemory-Team/LightMemory-Backend/pull/109)、[#110](https://github.com/LightMemory-Team/LightMemory-Backend/pull/110) |
+| G3 | 登入、註冊、改密碼、刪帳號沒有次數限制 | 高 | ⚠️ 要處理 429 | [#110](https://github.com/LightMemory-Team/LightMemory-Backend/pull/110) |
+| G4 | 改密碼後舊的登入 token 還能用最久 30 天 | 高 | ⚠️ 換 token／API 回 401 要導回登入頁；改密碼成功後要換掉本機 token | [#112](https://github.com/LightMemory-Team/LightMemory-Backend/pull/112) |
+| G9 | OpenAI 沒設 timeout，AI 一卡住請求就卡住 | 中 | 不用（超時沿用原本的固定內容） | [#111](https://github.com/LightMemory-Team/LightMemory-Backend/pull/111) |
+| 上傳限制 | 日記照片、錄音沒有大小與類型限制 | 中 | ⚠️ 新錯誤碼 `IMAGE_TOO_LARGE`、`AUDIO_TOO_LARGE`；Flutter Web 照片要帶 `contentType` | [#113](https://github.com/LightMemory-Team/LightMemory-Backend/pull/113) |
 
 - 測試：原本 764 個，現在 **982 個全部通過**（另有 1 個原本就預期失敗），新增 218 個測試。
 - F1～F11、F13 **沒有修改資料表**；F12 刪除了兩張沒在用的資料表，F14 新增 `rewards` 的兩張資料表（後端部署時要跑 migration，前端無感）。
@@ -48,24 +57,29 @@
 - [ ] 日記的 `photo_url`、`audio_url` **不要永久儲存**，也不要用完整網址當圖片快取 key；用 `diary_id` 當 key（F5）
 - [ ] `photo_url`、`audio_url` 可能是 **`null`**（簽名失敗），要有預設圖／隱藏播放鈕（F5）
 - [ ] 回覆日記（`replies`）要處理 **400 `INVALID_ROUND_INDEX`** 與 **409 `ROUND_ALREADY_ANSWERED`**（F7）
-- [ ] 收到 `401 NOT_AUTHENTICATED` 時，用 refresh token 換新 token 並重送；失敗再導回登入頁
+- [ ] 收到 `401` 時，清掉本機 token 並導回登入頁，不要無限重試（G4：改密碼後舊 token 會 401；換 token 的端點也會 401）。若日後前端有存 refresh token，才改成「先用 refresh token 換新、重送，失敗再導回登入頁」
+- [ ] （G4）修改密碼成功後，用回應的 `data.access`、`data.refresh` 換掉本機舊 token（目前前端沒有改密碼功能，之後做才需要）
+- [ ] （上傳限制）日記照片超過 10MB、錄音超過 25MB 會回 400 `IMAGE_TOO_LARGE`／`AUDIO_TOO_LARGE`，直接顯示 `error.message`；Flutter Web 送照片要帶 `contentType`
 - [ ] 以 `error.code` 判斷錯誤，**不要比對 `error.message` 文字**
 - [ ] （F11）冰箱檢查歷史的 `played_date`、會員統計的 `joined_at` **直接顯示後端給的日期**，不要自己再用 `completed_at` 去切字串或換算（F11）
 - [ ] （F13）日記的 AI 問題、回應不要假設每次都不同；AI 不合格時會是固定句型（F13）
 - [ ] （F14）遊戲結算、儀表板、週報、日記完成、日記分享的回應都要讀 `data.rewards`，有點數或新成就時跳出提示；`rewards.error` 不是 `null` 時溫和提示即可，不要當成請求失敗（F14）
 - [ ] （F14）新增「點數總覽」「成就牆」「點數紀錄」三個畫面所需的 API 串接（F14）
 - [ ] （F14）遊戲名稱改版：**不要在前端寫死遊戲名稱**，用後端給的 `name`／`title`（F14）
+- [ ] （G3）**登入、註冊、修改密碼、刪除帳號**都要處理 **429**，顯示「操作太頻繁了，請稍後再試」，可讀 `Retry-After`（秒）。登入被鎖時**即使密碼正確也不能登入**，要提示等待（G3）
+- [ ] （G4）**換 token 失敗（401）就導回登入頁，不要一直重試**；**修改密碼成功後，用回應裡的新 `access`／`refresh` 換掉本機儲存的舊 token**；部署後使用者要重新登入一次（G4）
 - [ ] （F14）日記完成（`finalize`）、分享（`share`）以及回覆日記（`replies`）的錯誤回應現在有 `success: false`，用 `error.code` 判斷的話不用改（F14）
 
 ### 1.2 錯誤碼總表（這一輪新增或變更的）
 
 | HTTP | `error.code` | 何時出現 | 建議處理 |
 |---|---|---|---|
-| 401 | `NOT_AUTHENTICATED` | token 過期或無效（本來就有） | 用 refresh token 換新 token，重送請求 |
+| 401 | `NOT_AUTHENTICATED` | token 過期、無效，或密碼改過後的舊 token（G4）。換 token 的端點 `login/refresh/` 也會回 401 | 清掉本機 token，導回登入頁（有存 refresh token 才先嘗試換新） |
+| 400 | `IMAGE_TOO_LARGE`、`AUDIO_TOO_LARGE` | 日記照片超過 10MB、錄音超過 25MB（上傳限制） | 直接顯示 `error.message` |
 | 404 | `USER_NOT_FOUND` | 遊戲開場／歷史端點**沒帶 token**（F1） | 視為 bug：檢查是否漏帶標頭；使用者端導回登入頁 |
 | 403 | `FORBIDDEN` | 這場遊戲不屬於目前登入的人，或沒帶 token（F1、F2、F3） | 不要重試；回首頁或重新開始一場 |
 | 404 | `SESSION_NOT_FOUND` | `session_id` 不存在（本來就有） | 重新開始一場 |
-| 429 | `TOO_MANY_REQUESTS` | 忘記密碼嘗試太頻繁（F4） | 顯示等待提示，依 `Retry-After`（秒）後再試 |
+| 429 | `TOO_MANY_REQUESTS` | 忘記密碼（F4）、登入失敗太多次、註冊太頻繁、改密碼／刪帳號輸入密碼太頻繁（G3） | 顯示等待提示，依 `Retry-After`（秒）後再試 |
 | 400 | `INVALID_ROUND_INDEX` | 日記回覆的 `round_index` 不是 1～4 的整數（F7） | 修正前端送出的值 |
 | 409 | `ROUND_ALREADY_ANSWERED` | 日記這一輪已經回答過（F7） | 視為這一輪已成功，重新取得日記狀態 |
 
@@ -79,7 +93,7 @@
 }
 ```
 
-> 注意：`diary` 相關端點的錯誤格式是 `{"error": {"code", "message"}}`，**沒有** `success` 與 `data` 欄位（這是既有的不一致，之後會統一，見第 3 節）。前端請先看 `error.code` 即可，兩種格式都適用。
+> 注意：日記的**錯誤**回應已統一成 `{success: false, data: null, error}`（F7、F14），**只有「上傳照片」`POST /api/diary/` 這一支**還是舊格式 `{"error": {"code", "message"}}`（沒有 `success`、`data`）。日記的成功回應有些也還沒統一（有的只有 `data`）。前端請看 `error.code` 判斷，兩種格式都適用。
 
 ### 1.3 Flutter 範例（攔截器）
 
@@ -96,7 +110,7 @@ dio.interceptors.add(InterceptorsWrapper(
     final status = error.response?.statusCode;
     final code = error.response?.data?['error']?['code'];
     if (status == 401 && code == 'NOT_AUTHENTICATED') {
-      // 用 refresh token 換新 access token 後重送；失敗則導回登入頁
+      // 清掉本機 token 並導回登入頁（若有存 refresh token，可先換新再重送）
     } else if (status == 429) {
       final wait = error.response?.headers.value('retry-after'); // 秒
       // 顯示「操作太頻繁，請稍後再試」
@@ -500,7 +514,7 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 | `game_id` | 原本 | 現在 |
 |---|---|---|
 | `market_route` | 菜市場找路 | **來去菜市場** |
-| `memory_recall` | 煮菜過程 | **記憶配對** |
+| `memory_recall` | 煮菜過程 | **料理準備**（11/14 起；F14 曾短暫叫「記憶配對」，已改回與前端遊戲內一致） |
 | `fridge_check` | 冰箱檢查 | **冰箱清點** |
 | `market_sort` | 整理菜籃（`title` 是「整理菜籃遊戲」） | **整理菜籃**（`name`、`title` 一致） |
 | `market_shopping` | 市場買菜 | 市場買菜（不變） |
@@ -521,22 +535,327 @@ HTTP 429，標頭 `Retry-After: <秒數>`。沒帶 `username` 時仍是 400 `VAL
 
 ---
 
+### G3 — 登入、註冊、改密碼／刪帳號的次數限制（fix/global）
+
+以前只有忘記密碼有次數限制（F4）。現在這幾支也有，超過一律回 **HTTP 429**，格式與 F4 相同：
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": { "code": "TOO_MANY_REQUESTS", "message": "操作太頻繁了，請稍後再試" }
+}
+```
+
+標頭 `Retry-After: <秒數>`（最多 3600）。
+
+| 端點 | 限制 | 怎麼算 |
+|---|---|---|
+| `POST /api/users/login/` | 同一個帳號 **10 次／小時**；同一個來源 **60 次／小時** | **只算「失敗」**（帳密錯誤、帳號不存在、帳號停用）。成功登入不算，而且會把這個帳號的失敗次數歸零。沒填帳號或密碼（400）不算 |
+| `POST /api/users/register/` | 同一個來源 **30 次／小時** | 成功、失敗（例如帳號已被註冊）都算 |
+| `POST /api/users/me/password/`、`DELETE /api/users/me/` | 同一位使用者合計 **10 次／小時** | 兩個動作共用同一份；查看、修改個人資料（`GET`、`PATCH /me/`）**不限制** |
+
+**前端要做的事**
+- 登入頁：一般的 `401`（帳密錯誤）照舊；收到 `429` 要顯示「操作太頻繁了，請稍後再試」，並可依 `Retry-After` 顯示還要等多久。**帳號被鎖住時，即使輸入正確的密碼也會回 429，要等到期才能登入**，請不要讓使用者誤以為密碼不對。
+- 註冊頁、修改密碼、刪除帳號：同樣處理 429。
+- 一般使用者不會碰到：登入只算失敗，一小時內連續打錯 10 次密碼才會被鎖。多人共用同一個網路（例如日照中心）時，來源限制是 60 次／小時，也不太會碰到。
+
+**限制與取捨**
+- 知道別人帳號名稱的人，可以故意連續輸錯 10 次把對方鎖一小時（針對帳號限制的固有取捨，F4 同樣）。
+- 次數是**每個後端 process 各自計算**，正式環境若跑多個 worker，實際上限會比表中寬鬆，要換共用快取（Redis）才精準。
+- `POST /api/users/login/refresh/`（換 token）沒有限制。
+
+**檔案**：`users/throttles.py`、`users/views.py`（新增 `LoginView`）、`users/urls.py`、`config/settings.py`、`users/tests/test_auth_throttle.py`（新）
+
+---
+
+### G4 — 改密碼或重設密碼後，舊的登入 token 失效（fix/global）
+
+以前換密碼之後，舊的 token 還能用最久 30 天（密碼被盜用才換的話，攻擊者仍然進得來）。現在**密碼一改，這個帳號所有舊的 token 立刻失效**。
+
+**會發生什麼**
+
+| 情境 | 結果 |
+|---|---|
+| 部署這個版本後 | **所有人的舊 token 都失效，要重新登入一次**（舊 token 沒有密碼指紋） |
+| 在手機 A 修改密碼 | 手機 A **不會被登出**（修改密碼的回應有新的 token）；同一個帳號在**其他裝置會被登出** |
+| 忘記密碼重設成功 | 重設前所有裝置的 token 都失效（本來就要用新密碼重新登入） |
+| 修改暱稱等個人資料、在另一台裝置登入 | 不影響既有 token |
+
+**失效的 token 會回**：`401`，`error.code` 是 `NOT_AUTHENTICATED`（和 token 過期同一種）。**換 token（`POST /api/users/login/refresh/`）也會回 401**，所以：
+
+```
+請求 → 401 → 用 refresh token 換新的 access token
+                ├─ 成功 → 用新的 access token 重送
+                └─ 失敗（401）→ 清掉本機 token，導回登入頁
+```
+
+**前端要做的事**
+1. 換 token 回 401 時，**清掉本機 token 並導回登入頁，不要無限重試**。
+2. **修改密碼成功後（`POST /api/users/me/password/`）**，回應 `data.access`、`data.refresh` 是新的 token，**一定要換掉本機儲存的舊 token**；不換的話下一個請求就會 401。
+3. 部署後使用者第一次會被要求重新登入，屬於預期行為。
+
+**限制**：沒有「登出時作廢 token」（access 仍有效 1 天、refresh 30 天）；只有「換密碼」會作廢。
+
+**檔案**：`config/settings.py`（`CHECK_REVOKE_TOKEN`）、`users/views.py`（`RefreshView`）、`users/urls.py`、`users/tests/test_token_revoke.py`（新）
+
+---
+
+### 日記照片與錄音的大小、類型限制（fix/global）
+
+以前日記上傳不檢查檔案，現在有上限；超過或類型不對會回 **400**，**不會**建立日記或寫入回覆。
+
+| API | 規則 | 錯誤碼（`error.code`） |
+|---|---|---|
+| `POST /api/diary/`（照片 `photo`） | 最大 10MB；副檔名 jpg／jpeg／png／webp／heic／heif（或類型是 `image/*`） | 太大：`IMAGE_TOO_LARGE`；空檔或不是圖片：`INVALID_IMAGE` |
+| `POST /api/diary/<id>/replies/`（錄音 `audio`） | 最大 25MB；webm／ogg／opus／m4a／mp4／aac／mp3／wav／flac（或類型是 `audio/*`） | 太大：`AUDIO_TOO_LARGE`；空檔或不是音訊：`INVALID_AUDIO` |
+
+**多出來的錯誤碼只有 `IMAGE_TOO_LARGE`、`AUDIO_TOO_LARGE`**；`INVALID_IMAGE`、`INVALID_AUDIO` 原本就有，現在多了「類型不對／空檔」也會出現。`error.message` 已經是給使用者看的中文（例如「這張照片太大了（不能超過 10MB），換一張試試看吧」），可以直接顯示。
+
+**目前的 App 不用改也能正常運作**：照片已壓縮到寬度 1600（通常不到 1MB），錄音單輪最長 3 分鐘（約 1MB）。
+
+**要注意**
+- 被擋的錄音**不會占用該輪次**，使用者重錄後同一輪還能回答。
+- **Flutter Web**：照片檔名若沒有副檔名、又沒有指定 `contentType`，會被判為 `INVALID_IMAGE`。手機 App 不受影響；Web 若遇到，請在 `MultipartFile.fromBytes` 補上 `contentType: MediaType('image', 'jpeg')`。
+- 照片上傳這支 API 的錯誤格式維持舊的 `{"error": {"code", "message"}}`（沒有 `success`）；錄音回覆是 `{"success": false, "data": null, "error": {...}}`。
+
+**檔案**：`diary/upload_checks.py`（新）、`diary/views.py`、`diary/tests/test_upload_limits.py`（新）
+
+---
+
+### 日記「跳過本輪」API（fix/global 新增）
+
+使用者在日記聊天頁按「跳過」時呼叫，**取代前端目前的假資料 `skipReply`**。
+
+```
+POST /api/diary/<diary_id>/replies/skip/
+Authorization: Bearer <access_token>
+Content-Type: application/json（或 multipart 表單）
+
+{ "round_index": 2 }
+```
+
+成功 `201`：
+
+```json
+{
+  "success": true,
+  "data": {
+    "round_index": 2,
+    "ai_reply": "那我們換個話題，這張照片裡你最喜歡的是什麼呢？",
+    "reply_count": 2,
+    "is_finalizable": false,
+    "is_done": false
+  },
+  "error": null
+}
+```
+
+欄位與 `POST /api/diary/<id>/replies/` 的回應相同，只是沒有 `transcript`、`audio_url`（沒有錄音）。
+
+**規則**
+- 跳過會算一輪：`reply_count` 增加；`round_index` 的範圍與 `replies` 一樣是 1～4。
+- `is_finalizable` 要「**有內容**的回覆」至少 2 輪才會是 `true`，跳過的不算。
+- `ai_reply` 是**固定句型**（3 句輪流，不呼叫 AI），第 4 輪（最後一輪）是 `null`、`is_done` 是 `true`。
+- 完成日記（`finalize`）只採用有內容的回覆，跳過的輪次不會出現在日記裡。日記詳情的 `replies[]` 會有這一輪，`is_skipped` 是 `true`、`transcript` 是空字串、`audio_url` 是 `null`。
+- **前端已經有的 `force=1` 欄位後端不處理，也不需要送。**
+
+**錯誤**（格式 `{success: false, data: null, error: {code, message}}`，看 `error.code`）
+
+| HTTP | `error.code` | 何時出現 | 建議處理 |
+|---|---|---|---|
+| 400 | `INVALID_ROUND_INDEX` | `round_index` 缺少或不是 1～4 的整數 | 同 `replies` |
+| 409 | `ROUND_ALREADY_ANSWERED` | 這一輪已回答或已跳過 | 同 `replies`：重新取得日記詳情還原那一輪 |
+| 400 | `DIARY_ALREADY_FINALIZED` | 日記已完成 | 導回日記 |
+| 400 | `SKIP_NOT_ALLOWED` | **前三輪全部跳過**，第 4 輪還想跳過（日記會完全沒有內容） | 提示「至少要錄一段內容才能完成日記，這一輪請錄音回答」（`error.message` 已是這句，可直接顯示）；建議前端在「前三輪都跳過」時，第 4 輪**隱藏或停用跳過按鈕** |
+| 404 | `DIARY_NOT_FOUND` | 不是你的日記或不存在 | 導回日記列表 |
+| 401 | `NOT_AUTHENTICATED` | 沒登入或 token 失效 | 導回登入頁 |
+
+**前端依賴的後端行為**（之後若要改，後端會先通知）：一篇日記最多 **4 輪**（後端 `MAX_REPLY_ROUNDS`），第 4 輪回覆或跳過後 `is_done` 是 `true`。
+
+**檔案**：`diary/views.py`（`DiaryReplySkipView`）、`diary/urls.py`、`diary/tests/test_skip_reply.py`（新）
+
+---
+
+### 遊戲名稱：`memory_recall` 改為「料理準備」（fix/global）
+
+F14 曾把 `memory_recall` 命名為「記憶配對」，與前端遊戲內的「料理準備」對不上，現在統一為 **料理準備**。只有 `name`／`title` 字串變了（`GET /api/home/games/`、首頁今日任務標題、成就說明），`game_id` 不變。前端不寫死名稱的話不用改。其他四款不變。
+
+---
+
+### 首頁遊戲卡片：新增認知維度欄位（feature/game-dimension-1114）
+
+`GET /api/home/games/` 的每款遊戲多兩個欄位，前端可在卡片上顯示「注意力」等標籤。只有**新增**欄位，原本的欄位不變，舊前端不受影響。
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `dimension` | string \| null | 雷達圖維度代碼：`attention`、`working_memory`、`executive_function`、`visual_spatial`、`math` |
+| `dimension_label` | string \| null | 顯示用名稱：注意力、工作記憶、執行功能、視覺空間、數學 |
+
+```json
+{"games": [
+  {"id": "market_route", "name": "來去菜市場", "title": "來去菜市場", "is_developed": true,
+   "played_this_week": false, "dimension": "attention", "dimension_label": "注意力"}
+]}
+```
+
+對應關係跟儀表板雷達圖共用 `dashboard/services.py` 的 `DIMENSIONS`（新增 `dimension_for_source()`），不另外維護。之後新增遊戲時若沒有對應維度，兩個欄位會是 `null`。
+
+**檔案**：`home/views.py`（`games_list`）、`dashboard/services.py`、`home/tests/test_home_api.py`
+
+---
+
+### 儀表板：新增「小提醒」欄位 alerts（feature/dashboard-outlier-alert-1114）
+
+`GET /api/dashboard/` 的 `data` 多一個 `alerts` 陣列：近 14 天內，某款遊戲有一場表現明顯比自己平常低（`z_score ≤ -1.5`）時列出來。只有**新增**欄位，原本的欄位不變。
+
+- `alerts` **一定存在**，沒有提醒時是空陣列 `[]`，前端不用判斷欄位在不在
+- 每款遊戲只列最近一場符合的，新到舊，最多 5 筆
+- 只提示偏低、不提示偏高；熟悉場、算不出 z 的場次不算；聲影日記不納入
+- `message` 由後端產生，前端**直接顯示**，不要自己組字
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `game_id` | string | 遊戲 id，「去玩一次」按鈕用它開遊戲 |
+| `game_title` | string | 遊戲名稱 |
+| `dimension` / `dimension_label` | string | 對應的認知維度，例如 `math` / 數學 |
+| `played_at` | string（ISO 8601，+08:00） | 那一場結束的時間 |
+| `display_score` | int | 那一場換算成 1～100 的分數 |
+| `message` | string | 給長者看的提醒文字 |
+
+```json
+"alerts": [
+  {"game_id": "market_shopping", "game_title": "市場買菜",
+   "dimension": "math", "dimension_label": "數學",
+   "played_at": "2026-11-12T15:30:00+08:00", "display_score": 12,
+   "message": "11/12 玩「市場買菜」的表現比平常低一些，可能當天比較累，建議多注意一下，休息後再玩一次看看。"}
+]
+```
+
+**檔案**：`dashboard/alerts.py`（新增）、`dashboard/views.py`、`dashboard/tests/test_alerts.py`
+
+---
+
+### 語音加油：上傳、列表、轉文字（feature/share-voice-reply-1114）
+
+親友在分享頁錄一段最長 10 秒的語音加油，長者在動態牆聽、需要時按「轉文字」。
+
+**動態牆**：貼文的 `voice_reply_count` 改為實際數量（原本固定 0）。新增通知類型 `voice_reply`（「{暱稱} 送給你一段語音加油」，`target_url` 是 `/posts/<id>/`）。
+
+**(1) 訪客上傳（分享頁網頁呼叫，免登入）** `POST /api/share/<share_token>/voice-replies/`
+
+multipart：`nickname`（1–12 字）、`audio_file`（webm／mp4／ogg／m4a，≤ 2MB）、`duration_sec`（1–11 整數）。同 IP 每分鐘 5 則。
+
+```json
+{"success": true,
+ "data": {"voice_reply_id": 12, "nickname": "小玲", "duration_sec": 8,
+          "created_at": "2026-11-14T10:20:00+08:00"},
+ "error": null}
+```
+
+**(2) 長者取得列表（需登入、限作者）** `GET /api/social/posts/<post_id>/voice-replies/`
+
+```json
+{"success": true,
+ "data": {"items": [
+   {"voice_reply_id": 12, "nickname": "小玲", "audio_url": "https://…簽名網址",
+    "duration_sec": 8, "transcribed_text": "", "created_at": "2026-11-14T10:20:00+08:00"}
+ ]},
+ "error": null}
+```
+
+新的在前；`transcribed_text` 空字串代表還沒轉；`audio_url` 是有時效的簽名網址（6 小時）。
+
+**(3) 長者轉文字（需登入、限作者）** `POST /api/social/voice-replies/<voice_reply_id>/transcribe/`
+
+```json
+{"success": true, "data": {"voice_reply_id": 12, "transcribed_text": "阿嬤妳拍得好漂亮，加油！"}, "error": null}
+```
+
+第一次才跑 Whisper（同步，約數秒），結果存起來，之後直接回傳。聽不出內容時回「（聽不太清楚，請直接播放聽聽看）」。
+
+| API | 錯誤碼 | HTTP |
+|---|---|---|
+| 上傳 | `TOO_MANY_REQUESTS` | 429 |
+| 上傳 | `SHARE_NOT_FOUND` | 404 |
+| 上傳 | `INVALID_NICKNAME`、`INVALID_AUDIO`、`AUDIO_TOO_LONG` | 400 |
+| 上傳 | `UPLOAD_FAILED` | 500 |
+| 列表／轉文字 | `NOT_AUTHENTICATED` | 401 |
+| 列表 | `POST_NOT_FOUND` | 404 |
+| 轉文字 | `VOICE_REPLY_NOT_FOUND` | 404 |
+| 轉文字 | `TRANSCRIBE_FAILED` | 502 |
+
+**分享頁（網頁，`GET /share/<share_token>/`）**：語音加油收在留言區，輸入框旁的麥克風點了直接錄音（最長 10 秒自動停止），可試聽、重錄、送出。暱稱沿用留言的暱稱。日記有 `suggested_replies` 時，留言框上方顯示最多 3 個參考句小標籤，點了只當提詞，不會自動送出。瀏覽器不支援錄音或拒絕麥克風權限時，只保留文字留言。
+
+**檔案**：`social/models.py`（`VoiceReply`）、`public_share/views.py`、`social/views.py`、`diary/external.py`（`download_from_firebase`）、`public_share/templates/public_share/share.html`、`public_share/static/public_share/share.js`、`share.css`
+
+---
+
+### 分享頁：送出成功彈窗＋留言彈幕（feature/share-danmaku-1114）
+
+只改分享頁網頁，**API 與資料表都沒變**。
+
+- 文字留言或語音加油送出成功後，跳出「成功送出」彈窗，按鈕「再留言一篇」；原本留言區的「已送出」列表拿掉
+- 照片上用彈幕飄過之前的人留下的內容：文字留言＋語音加油，新的在前，最多 30 則，每則最多 30 字；右上角可開關彈幕
+- 語音只顯示「{暱稱}：送了一段語音加油」，**不公開音檔與轉出來的文字**（只給作者在 App 看）
+- ⚠️ 隱私：拿到分享連結的人，都看得到其他親友的暱稱與留言（之前只看得到自己送出的）
+
+資料由 `SharePageView` 的 context `danmaku_items`（`public_share/views.py` 的 `build_danmaku_items`）以 `json_script id="danmaku-data"` 給 `share.js`，每則 `{name, text, kind: "comment" | "voice"}`。
+
+**檔案**：`public_share/views.py`、`share.html`、`share.js`、`share.css`、`public_share/tests/test_share_page_danmaku.py`
+
+---
+
+### 遊戲 Demo 模式：admin_demo 答 3 題就結束（feature/game-demo-mode-1115）
+
+複賽 demo 用。**只有登入帳號是 `admin_demo` 才會變**，其他帳號的 API 回應與流程完全照舊。前端不要自己判斷帳號名稱，一律照後端給的 `total_questions` 出題。
+
+| 遊戲 | 誰決定結束 | 前端要做的事 |
+|---|---|---|
+| 市場路線 market_route | 前端 | `GET /api/games/market-route/config/` 的 `total_questions`（admin_demo 是 3，其他人 20）取代寫死的 20 |
+| 市場分類 market_sort | 前端 | 開局先打**新 API** `GET /api/games/market-sort/config/`，照 `total_questions` 出題（admin_demo 是 3，其他人 28） |
+| 冰箱檢查 fridge_check | 後端 | 第 3 題答完就回 `is_completed: true`；進度顯示請用回應裡的 `total_questions` |
+| 市場買菜 market_shopping | 後端 | 同上 |
+| 料理準備 memory_recall | 後端 | 第 3 回合回 `action: "finished"`，前端原本就會呼叫 `finish/` |
+
+新 API（需登入）：
+
+```http
+GET /api/games/market-sort/config/
+```
+
+```json
+{ "success": true, "data": { "total_questions": 28 }, "error": null }
+```
+
+- admin_demo 交 3 題的 `submit/` 會被接受；其他人少於 28 題照舊回 400
+- admin_demo 每場分數固定 **80**（`total_score`／`standard_score`／`final_score`／`current_score`，市場買菜的 `raw_score` 也是），`z_score` 固定 1.2，儀表板與週報也會顯示 80
+- 料理準備的 `accuracy` 固定 0.8（結算視窗大字「本次分數」是正確率 × 100，才會跟總分一樣是 80）
+- admin_demo 沒有熟悉場（`is_pretest` 一律 false），第一場就有分數；點數、成就照常發
+- config 打不到或沒有 `total_questions` 時，前端請用原本的題數（20／28）
+
+**檔案**：`games/demo_mode.py`、`games/session_service.py`、五款遊戲的 views／services、`games/market_sort/urls.py`、`games/tests/test_demo_mode.py`
+
+---
+
 ## 3. 還沒做的事（前端可以先知道方向）
 
 > 以下**尚未實作**，只是方向，上線前會再更新本文件。請勿現在就照這節改程式。
 
 ### 屬於這一輪（`fix/features`）但還沒完成
-- **忘記密碼的身分驗證**（F4 的後續）：預計加「生日＋手機號碼」。上線時前端要在重設密碼流程加兩個輸入欄位。
+- **忘記密碼的身分驗證**（F4 的後續）：**已決定維持現狀，不做**（目前只有次數限制，重設只需要帳號名稱）。前端不用準備額外欄位。
 - **舊的公開檔案改成私有**（F5 的後續）：一次性腳本，前端無感，但舊網址會失效。
 - **週報改成純讀取**（F10 的後續）：目前首次點開 `GET` 仍會寫入一次（記 `viewed_at`）。之後可能新增一個「標記已讀」端點，到時前端要在看完週報時多呼叫一次。
 
-### 屬於共通問題（`fix/global` 分支，規劃中）
-| 項目 | 前端影響 |
+### 屬於共通問題（`fix/global`）：這一輪**不做**
+
+2026-11-14 決定「後端先處理嚴重問題」，以下都**沒有排程**，前端不用準備；真的要做時會先通知並更新本文件。
+
+| 項目 | 若日後要做，前端會受到的影響 |
 |---|---|
-| 預設所有 API 都需要登入，只有註冊、登入、token 刷新、忘記密碼、分享頁等公開 | 除公開端點外，每個請求都要帶 token |
-| 登入、註冊、改密碼加入次數限制 | 會有 429，同 F4 |
-| 縮短 access token 有效期、refresh token 輪替、改密碼後舊 token 失效 | 必須實作「過期 → 用 refresh 換新 → 重送」；若啟用輪替，refresh 時要存新的 refresh token |
-| 統一回應格式 `{ success, data, error }`（日記、社群、首頁、部分使用者端點目前不一致） | 建議現在就把解析回應集中在一處，並相容有／沒有 `success` 欄位兩種格式。登入、註冊的格式改動影響最大，會先和前端確認 |
+| 預設所有 API 都需要登入（G2） | 現況每個端點都已在程式裡檢查登入，沒有漏洞，只是預防；做的話只影響新端點，前端無感 |
+| 縮短 access token 有效期、refresh token 輪替、登出時作廢 token（JWT blacklist） | 目前 access 有效 1 天、refresh 30 天。要縮短前，前端必須先實作「401 → 用 refresh token 換新 → 重送」並**保存 refresh token**（前端目前只存 access token），所以會**先通知前端**、排時間再改 |
+| 統一回應格式 `{ success, data, error }`（日記成功回應、社群、首頁、部分使用者端點目前不一致） | 建議前端把解析回應集中在一處，並相容有／沒有 `success` 欄位兩種格式；登入、註冊的格式改動影響最大，會先和前端確認 |
 
 ---
 

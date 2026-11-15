@@ -1262,7 +1262,7 @@ git merge origin/feat/stage3
 | 遊戲名稱 | `games/catalog.py`、`rewards/catalog.py` 的 `GAME_NAMES`、`home/daily_tasks.py` 的 `GAME_TASK_NAMES` 三處**逐一比對一致**（見下方「前端影響」） |
 | 全站掃描 | 見 15.3（1），已修正 |
 
-**前端影響**（完整說明在 [frontend_api_changes.md](frontend_api_changes.md) 的 F14）：3 支新 API、10 支既有 API 多 `rewards` 區塊、首頁任務的 `points` 與 `all_done_bonus`、**遊戲名稱改回 App 內的正式名稱**（`market_route` 菜市場找路 → 來去菜市場、`memory_recall` 煮菜過程 → 記憶配對、`fridge_check` 冰箱檢查 → 冰箱清點、`market_sort` 的 `title` 整理菜籃遊戲 → 整理菜籃）、日記 `finalize`／`share` 與 F7 錯誤的格式統一。
+**前端影響**（完整說明在 [frontend_api_changes.md](frontend_api_changes.md) 的 F14）：3 支新 API、10 支既有 API 多 `rewards` 區塊、首頁任務的 `points` 與 `all_done_bonus`、**遊戲名稱改回 App 內的正式名稱**（`market_route` 菜市場找路 → 來去菜市場、`memory_recall` 煮菜過程 → 料理準備（原本 F14 寫「記憶配對」，11/14 依前端遊戲內名稱改成「料理準備」）、`fridge_check` 冰箱檢查 → 冰箱清點、`market_sort` 的 `title` 整理菜籃遊戲 → 整理菜籃）、日記 `finalize`／`share` 與 F7 錯誤的格式統一。
 
 ### 15.7 規模與測試
 

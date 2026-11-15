@@ -31,8 +31,8 @@ GAMES = [
     },
     {
         "id": "memory_recall",
-        "name": "記憶配對",
-        "title": "記憶配對",
+        "name": "料理準備",
+        "title": "料理準備",
         "is_developed": True,
     },
     {

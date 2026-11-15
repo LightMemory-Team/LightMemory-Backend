@@ -11,4 +11,14 @@ urlpatterns = [
     path('posts/<int:post_id>/', PostDetailView.as_view(), name='post_detail'),
     path('posts/<int:post_id>/comments/', PostCommentsView.as_view(), name='post_comments'),
     path('comments/<int:comment_id>/', CommentDeleteView.as_view(), name='comment_delete'),
+    path(
+        'posts/<int:post_id>/voice-replies/',
+        views.PostVoiceRepliesView.as_view(),
+        name='post_voice_replies',
+    ),
+    path(
+        'voice-replies/<int:voice_reply_id>/transcribe/',
+        views.VoiceReplyTranscribeView.as_view(),
+        name='voice_reply_transcribe',
+    ),
 ]

@@ -9,6 +9,7 @@ import logging
 
 from django.conf import settings
 
+from .client import get_client
 from .wording import BANNED_WORDS, contains_banned_word  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -76,9 +77,7 @@ def _facts_to_text(facts):
 
 
 def _client():
-    from openai import OpenAI
-
-    return OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
+    return get_client()
 
 
 def _is_acceptable(summary):

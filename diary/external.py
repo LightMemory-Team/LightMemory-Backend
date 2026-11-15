@@ -38,6 +38,30 @@ def upload_to_firebase(file_obj, folder, public=False):
         return None
 
 
+def download_from_firebase(path):
+    """把 Firebase 上的私有檔案下載成本機暫存檔，回傳暫存檔路徑；失敗回傳 None。
+
+    path 是 upload_to_firebase() 回傳的檔案路徑。暫存檔用完後由呼叫端刪除。
+    """
+    tmp_path = None
+    try:
+        from firebase_admin import storage
+
+        from config.firebase import firebase_app
+
+        bucket = storage.bucket(app=firebase_app)
+        suffix = os.path.splitext(path)[1] or '.bin'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp_path = tmp.name
+        bucket.blob(path).download_to_filename(tmp_path)
+        return tmp_path
+    except Exception as e:
+        logger.error(f"Firebase下載失敗（{path}）: {e}")
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        return None
+
+
 _whisper_model = None
 
 def transcribe_audio(file_obj):

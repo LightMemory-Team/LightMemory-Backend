@@ -11,9 +11,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap">
+  <!-- 圖示：Material Symbols（同比賽版 futureQ 分享頁） -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
   <link rel="stylesheet" href="{% static 'public_share/share.css' %}">
 </head>
-<body data-share-token="{{ share_token }}">
+<body data-share-token="{{ share_token }}" data-author-name="{{ author_name }}">
 
   <header class="top-bar">
     <span class="top-bar-title">憶智防線</span>
@@ -37,9 +39,21 @@
   <!-- 第 2 步：看日記、留言 -->
   <main id="post-step" class="page" hidden>
     <article class="post-card">
-      {% if photo_url %}
-      <img class="post-photo" src="{{ photo_url }}" alt="{{ title }}" onerror="this.remove()">
-      {% endif %}
+      <!-- 照片＋彈幕：之前的人留下的話從右往左飄過照片；沒有照片時是一條淺綠色帶子，
+           還沒有人留言時整條收起，送出第一則後才出現 -->
+      <div id="post-media" class="post-media{% if not photo_url %} no-photo{% endif %}"
+           {% if not photo_url and not danmaku_items %}hidden{% endif %}>
+        {% if photo_url %}
+        <img class="post-photo" src="{{ photo_url }}" alt="{{ title }}"
+             onerror="this.remove(); document.getElementById('post-media').classList.add('no-photo')">
+        {% endif %}
+        <div id="danmaku-layer" class="danmaku-layer" aria-hidden="true"></div>
+        <button type="button" id="danmaku-toggle" class="danmaku-toggle"
+                aria-pressed="true" {% if not danmaku_items %}hidden{% endif %}>
+          <span class="material-symbols-outlined" aria-hidden="true">subtitles</span>
+          <span class="danmaku-toggle-text">彈幕</span>
+        </button>
+      </div>
 
       <div class="post-body">
         <div class="author-row">
@@ -60,25 +74,82 @@
         {% endif %}
       </div>
 
+      <!-- 留言區：打字留言，或按麥克風錄一段語音加油（最多 10 秒，照比賽版 futureQ）。
+           語音只上傳，作者在 App 按「轉文字」才轉成文字 -->
       <div class="comment-area">
-        <ul id="sent-list" class="sent-list" hidden></ul>
-
         <p class="as-line">
           以「<span id="nickname-display"></span>」留言
           <button type="button" id="change-nickname" class="btn-link">修改</button>
         </p>
 
+        {% if suggested_replies %}
+        <!-- 不知道說什麼時的參考句：點一句會在錄音時顯示，照著唸即可，不會直接送出文字 -->
+        <div class="reply-suggestions">
+          <p class="suggest-title">不知道說什麼嗎？點一句，錄音時照著唸：</p>
+          <div class="suggest-chips">
+            {% for text in suggested_replies %}
+            <button type="button" class="suggest-chip" data-text="{{ text }}">{{ text }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
         <form id="comment-form" class="comment-row" novalidate>
           <label for="comment-input" class="sr-only">留言</label>
           <textarea id="comment-input" class="pill-input comment-input" rows="1"
                     maxlength="200" placeholder="留言…"></textarea>
+          <button type="button" id="vr-mic-btn" class="btn-mic" aria-label="錄一段語音加油">
+            <span id="vr-mic-icon" class="material-symbols-outlined icon-fill" aria-hidden="true">mic</span>
+          </button>
           <button type="submit" id="comment-submit" class="btn-primary btn-send">發送</button>
         </form>
         <p id="comment-error" class="error-text" role="alert" hidden></p>
+
+        <!-- 語音加油：按麥克風後在輸入框下方展開 -->
+        <div id="vr-panel" class="vr-panel" hidden>
+          <p id="cue-card" class="cue-card" hidden></p>
+
+          <!-- 錄音中 -->
+          <div id="vr-recording" class="vr-recording-row" aria-live="polite">
+            <span class="vr-rec-dot" aria-hidden="true"></span>
+            <div class="vr-recording-text">
+              <p id="vr-timer" class="vr-timer">00:00 / 00:10</p>
+              <p class="vr-hint">錄音中…說完按上方紅色按鈕結束（最多 10 秒）</p>
+            </div>
+          </div>
+
+          <!-- 錄好了：試聽、重錄、送出 -->
+          <div id="vr-preview" class="vr-preview" hidden>
+            <audio id="vr-audio" class="vr-audio" controls></audio>
+            <div class="vr-actions">
+              <button type="button" id="vr-redo-btn" class="vr-redo-btn">
+                <span class="material-symbols-outlined" aria-hidden="true">replay</span>重錄
+              </button>
+              <button type="button" id="vr-send-btn" class="btn-primary vr-send-btn">
+                <span class="material-symbols-outlined" aria-hidden="true">send</span>送出語音
+              </button>
+            </div>
+          </div>
+        </div>
+        <p id="vr-error" class="error-text" role="alert" hidden></p>
       </div>
     </article>
   </main>
 
+  <!-- 留言或語音送出成功的彈窗 -->
+  <div id="success-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true"
+         aria-labelledby="success-title" aria-describedby="success-text">
+      <div class="modal-icon" aria-hidden="true">
+        <span class="material-symbols-outlined icon-fill">favorite</span>
+      </div>
+      <h2 id="success-title" class="modal-title">成功送出</h2>
+      <p id="success-text" class="modal-text"></p>
+      <button type="button" id="success-again" class="btn-primary btn-block modal-btn">再留言一篇</button>
+    </div>
+  </div>
+
+  {{ danmaku_items|json_script:"danmaku-data" }}
   <script src="{% static 'public_share/share.js' %}"></script>
 </body>
 </html>

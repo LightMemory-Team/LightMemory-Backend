@@ -34,6 +34,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from . import demo_mode
 from .models import Game, GameCategory, GameSession, GameStepLog
 
 
@@ -191,6 +192,9 @@ def is_first_session(game_type, user):
     也不進任何歷史（見 _finished_sessions_before）。玩到一半放棄的不算玩過。
     各遊戲建立場次時用這個函式決定 create_session 的 is_pretest。
     """
+    # demo 帳號每場都要顯示分數，不安排熟悉場（見 games/demo_mode.py）
+    if demo_mode.is_demo_user(user):
+        return False
     game = _get_game(game_type)
     return not GameSession.objects.filter(
         game=game, user=user, status="finished"
@@ -277,6 +281,9 @@ def finish_session(game_type, session_id, result, avg_response_time_ms=None):
     session = _lookup(game_type, session_id)
     if session is None:
         raise SessionNotFound(session_id)
+    # demo 帳號：分數固定 80（就地修改，呼叫端手上的 result 也會跟著變）
+    if demo_mode.is_demo_user(session.user_id):
+        demo_mode.apply_demo_score(game_type, result)
     session.status = "finished"
     session.result = result
     if avg_response_time_ms is not None:

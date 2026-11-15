@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 from rewards import services as rewards_services
 
-from . import encouragement, services, weekly_report
+from . import alerts, encouragement, services, weekly_report
 from .models import WeeklyReport
 
 
@@ -46,6 +46,8 @@ def dashboard(request):
         "encouragement": encouragement.get_encouragement(
             request.user, diary_scores=diary_scores
         ),
+        # 小提醒：近 14 天某款遊戲有一場明顯比平常低；沒有時是空陣列
+        "alerts": alerts.get_score_alerts(request.user),
         # 第一次查看解鎖「認識自己」成就；之後再開都是 0 點
         "rewards": rewards_services.grant(
             request.user, rewards_services.DASHBOARD_VIEWED

@@ -11,6 +11,7 @@ import logging
 
 from django.conf import settings
 
+from ai_service.client import get_client
 from ai_service.wording import contains_banned_word
 
 logger = logging.getLogger(__name__)
@@ -54,12 +55,7 @@ MAX_LIST_ITEMS = 5
 
 
 def _client():
-    from openai import OpenAI
-
-    return OpenAI(
-        api_key=settings.OPENAI_API_KEY,
-        base_url=getattr(settings, "OPENAI_BASE_URL", None),
-    )
+    return get_client()
 
 
 def _model():

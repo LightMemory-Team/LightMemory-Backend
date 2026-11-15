@@ -1,27 +1,23 @@
-"""刪除帳號時一併清除雲端與本機檔案的測試。
+"""刪除帳號時一併清除雲端檔案的測試。
 
 執行：
     python manage.py test users.tests.test_delete_account_files \
         --settings=config.settings_test
 """
 
-import os
 import sys
-import tempfile
 import types
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from diary.external import blob_name_from_stored, delete_from_firebase
 from diary.models import Diary, DiaryReply
-from social.models import Post
+from social.models import Post, VoiceReply
 
 User = get_user_model()
 
@@ -149,11 +145,18 @@ class DeleteAccountFilesTests(APITestCase):
         Diary.objects.create(
             user=self.user, status="done", image_path="https://example.com/seed.jpg"
         )
-        Post.objects.create(
+        post = Post.objects.create(
             user=self.user,
             diary=diary,
             content="c",
             image_path="voice-diary/images/d1.jpg",
+        )
+        # 親友錄給這篇貼文的語音加油
+        VoiceReply.objects.create(
+            post=post,
+            nickname="小玲",
+            audio_path="voice-diary/voice-replies/v1.webm",
+            duration_sec=8,
         )
 
     def _delete(self, password=PASSWORD):
@@ -172,6 +175,7 @@ class DeleteAccountFilesTests(APITestCase):
                 "voice-diary/avatars/me.jpg",
                 "voice-diary/images/d1.jpg",
                 "voice-diary/images/old.jpg",
+                "voice-diary/voice-replies/v1.webm",
             ],
         )
 
@@ -203,22 +207,17 @@ class DeleteAccountFilesTests(APITestCase):
         self.assertNotIn("voice-diary/images/other.jpg", deleted_names(bucket))
 
 
-class DeleteAccountLocalAvatarTests(APITestCase):
-    def test_local_avatar_file_is_removed(self):
-        with (
-            tempfile.TemporaryDirectory() as tmp,
-            override_settings(MEDIA_ROOT=tmp, MEDIA_URL="/media/"),
-        ):
-            saved = default_storage.save("avatars/me.jpg", ContentFile(b"x"))
-            user = User.objects.create_user(
-                username="local", password=PASSWORD, avatar_url=f"/media/{saved}"
-            )
-            self.client.force_authenticate(user=user)
+class DeleteAccountOldLocalAvatarTests(APITestCase):
+    def test_old_local_avatar_path_is_skipped(self):
+        # 舊資料：頭像以前會存本機 media，現在不存了，刪帳號時略過這種路徑
+        user = User.objects.create_user(
+            username="local", password=PASSWORD, avatar_url="/media/avatars/me.jpg"
+        )
+        self.client.force_authenticate(user=user)
 
-            with self.captureOnCommitCallbacks(execute=True):
-                response = self.client.delete(
-                    ME_URL, {"password": PASSWORD}, format="json"
-                )
+        with fake_firebase() as bucket, self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(ME_URL, {"password": PASSWORD}, format="json")
 
-            self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-            self.assertFalse(os.path.exists(os.path.join(tmp, saved)))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(User.objects.filter(pk=user.pk).exists())
+        bucket.blob.assert_not_called()

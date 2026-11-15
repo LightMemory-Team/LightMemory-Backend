@@ -11,7 +11,8 @@
    - 其他場：用新算法跟「這場之前」的歷史比（歷史排除熟悉場）
 
 demo 帳號的種子場次（client_session_id 以 seed- 開頭）的 z 是直接寫進去的，
-不重算。日記的語言 z 是隨時現算的，不用處理。
+不重算；admin_demo 的場次是固定 80 分（見 games/demo_mode.py），也不重算。
+日記的語言 z 是隨時現算的，不用處理。
 
 可以重複執行：結果只跟資料有關，跑幾次都一樣。
 """
@@ -19,6 +20,7 @@ demo 帳號的種子場次（client_session_id 以 seed- 開頭）的 z 是直�
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
+from demo_tools.constants import DEMO_USERNAME
 from games import session_service
 from games.catalog import GAMES
 from games.fridge_check import services as fridge_check
@@ -118,10 +120,11 @@ RECOMPUTERS = {
 
 
 def _real_finished_sessions():
-    """真人玩完的場次（排除 demo 種子場次），依結束時間排序。"""
+    """真人玩完的場次（排除 demo 種子場次與 admin_demo），依結束時間排序。"""
     return (
         GameSession.objects.filter(status="finished", game__code__in=GAME_CODES)
         .exclude(client_session_id__startswith=SEED_CLIENT_SESSION_PREFIX)
+        .exclude(user__username=DEMO_USERNAME)
         .order_by("finished_at")
     )
 
